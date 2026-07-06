@@ -1,7 +1,7 @@
 """
 title: یار کودک
 author: Yar Kids
-version: 0.2.3
+version: 0.3.0
 description: دستیار کودک‌دوست با معماری Persona، Intent Detection و Reflection
 required_open_webui_version: 0.5.0
 """
@@ -11,8 +11,9 @@ from __future__ import annotations
 import inspect
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Literal, Protocol
+from typing import Any, Awaitable, Callable, Literal, Protocol, Union
 
 from pydantic import BaseModel, Field
 
@@ -52,6 +53,9 @@ PERSONA_DROPDOWN_OPTIONS: list[dict[str, str]] = [
     {"value": "teacher", "label": "📚 معلم"},
     {"value": "homework", "label": "✏️ کمک‌درس"},
 ]
+
+PERSONA_ONBOARDING_SIGNATURE = "بگو دوست داری امروز چطور کنارت باشم؟"
+STREAM_CHUNK_SIZE = 16
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -138,6 +142,10 @@ def get_intent_detection_prompt() -> str:
 def get_reflection_prompt() -> str:
     template = _load_prompt("reflection.md")
     return template.replace("{{CORE_PROMPT}}", get_core_prompt())
+
+
+def get_persona_onboarding_message() -> str:
+    return _load_prompt("persona_onboarding.md")
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +265,43 @@ def _normalize_persona(value: str | None) -> PersonaId | None:
     if normalized in SUPPORTED_PERSONAS:
         return normalized  # type: ignore[return-value]
     return None
+
+
+def _user_explicitly_chose_persona(user_persona: str | None) -> bool:
+    """True when UserValves/metadata persona is set to a concrete persona (not auto)."""
+    if not user_persona:
+        return False
+    return _normalize_persona(user_persona) is not None
+
+
+def persona_onboarding_was_shown(messages: list[ChatMessage]) -> bool:
+    for message in messages:
+        if message.role == "assistant" and PERSONA_ONBOARDING_SIGNATURE in message.content:
+            return True
+    return False
+
+
+def should_ask_persona_onboarding(
+    *,
+    manual_persona: PersonaId | None,
+    user_persona: str | None,
+    messages: list[ChatMessage],
+) -> bool:
+    """Ask the child to pick a persona when none is loaded yet."""
+    if manual_persona:
+        return False
+    if _user_explicitly_chose_persona(user_persona):
+        return False
+    return not persona_onboarding_was_shown(messages)
+
+
+def iter_text_chunks(text: str, chunk_size: int = STREAM_CHUNK_SIZE) -> Iterator[str]:
+    """Split text into chunks for simulated streaming in OpenWebUI pipes."""
+    if not text:
+        yield ""
+        return
+    for index in range(0, len(text), chunk_size):
+        yield text[index : index + chunk_size]
 
 
 # ---------------------------------------------------------------------------
@@ -423,10 +468,14 @@ async def resolve_active_persona(
     messages: list[ChatMessage],
     user_persona: str | None = None,
     body: dict[str, Any] | None = None,
+    on_detecting_status: Callable[[], Awaitable[None]] | None = None,
 ) -> PersonaId:
     manual_persona = resolve_manual_persona(user_persona=user_persona, body=body)
     if manual_persona:
         return manual_persona
+
+    if on_detecting_status:
+        await on_detecting_status()
 
     intent = await detect_intent(llm_client, backend_model=backend_model, messages=messages)
     return intent.persona
@@ -675,6 +724,33 @@ class Pipe:
         __user__: dict[str, Any],
         __request__: Any,
         __event_emitter__: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> Union[str, Iterator[str]]:
+        streaming = bool(body.get("stream", False))
+
+        final_response = await self._run_chat(
+            body,
+            __user__,
+            __request__,
+            __event_emitter__,
+            use_status=self.valves.ENABLE_STATUS_UPDATES,
+        )
+
+        if streaming:
+            # Status during processing is fine; clear it before text chunks stream in.
+            if self.valves.ENABLE_STATUS_UPDATES:
+                await clear_status_message(__event_emitter__)
+            return iter_text_chunks(final_response)
+
+        return final_response
+
+    async def _run_chat(
+        self,
+        body: dict[str, Any],
+        __user__: dict[str, Any],
+        __request__: Any,
+        __event_emitter__: Callable[[dict[str, Any]], Awaitable[None]] | None,
+        *,
+        use_status: bool = True,
     ) -> str:
         user = await self._get_user_object(__user__)
         llm_client = OpenWebUILLMClient(__request__, user)
@@ -688,14 +764,19 @@ class Pipe:
             raw_messages = []
 
         conversation_messages = normalize_messages(raw_messages)
-        on_status = self._build_status_emitter(__event_emitter__)
+        on_status = self._build_status_emitter(__event_emitter__) if use_status else None
         user_persona = get_user_persona_selection(__user__)
         manual_persona = resolve_manual_persona(user_persona=user_persona, body=body)
 
-        if on_status:
-            if manual_persona:
-                await on_status(status_persona_selected(manual_persona))
-            else:
+        if should_ask_persona_onboarding(
+            manual_persona=manual_persona,
+            user_persona=user_persona,
+            messages=conversation_messages,
+        ):
+            return get_persona_onboarding_message()
+
+        async def emit_detecting_persona() -> None:
+            if on_status:
                 await on_status(status_detecting_persona())
 
         persona = await resolve_active_persona(
@@ -704,9 +785,14 @@ class Pipe:
             messages=conversation_messages,
             user_persona=user_persona,
             body=body,
+            on_detecting_status=emit_detecting_persona
+            if not manual_persona
+            else None,
         )
 
-        if on_status and not manual_persona and persona != "none":
+        if on_status and manual_persona:
+            await on_status(status_persona_selected(manual_persona))
+        elif on_status and persona != "none":
             await on_status(status_persona_selected(persona))
 
         final_response = await run_response_loop(
@@ -718,7 +804,7 @@ class Pipe:
             on_status=on_status,
         )
 
-        if self.valves.ENABLE_STATUS_UPDATES:
+        if use_status:
             await clear_status_message(__event_emitter__)
 
         return final_response

@@ -74,6 +74,10 @@ def get_intent_detection_prompt() -> str:
 def get_reflection_prompt() -> str:
     template = _load_prompt("reflection.md")
     return template.replace("{{{{CORE_PROMPT}}}}", get_core_prompt())
+
+
+def get_persona_onboarding_message() -> str:
+    return _load_prompt("persona_onboarding.md")
 """
 
 
