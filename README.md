@@ -40,18 +40,39 @@ python scripts/build_embedded_pipe.py
 
 این فایل را مستقیم در **Admin → Functions** import کنید.
 
-## انتخاب Persona در چت
+## انتخاب شخصیت (یک مدل — چند شخصیت)
 
-OpenWebUI از **UserValves** پشتیبانی می‌کند — یک dropdown داخل بخش چت:
+فقط **یک مدل** «یار کودک» در لیست مدل‌ها نمایش داده می‌شود.
 
-1. مدل **یار کودک** را انتخاب کنید
-2. سایدبار **Chat Controls** (کنترل‌های چت) را باز کنید
-3. بخش **Valves** را پیدا کنید
-4. از منوی **PERSONA** پرسونا را انتخاب کنید:
-   - **خودکار** → Intent Detection اجرا می‌شود
-   - **خلاق / داستان‌گو / معلم / کمک‌درس** → همان پرسونا ثابت می‌ماند
+انتخاب شخصیت از یکی از این مسیرها:
 
-> نیاز به تغییر در هسته OpenWebUI نیست. این قابلیت استاندارد Pipe Function است.
+| مسیر | مناسب برای |
+|------|------------|
+| **UserValves** | OpenWebUI استاندارد (Chat Controls → Valves) |
+| **`metadata.yarkids_persona`** | UI سفارشی «یار» (dropdown کنار چت) |
+| **خودکار** | اگر چیزی انتخاب نشود → Intent Detection |
+
+### اتصال UI سفارشی (dropdown کنار چت)
+
+وقتی کاربر از dropdown شخصیت انتخاب کرد، هنگام ارسال پیام این مقدار را بفرستید:
+
+```json
+{
+  "model": "yarkids",
+  "messages": [...],
+  "metadata": {
+    "yarkids_persona": "creative"
+  }
+}
+```
+
+مقادیر مجاز: `auto` | `creative` | `storyteller` | `teacher` | `homework`
+
+همچنین می‌توانید مستقیم روی body بفرستید: `body.yarkids_persona` یا `body.persona`
+
+### UserValves (OpenWebUI خام)
+
+Chat Controls → Valves → **شخصیت یار کودک**
 
 ### Valves (تنظیمات ادمین)
 

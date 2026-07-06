@@ -1,7 +1,7 @@
 """
 title: یار کودک
 author: Yar Kids
-version: 0.2.2
+version: 0.2.3
 description: دستیار کودک‌دوست با معماری Persona، Intent Detection و Reflection
 required_open_webui_version: 0.5.0
 """
@@ -34,6 +34,24 @@ SAFE_FALLBACK_RESPONSE = (
     "بیایید با هم یک موضوع دیگر را امتحان کنیم! "
     "می‌توانی دربارهٔ یک داستان، یک سوال درسی، یا یک ایدهٔ خلاقانه از من بپرسی."
 )
+
+# Child-friendly labels for persona dropdown and status messages.
+PERSONA_UI_LABELS: dict[str, str] = {
+    "auto": "✨ خودکار",
+    "creative": "🎨 خلاق",
+    "storyteller": "📖 داستان‌گو",
+    "teacher": "📚 معلم",
+    "homework": "✏️ کمک‌درس",
+    "none": "😊 یار کودک",
+}
+
+PERSONA_DROPDOWN_OPTIONS: list[dict[str, str]] = [
+    {"value": "auto", "label": "✨ خودکار — خودم انتخاب می‌کنم!"},
+    {"value": "creative", "label": "🎨 خلاق"},
+    {"value": "storyteller", "label": "📖 داستان‌گو"},
+    {"value": "teacher", "label": "📚 معلم"},
+    {"value": "homework", "label": "✏️ کمک‌درس"},
+]
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -132,6 +150,42 @@ async def _await_if_needed(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def get_persona_ui_label(persona: PersonaId | str) -> str:
+    """Return a child-friendly persona label for UI status messages."""
+    return PERSONA_UI_LABELS.get(str(persona), PERSONA_UI_LABELS["none"])
+
+
+def status_detecting_persona() -> str:
+    return "😊 دارم شخصیت مناسب رو پیدا می‌کنم..."
+
+
+def status_persona_selected(persona: PersonaId) -> str:
+    label = get_persona_ui_label(persona)
+    return f"🎭 شخصیت {label} انتخاب شد! بزن بریم..."
+
+
+def status_generating_response(attempt: int, max_attempts: int) -> str:
+    return f"✨ دارم جواب قشنگت رو می‌نویسم... ({attempt} از {max_attempts})"
+
+
+def status_reviewing_response() -> str:
+    return "🔍 یه لحظه! دارم چک می‌کنم همه‌چیز عالی باشه..."
+
+
+async def clear_status_message(
+    __event_emitter__: Callable[[dict[str, Any]], Awaitable[None]] | None,
+) -> None:
+    """Hide the status bar after the response is complete (OpenWebUI events API)."""
+    if not __event_emitter__:
+        return
+    await __event_emitter__(
+        {
+            "type": "status",
+            "data": {"description": "", "done": True, "hidden": True},
+        }
+    )
 
 
 def extract_text_from_completion(response: Any) -> str:
@@ -327,6 +381,14 @@ def resolve_manual_persona(
             if manual:
                 return manual
 
+    # Custom frontend (e.g. Yar UI): send persona directly on the request body.
+    for key in ("yarkids_persona", "persona", "PERSONA"):
+        direct = body.get(key)
+        if isinstance(direct, str):
+            manual = _normalize_persona(direct)
+            if manual:
+                return manual
+
     params = body.get("params") or {}
     if isinstance(params, dict):
         params_persona = params.get("PERSONA") or params.get("persona")
@@ -491,7 +553,7 @@ async def run_response_loop(
 
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         if on_status:
-            await on_status(f"در حال تولید پاسخ (تلاش {attempt}/{MAX_GENERATION_ATTEMPTS})...")
+            await on_status(status_generating_response(attempt, MAX_GENERATION_ATTEMPTS))
 
         candidate = await generate_response(
             llm_client,
@@ -503,7 +565,7 @@ async def run_response_loop(
         )
 
         if on_status:
-            await on_status("در حال بازبینی کیفیت پاسخ...")
+            await on_status(status_reviewing_response())
 
         reflection = await reflect_on_response(
             llm_client,
@@ -548,21 +610,22 @@ class Pipe:
         )
 
     class UserValves(BaseModel):
-        """Per-chat persona selector shown in Chat Controls → Valves."""
+        """
+        Persona dropdown — rendered by OpenWebUI in Chat Controls → Valves.
+
+        TODO(frontend/yar-ui): For custom chat UI, render a persona dropdown and send
+        the selected value in body.metadata.yarkids_persona on each chat request.
+        See README → «اتصال UI سفارشی».
+        """
 
         PERSONA: str = Field(
             default="auto",
-            description="پرسونای فعال برای این گفتگو",
+            title="شخصیت یار کودک",
+            description="از این منو شخصیت دوستت رو انتخاب کن! 😊",
             json_schema_extra={
                 "input": {
                     "type": "select",
-                    "options": [
-                        {"value": "auto", "label": "خودکار (تشخیص نیت)"},
-                        {"value": "creative", "label": "خلاق"},
-                        {"value": "storyteller", "label": "داستان‌گو"},
-                        {"value": "teacher", "label": "معلم"},
-                        {"value": "homework", "label": "کمک‌درس"},
-                    ],
+                    "options": PERSONA_DROPDOWN_OPTIONS,
                 }
             },
         )
@@ -571,17 +634,18 @@ class Pipe:
         self.valves = self.Valves()
 
     def pipes(self) -> list[dict[str, str]]:
-        return [{"id": MODEL_ID, "name": MODEL_NAME}]
+        return [
+            {
+                "id": MODEL_ID,
+                "name": MODEL_NAME,
+                "description": "همراه هوشمند و کودک‌دوست",
+            }
+        ]
 
     async def _resolve_backend_model(self, body: dict[str, Any]) -> str:
         if self.valves.BACKEND_MODEL.strip():
             return self.valves.BACKEND_MODEL.strip()
-
-        model_from_body = body.get("model", "")
-        if isinstance(model_from_body, str) and "." in model_from_body:
-            return model_from_body.split(".", 1)[1]
-
-        return str(model_from_body) if model_from_body else ""
+        return ""
 
     async def _get_user_object(self, __user__: dict[str, Any]) -> Any:
         from open_webui.models.users import Users
@@ -597,7 +661,10 @@ class Pipe:
 
         async def emit_status(description: str) -> None:
             await __event_emitter__(
-                {"type": "status", "data": {"description": description, "done": False}}
+                {
+                    "type": "status",
+                    "data": {"description": description, "done": False, "hidden": False},
+                }
             )
 
         return emit_status
@@ -622,17 +689,25 @@ class Pipe:
 
         conversation_messages = normalize_messages(raw_messages)
         on_status = self._build_status_emitter(__event_emitter__)
+        user_persona = get_user_persona_selection(__user__)
+        manual_persona = resolve_manual_persona(user_persona=user_persona, body=body)
 
         if on_status:
-            await on_status("در حال انتخاب پرسونا...")
+            if manual_persona:
+                await on_status(status_persona_selected(manual_persona))
+            else:
+                await on_status(status_detecting_persona())
 
         persona = await resolve_active_persona(
             llm_client,
             backend_model=backend_model,
             messages=conversation_messages,
-            user_persona=get_user_persona_selection(__user__),
+            user_persona=user_persona,
             body=body,
         )
+
+        if on_status and not manual_persona and persona != "none":
+            await on_status(status_persona_selected(persona))
 
         final_response = await run_response_loop(
             llm_client,
@@ -643,9 +718,7 @@ class Pipe:
             on_status=on_status,
         )
 
-        if __event_emitter__ and self.valves.ENABLE_STATUS_UPDATES:
-            await __event_emitter__(
-                {"type": "status", "data": {"description": "پاسخ آماده است.", "done": True}}
-            )
+        if self.valves.ENABLE_STATUS_UPDATES:
+            await clear_status_message(__event_emitter__)
 
         return final_response
