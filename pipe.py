@@ -1,7 +1,7 @@
 """
 title: یار کودک
 author: Yar Kids
-version: 0.3.1
+version: 0.4.0
 description: دستیار کودک‌دوست با معماری Persona، Intent Detection و Reflection
 required_open_webui_version: 0.5.0
 """
