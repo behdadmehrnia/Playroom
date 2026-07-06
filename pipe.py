@@ -1,13 +1,14 @@
 """
 title: یار کودک
 author: Yar Kids
-version: 0.2.1
+version: 0.2.2
 description: دستیار کودک‌دوست با معماری Persona، Intent Detection و Reflection
 required_open_webui_version: 0.5.0
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
 from pathlib import Path
@@ -124,6 +125,13 @@ def get_reflection_prompt() -> str:
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
+
+
+async def _await_if_needed(value: Any) -> Any:
+    """Await coroutines; return plain values unchanged (OpenWebUI version compat)."""
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 def extract_text_from_completion(response: Any) -> str:
@@ -383,7 +391,9 @@ class OpenWebUILLMClient:
         if request.temperature is not None:
             body["temperature"] = request.temperature
 
-        response = await generate_chat_completion(self._request, body, self._user)
+        response = await _await_if_needed(
+            generate_chat_completion(self._request, body, self._user)
+        )
         return extract_text_from_completion(response)
 
 
@@ -576,7 +586,7 @@ class Pipe:
     async def _get_user_object(self, __user__: dict[str, Any]) -> Any:
         from open_webui.models.users import Users
 
-        return await Users.get_user_by_id(__user__["id"])
+        return await _await_if_needed(Users.get_user_by_id(__user__["id"]))
 
     def _build_status_emitter(
         self,
