@@ -28,6 +28,18 @@ yarkids/
 
 > پرامپت‌ها از فایل‌های `.md` کنار `pipe.py` خوانده می‌شوند. حتماً پوشه `prompts/` را هم کپی کنید.
 
+## نسخه تک‌فایلی برای OpenWebUI
+
+اگر فقط یک فایل می‌خواهید import کنید (بدون پوشه `prompts/`):
+
+```bash
+python scripts/build_embedded_pipe.py
+```
+
+خروجی: `pipe_embedded.py` — همان منطق `pipe.py` با پرامپت‌های embed شده.
+
+این فایل را مستقیم در **Admin → Functions** import کنید.
+
 ## انتخاب Persona در چت
 
 OpenWebUI از **UserValves** پشتیبانی می‌کند — یک dropdown داخل بخش چت:

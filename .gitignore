@@ -10,3 +10,4 @@ build/
 .venv/
 venv/
 .env
+pipe_embedded.py
