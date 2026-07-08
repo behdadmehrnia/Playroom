@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 IncludeImageMode = Literal["never", "auto", "always"]
-MatchType = Literal["exact_page", "topic_search", "none"]
+MatchType = Literal["exact_page", "lesson", "topic_search", "none"]
 
 
 class RetrieveRequest(BaseModel):
@@ -31,6 +31,7 @@ class RetrieveResponse(BaseModel):
     confidence: float | None = None
     detected_topic: str | None = None
     detected_topic_label: str | None = None
+    text_usable: bool = True
 
 
 class HealthResponse(BaseModel):

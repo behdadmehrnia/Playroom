@@ -12,7 +12,6 @@ from pathlib import Path
 
 from app.config import DATA_DIR
 
-# Canonical subject ids — must match catalog.json `subject` field
 SUBJECT_TITLES: dict[str, str] = {
     "math": "ریاضی",
     "science": "علوم تجربی",
@@ -25,32 +24,25 @@ SUBJECT_TITLES: dict[str, str] = {
     "technology": "کار و فناوری",
 }
 
-# Book-level names → canonical subject id
 BOOK_SUBJECT_SYNONYMS: dict[str, str] = {
-    # math
     "math": "math",
     "ریاضی": "math",
     "ریاضیات": "math",
-    # science
     "science": "science",
     "علوم": "science",
     "علوم تجربی": "science",
     "تجربی": "science",
-    # persian
     "persian": "persian",
     "فارسی": "persian",
     "بخوانیم": "persian",
     "املا": "persian",
-    # writing
     "writing": "writing",
     "نگارش": "writing",
-    # social studies (whole book)
     "social": "social",
     "social_studies": "social",
     "مطالعات": "social",
     "مطالعات اجتماعی": "social",
     "اجتماعی": "social",
-    # quran
     "quran": "quran",
     "قرآن": "quran",
     "قران": "quran",
@@ -86,7 +78,6 @@ DEFAULT_TOPIC_ALIASES: dict[str, str] = {
     "اقتصاد": "social",
     "مکان": "social",
     "محیط": "social",
-    # common phrasing
     "درس تاریخ": "social",
     "درس جغرافیا": "social",
     "درس مدنی": "social",

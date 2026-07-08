@@ -27,6 +27,7 @@ from app.config import (  # noqa: E402
     PDFS_DIR,
 )
 from app.subjects import SUBJECT_TITLES  # noqa: E402
+from app.text_quality import is_text_garbled  # noqa: E402
 
 try:
     import fitz  # PyMuPDF
@@ -34,49 +35,124 @@ except ImportError as exc:
     raise SystemExit("Install pymupdf: pip install pymupdf") from exc
 
 
-import io
+import os
+import shutil
+import statistics
+import subprocess
+import tempfile
 
-# OCR is optional. It is loaded lazily and disabled permanently on first failure
-# (e.g. a broken pandas/numpy in the environment), so indexing never crashes.
-_OCR_STATE: dict[str, object] = {"enabled": True, "checked": False, "fn": None}
+# OCR is optional and calls the `tesseract` binary directly via subprocess.
+# We deliberately avoid `pytesseract` because it imports pandas/numpy at load
+# time, which can break in some environments (numpy 1.x vs 2.x conflicts).
+_OCR_STATE: dict[str, object] = {"enabled": True, "checked": False, "available": False}
+
+OCR_LANG = "fas"
+OCR_PSM = "3"
+OCR_TIMEOUT_SEC = 120
+# Mean per-word tesseract confidence below which OCR output is considered
+# unreliable (calligraphy / decorative fonts). Such pages fall back to image.
+MIN_OCR_CONFIDENCE = 65.0
 
 
-def _load_ocr():
-    """Return a callable (PIL.Image -> str) or None if OCR is unavailable."""
+def _ocr_available() -> bool:
+    """Return True if the tesseract binary with the Persian model is usable."""
     if _OCR_STATE["checked"]:
-        return _OCR_STATE["fn"]
+        return bool(_OCR_STATE["available"])
     _OCR_STATE["checked"] = True
     if not _OCR_STATE["enabled"]:
-        return None
-    try:
-        import pytesseract  # noqa: PLC0415
-
-        def _run(image) -> str:
-            return pytesseract.image_to_string(image, lang="fas").strip()
-
-        _OCR_STATE["fn"] = _run
-        return _run
-    except BaseException as exc:  # noqa: BLE001 - keep indexing alive on any import failure
+        _OCR_STATE["available"] = False
+        return False
+    binary = shutil.which("tesseract")
+    if not binary:
         print(
-            f"warning: OCR disabled (could not load pytesseract: {type(exc).__name__}). "
-            "Scanned pages will be indexed without OCR text.",
+            "warning: OCR disabled — `tesseract` binary not found on PATH. "
+            "Install it (e.g. `brew install tesseract tesseract-lang`).",
             file=sys.stderr,
         )
-        _OCR_STATE["fn"] = None
-        return None
-
-
-def _try_ocr(image_bytes: bytes) -> str:
-    ocr = _load_ocr()
-    if ocr is None:
-        return ""
+        _OCR_STATE["available"] = False
+        return False
     try:
-        from PIL import Image  # noqa: PLC0415
+        langs = subprocess.run(
+            [binary, "--list-langs"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        available_langs = langs.stdout.decode("utf-8", "ignore")
+        if OCR_LANG not in available_langs:
+            print(
+                f"warning: OCR disabled — tesseract language '{OCR_LANG}' not installed. "
+                "Install the Persian model (e.g. `brew install tesseract-lang`).",
+                file=sys.stderr,
+            )
+            _OCR_STATE["available"] = False
+            return False
+    except (OSError, subprocess.SubprocessError):
+        _OCR_STATE["available"] = False
+        return False
+    _OCR_STATE["available"] = True
+    return True
 
-        image = Image.open(io.BytesIO(image_bytes))
-        return ocr(image)
-    except BaseException:  # noqa: BLE001
-        return ""
+
+def _try_ocr(image_bytes: bytes) -> tuple[str, float]:
+    """Run tesseract on PNG bytes.
+
+    Returns (recognized_text, mean_word_confidence). Confidence is 0.0 on
+    failure or when tesseract reports no confident words.
+    """
+    if not _ocr_available():
+        return "", 0.0
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            img_path = os.path.join(tmp, "page.png")
+            with open(img_path, "wb") as fh:
+                fh.write(image_bytes)
+            base = os.path.join(tmp, "out")
+            subprocess.run(
+                [
+                    "tesseract", img_path, base,
+                    "-l", OCR_LANG, "--psm", OCR_PSM, "txt", "tsv",
+                ],
+                capture_output=True,
+                timeout=OCR_TIMEOUT_SEC,
+                check=False,
+            )
+            text = ""
+            txt_file = base + ".txt"
+            if os.path.isfile(txt_file):
+                with open(txt_file, encoding="utf-8", errors="ignore") as fh:
+                    text = fh.read().strip()
+            confidence = _mean_confidence(base + ".tsv")
+            return text, confidence
+    except (OSError, subprocess.SubprocessError):
+        return "", 0.0
+
+
+def _mean_confidence(tsv_path: str) -> float:
+    if not os.path.isfile(tsv_path):
+        return 0.0
+    confidences: list[float] = []
+    with open(tsv_path, encoding="utf-8", errors="ignore") as fh:
+        lines = fh.read().splitlines()
+    for line in lines[1:]:  # skip header
+        cols = line.split("\t")
+        if len(cols) < 12:
+            continue
+        word = cols[11].strip()
+        if not word:
+            continue
+        try:
+            conf = float(cols[10])
+        except ValueError:
+            continue
+        if conf >= 0:
+            confidences.append(conf)
+    return statistics.mean(confidences) if confidences else 0.0
+
+
+def _text_is_usable(text: str) -> bool:
+    """Clean digital/OCR text: long enough and not garbled mojibake."""
+    return len(text.strip()) >= MIN_TEXT_CHARS_FOR_DIGITAL and not is_text_garbled(text)
 
 
 def _printed_page_from_offset(pdf_page_index: int, page_offset: int) -> int:
@@ -105,6 +181,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
             text TEXT NOT NULL,
             image_path TEXT,
             is_scanned INTEGER NOT NULL DEFAULT 0,
+            text_usable INTEGER NOT NULL DEFAULT 1,
             UNIQUE(grade, subject, printed_page)
         );
 
@@ -129,13 +206,14 @@ def _insert_page(
     text: str,
     image_path: str | None,
     is_scanned: bool,
+    text_usable: bool,
 ) -> None:
     conn.execute(
         """
         INSERT INTO pages (
             grade, subject, subject_title, printed_page, pdf_page_index,
-            text, image_path, is_scanned
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            text, image_path, is_scanned, text_usable
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             grade,
@@ -146,16 +224,26 @@ def _insert_page(
             text,
             image_path,
             1 if is_scanned else 0,
+            1 if text_usable else 0,
         ),
     )
 
 
-def build_index(pdf_dir: Path, *, render_dpi: int = 120, use_ocr: bool = True) -> int:
+def build_index(
+    pdf_dir: Path,
+    *,
+    render_dpi: int = 120,
+    ocr_dpi: int = 300,
+    use_ocr: bool = True,
+) -> int:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     PAGES_DIR.mkdir(parents=True, exist_ok=True)
 
     if not use_ocr:
         _OCR_STATE["enabled"] = False
+
+    ocr_pages = 0
+    ocr_fixed = 0
 
     if not CATALOG_PATH.is_file():
         raise FileNotFoundError(f"Missing catalog: {CATALOG_PATH}")
@@ -190,14 +278,36 @@ def build_index(pdf_dir: Path, *, render_dpi: int = 120, use_ocr: bool = True) -
             for pdf_page_index in range(len(doc)):
                 page = doc[pdf_page_index]
                 raw_text = page.get_text("text").strip()
-                is_scanned = len(raw_text) < MIN_TEXT_CHARS_FOR_DIGITAL
+                digital_ok = _text_is_usable(raw_text)
 
-                if is_scanned and use_ocr:
-                    pix = page.get_pixmap(dpi=render_dpi)
-                    ocr_text = _try_ocr(pix.tobytes("png"))
-                    text = ocr_text if ocr_text else raw_text
-                else:
-                    text = raw_text
+                # OCR whenever the digital text layer is missing OR garbled
+                # (Iranian schoolbook PDFs often embed broken font CMaps that
+                # produce plenty of text, but it's mojibake).
+                text = raw_text
+                text_usable = digital_ok
+                if not digital_ok and use_ocr:
+                    ocr_png = page.get_pixmap(dpi=ocr_dpi).tobytes("png")
+                    ocr_text, ocr_conf = _try_ocr(ocr_png)
+                    if ocr_text:
+                        ocr_pages += 1
+                        clean = _text_is_usable(ocr_text)
+                        confident = ocr_conf >= MIN_OCR_CONFIDENCE
+                        # Trust OCR only when it is clean AND tesseract is
+                        # confident. Low-confidence output (calligraphy, decorative
+                        # fonts) looks like valid Persian but is often wrong, so we
+                        # keep it out of the usable text and rely on the page image.
+                        if clean and confident:
+                            text = ocr_text
+                            text_usable = True
+                            ocr_fixed += 1
+                        elif len(ocr_text) > len(raw_text):
+                            # Keep best-effort text for search, but not "usable".
+                            text = ocr_text
+                            text_usable = False
+
+                # Attach the page image whenever the text isn't reliably usable
+                # (e.g. calligraphic poems) so a vision model can read it.
+                is_scanned = not text_usable
 
                 printed_page = _printed_page_from_offset(pdf_page_index, page_offset)
 
@@ -216,7 +326,8 @@ def build_index(pdf_dir: Path, *, render_dpi: int = 120, use_ocr: bool = True) -
                     pdf_page_index=pdf_page_index,
                     text=text,
                     image_path=str(image_path.relative_to(DATA_DIR)),
-                    is_scanned=is_scanned and len(text) < MIN_TEXT_CHARS_FOR_DIGITAL,
+                    is_scanned=is_scanned,
+                    text_usable=text_usable,
                 )
                 total_pages += 1
 
@@ -230,7 +341,10 @@ def build_index(pdf_dir: Path, *, render_dpi: int = 120, use_ocr: bool = True) -
         )
         conn.commit()
 
-    print(f"Done. Indexed {total_pages} pages → {INDEX_PATH}")
+    print(
+        f"Done. Indexed {total_pages} pages → {INDEX_PATH} "
+        f"(OCR ran on {ocr_pages} pages, produced clean text for {ocr_fixed})"
+    )
     return total_pages
 
 
@@ -242,7 +356,8 @@ def main() -> int:
         default=PDFS_DIR,
         help=f"Directory containing PDF files (default: {PDFS_DIR})",
     )
-    parser.add_argument("--dpi", type=int, default=120, help="PNG render DPI")
+    parser.add_argument("--dpi", type=int, default=120, help="Stored page PNG render DPI")
+    parser.add_argument("--ocr-dpi", type=int, default=300, help="Render DPI used for OCR")
     parser.add_argument(
         "--no-ocr",
         action="store_true",
@@ -251,7 +366,12 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        build_index(args.pdf_dir, render_dpi=args.dpi, use_ocr=not args.no_ocr)
+        build_index(
+            args.pdf_dir,
+            render_dpi=args.dpi,
+            ocr_dpi=args.ocr_dpi,
+            use_ocr=not args.no_ocr,
+        )
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
