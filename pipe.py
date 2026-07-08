@@ -1,7 +1,7 @@
 """
 title: یار کودک
 author: Yar Kids
-version: 0.4.0
+version: 0.5.0
 description: دستیار کودک‌دوست با معماری Persona، Intent Detection و Reflection
 required_open_webui_version: 0.5.0
 """
@@ -9,9 +9,12 @@ required_open_webui_version: 0.5.0
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import json
 import re
+import urllib.error
+import urllib.request
 from collections.abc import AsyncIterator
 from collections.abc import Iterator
 from pathlib import Path
@@ -31,6 +34,10 @@ MANUAL_PERSONA_METADATA_KEY = "yarkids_persona"
 PERSONA_AUTO_VALUE = "auto"
 SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework")
 REVISION_INSTRUCTION_HEADER = "بازبینی لازم است. پاسخ قبلی مناسب نبود. دلایل:"
+TEXTBOOK_CONTEXT_HEADER = (
+    "متن کتاب درسی بازیابی‌شده (مرجع — برای راهنمایی آموزشی؛ جواب نهایی را بدون آموزش روش نده):"
+)
+DEFAULT_TEXTBOOK_TIMEOUT_SEC = 5.0
 
 SAFE_FALLBACK_RESPONSE = (
     "متأسفم، الان نتوانستم پاسخ مناسبی برایت بدهم. "
@@ -71,6 +78,7 @@ VALID_PERSONAS: set[PersonaId] = {
     "homework",
     "none",
 }
+TEXTBOOK_PERSONAS: frozenset[PersonaId] = frozenset({"teacher", "homework"})
 
 # ---------------------------------------------------------------------------
 # Models
@@ -94,9 +102,21 @@ class ChatMessage(BaseModel):
 
 class LLMCompletionRequest(BaseModel):
     model: str
-    messages: list[dict[str, str]]
+    messages: list[dict[str, Any]]
     stream: bool = False
     temperature: float | None = None
+
+
+class TextbookContext(BaseModel):
+    matched: bool = False
+    match_type: str | None = None
+    grade: int | None = None
+    subject: str | None = None
+    subject_title: str | None = None
+    page: int | None = None
+    context_text: str | None = None
+    needs_image: bool = False
+    image_base64: str | None = None
 
 
 class LLMClient(Protocol):
@@ -179,6 +199,10 @@ def status_generating_response(attempt: int, max_attempts: int) -> str:
 
 def status_reviewing_response() -> str:
     return "🔍 یه لحظه! دارم چک می‌کنم همه‌چیز عالی باشه..."
+
+
+def status_fetching_textbook() -> str:
+    return "📖 دارم صفحهٔ کتاب درسی رو پیدا می‌کنم..."
 
 
 async def clear_status_message(
@@ -276,6 +300,117 @@ def iter_text_chunks(text: str, chunk_size: int = STREAM_CHUNK_SIZE) -> Iterator
 
 
 # ---------------------------------------------------------------------------
+# Textbook context client (calls external textbook-service API)
+# ---------------------------------------------------------------------------
+
+
+def _normalize_api_base_url(api_url: str) -> str:
+    return api_url.strip().rstrip("/")
+
+
+def _http_post_json(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    headers: dict[str, str],
+    timeout_sec: float,
+) -> dict[str, Any] | None:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={**headers, "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+        raw = response.read().decode("utf-8")
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+
+
+def _http_get_bytes(
+    url: str,
+    *,
+    headers: dict[str, str],
+    timeout_sec: float,
+) -> bytes | None:
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+        return response.read()
+
+
+async def fetch_textbook_context(
+    query: str,
+    *,
+    api_url: str,
+    api_key: str | None = None,
+    include_neighbors: int = 1,
+    include_image: str = "auto",
+    timeout_sec: float = DEFAULT_TEXTBOOK_TIMEOUT_SEC,
+) -> TextbookContext | None:
+    """
+    Call textbook-service POST /v1/retrieve. Returns None on failure (graceful degrade).
+    """
+    base = _normalize_api_base_url(api_url)
+    if not base:
+        return None
+
+    headers: dict[str, str] = {}
+    if api_key and api_key.strip():
+        headers["Authorization"] = f"Bearer {api_key.strip()}"
+
+    payload = {
+        "query": query,
+        "include_neighbors": include_neighbors,
+        "include_image": include_image,
+    }
+
+    def _retrieve() -> dict[str, Any] | None:
+        try:
+            return _http_post_json(
+                f"{base}/v1/retrieve",
+                payload,
+                headers=headers,
+                timeout_sec=timeout_sec,
+            )
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError):
+            return None
+
+    data = await asyncio.to_thread(_retrieve)
+    if not data or not data.get("matched"):
+        return TextbookContext(matched=False)
+
+    context = TextbookContext(
+        matched=True,
+        match_type=str(data.get("match_type")) if data.get("match_type") else None,
+        grade=int(data["grade"]) if data.get("grade") is not None else None,
+        subject=str(data["subject"]) if data.get("subject") else None,
+        subject_title=str(data["subject_title"]) if data.get("subject_title") else None,
+        page=int(data["page"]) if data.get("page") is not None else None,
+        context_text=str(data["context_text"]) if data.get("context_text") else None,
+        needs_image=bool(data.get("needs_image")),
+        image_base64=str(data["image_base64"]) if data.get("image_base64") else None,
+    )
+
+    if context.needs_image and not context.image_base64:
+        image_url = data.get("image_url")
+        if isinstance(image_url, str) and image_url.strip():
+
+            def _fetch_image() -> bytes | None:
+                full_url = image_url if image_url.startswith("http") else f"{base}{image_url}"
+                try:
+                    return _http_get_bytes(full_url, headers=headers, timeout_sec=timeout_sec)
+                except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+                    return None
+
+            image_bytes = await asyncio.to_thread(_fetch_image)
+            if image_bytes:
+                context.image_base64 = base64.b64encode(image_bytes).decode("ascii")
+
+    return context
+
+
+# ---------------------------------------------------------------------------
 # Prompt builder
 # ---------------------------------------------------------------------------
 
@@ -283,12 +418,27 @@ def iter_text_chunks(text: str, chunk_size: int = STREAM_CHUNK_SIZE) -> Iterator
 def build_system_prompt(
     persona: PersonaId,
     revision_reasons: list[str] | None = None,
+    textbook_context: TextbookContext | None = None,
 ) -> str:
     sections: list[str] = [get_core_prompt()]
 
     persona_prompt = get_persona_prompt(persona)
     if persona_prompt:
         sections.append(persona_prompt)
+
+    if textbook_context and textbook_context.matched and textbook_context.context_text:
+        meta_parts: list[str] = []
+        if textbook_context.subject_title:
+            meta_parts.append(textbook_context.subject_title)
+        if textbook_context.grade:
+            meta_parts.append(f"پایه {textbook_context.grade}")
+        if textbook_context.page:
+            meta_parts.append(f"صفحه {textbook_context.page}")
+        meta = " — ".join(meta_parts)
+        header = TEXTBOOK_CONTEXT_HEADER
+        if meta:
+            header = f"{header}\n({meta})"
+        sections.append(f"{header}\n{textbook_context.context_text}")
 
     if revision_reasons:
         reasons_text = "\n".join(f"- {reason}" for reason in revision_reasons)
@@ -297,19 +447,56 @@ def build_system_prompt(
     return "\n\n".join(sections)
 
 
+def _attach_textbook_image_to_messages(
+    messages: list[dict[str, Any]],
+    textbook_context: TextbookContext | None,
+) -> list[dict[str, Any]]:
+    if not textbook_context or not textbook_context.needs_image:
+        return messages
+    if not textbook_context.image_base64:
+        return messages
+
+    data_uri = f"data:image/png;base64,{textbook_context.image_base64}"
+    image_note = "تصویر صفحهٔ کتاب درسی پیوست شده — اگر تمرین شکل یا جدول دارد از تصویر هم استفاده کن."
+
+    updated = list(messages)
+    for index in range(len(updated) - 1, -1, -1):
+        if updated[index].get("role") != "user":
+            continue
+        original = updated[index].get("content", "")
+        text_part = original if isinstance(original, str) else image_note
+        updated[index] = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": f"{text_part}\n\n{image_note}"},
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ],
+        }
+        break
+    return updated
+
+
 def build_prompt_messages(
     *,
     persona: PersonaId,
     conversation_messages: list[ChatMessage],
     revision_reasons: list[str] | None = None,
-) -> list[dict[str, str]]:
-    llm_messages: list[dict[str, str]] = [
-        {"role": "system", "content": build_system_prompt(persona, revision_reasons)},
+    textbook_context: TextbookContext | None = None,
+) -> list[dict[str, Any]]:
+    llm_messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": build_system_prompt(
+                persona,
+                revision_reasons,
+                textbook_context=textbook_context,
+            ),
+        },
     ]
     for message in conversation_messages:
         if message.role != "system":
             llm_messages.append({"role": message.role, "content": message.content})
-    return llm_messages
+    return _attach_textbook_image_to_messages(llm_messages, textbook_context)
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +679,7 @@ async def generate_response(
     conversation_messages: list[ChatMessage],
     revision_reasons: list[str] | None = None,
     temperature: float | None = None,
+    textbook_context: TextbookContext | None = None,
 ) -> str:
     request = LLMCompletionRequest(
         model=backend_model,
@@ -499,6 +687,7 @@ async def generate_response(
             persona=persona,
             conversation_messages=conversation_messages,
             revision_reasons=revision_reasons,
+            textbook_context=textbook_context,
         ),
         stream=False,
         temperature=temperature,
@@ -567,6 +756,7 @@ async def run_response_loop(
     conversation_messages: list[ChatMessage],
     temperature: float | None = None,
     on_status: Callable[[str], Awaitable[None]] | None = None,
+    textbook_context: TextbookContext | None = None,
 ) -> str:
     revision_reasons: list[str] = []
     user_message = _get_latest_user_message(conversation_messages)
@@ -582,6 +772,7 @@ async def run_response_loop(
             conversation_messages=conversation_messages,
             revision_reasons=revision_reasons or None,
             temperature=temperature,
+            textbook_context=textbook_context,
         )
 
         if on_status:
@@ -627,6 +818,34 @@ class Pipe:
         ENABLE_STATUS_UPDATES: bool = Field(
             default=True,
             description="نمایش وضعیت پردازش در رابط کاربری.",
+        )
+        ENABLE_TEXTBOOK_CONTEXT: bool = Field(
+            default=True,
+            description="فعال‌سازی بازیابی کتاب درسی از textbook-service (معلم/کمک‌درسی).",
+        )
+        TEXTBOOK_API_URL: str = Field(
+            default="http://localhost:8080",
+            description="آدرس پایهٔ API سرویس textbook-service (بدون / در انتها).",
+        )
+        TEXTBOOK_API_KEY: str = Field(
+            default="",
+            description="کلید API اختیاری (Bearer token).",
+        )
+        TEXTBOOK_REQUEST_TIMEOUT_SEC: float = Field(
+            default=DEFAULT_TEXTBOOK_TIMEOUT_SEC,
+            ge=1.0,
+            le=30.0,
+            description="مهلت درخواست به textbook-service (ثانیه).",
+        )
+        TEXTBOOK_NEIGHBOR_PAGES: int = Field(
+            default=1,
+            ge=0,
+            le=3,
+            description="تعداد صفحات همسایه برای بازیابی.",
+        )
+        TEXTBOOK_INCLUDE_IMAGE: str = Field(
+            default="auto",
+            description='ارسال تصویر صفحه: never | auto | always',
         )
 
     class UserValves(BaseModel):
@@ -792,6 +1011,28 @@ class Pipe:
         elif on_status and persona != "none":
             await on_status(status_persona_selected(persona))
 
+        textbook_context: TextbookContext | None = None
+        user_message = _get_latest_user_message(conversation_messages)
+        if (
+            self.valves.ENABLE_TEXTBOOK_CONTEXT
+            and persona in TEXTBOOK_PERSONAS
+            and user_message
+            and self.valves.TEXTBOOK_API_URL.strip()
+        ):
+            if on_status:
+                await on_status(status_fetching_textbook())
+            include_image = self.valves.TEXTBOOK_INCLUDE_IMAGE.strip().lower()
+            if include_image not in {"never", "auto", "always"}:
+                include_image = "auto"
+            textbook_context = await fetch_textbook_context(
+                user_message,
+                api_url=self.valves.TEXTBOOK_API_URL,
+                api_key=self.valves.TEXTBOOK_API_KEY or None,
+                include_neighbors=self.valves.TEXTBOOK_NEIGHBOR_PAGES,
+                include_image=include_image,  # type: ignore[arg-type]
+                timeout_sec=self.valves.TEXTBOOK_REQUEST_TIMEOUT_SEC,
+            )
+
         return await run_response_loop(
             llm_client,
             backend_model=backend_model,
@@ -799,4 +1040,5 @@ class Pipe:
             conversation_messages=conversation_messages,
             temperature=self.valves.TEMPERATURE,
             on_status=on_status,
+            textbook_context=textbook_context,
         )

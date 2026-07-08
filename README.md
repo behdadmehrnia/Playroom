@@ -6,16 +6,14 @@ Pipe Function برای OpenWebUI — دستیار کودک‌دوست.
 
 ```
 yarkids/
-├── pipe.py                 # کل منطق + کلاس Pipe
-└── prompts/
-    ├── core.md             # Core Prompt
-    ├── intent_detection.md
-    ├── reflection.md
-    └── personas/
-        ├── creative.md
-        ├── storyteller.md
-        ├── teacher.md
-        └── homework.md
+├── pipe.py                 # کل منطق + کلاس Pipe (+ کلاینت textbook-service)
+├── scripts/
+│   └── build_embedded_pipe.py
+├── prompts/                # پرامپت‌های یار کودک
+└── textbook-service/       # API جدا — بازیابی کتاب درسی
+    ├── app/                # FastAPI
+    ├── indexer/            # build_index.py
+    └── data/               # catalog.json, pdfs/, index.sqlite
 ```
 
 ## نصب در OpenWebUI
@@ -81,6 +79,25 @@ Chat Controls → Valves → **شخصیت یار کودک**
 | `BACKEND_MODEL` | مدل LLM پشتیبان (الزامی) |
 | `TEMPERATURE` | دمای تولید |
 | `ENABLE_STATUS_UPDATES` | نمایش وضعیت در UI |
+| `ENABLE_TEXTBOOK_CONTEXT` | بازیابی کتاب درسی (معلم/کمک‌درسی) |
+| `TEXTBOOK_API_URL` | آدرس textbook-service |
+| `TEXTBOOK_API_KEY` | کلید API اختیاری |
+| `TEXTBOOK_REQUEST_TIMEOUT_SEC` | مهلت درخواست (ثانیه) |
+| `TEXTBOOK_NEIGHBOR_PAGES` | صفحات همسایه (۰–۳) |
+| `TEXTBOOK_INCLUDE_IMAGE` | `never` / `auto` / `always` |
+
+## کتاب درسی (textbook-service)
+
+برای پرسوناهای **معلم** و **کمک‌درسی**، Pipe از API جداگانهٔ `textbook-service` کانتکست صفحهٔ کتاب را می‌گیرد.
+
+1. PDFها را در `textbook-service/data/pdfs/` بگذارید و `catalog.json` را تنظیم کنید.
+2. ایندکس بسازید: `python textbook-service/indexer/build_index.py`
+3. API را اجرا کنید: `cd textbook-service && docker compose up` یا `uvicorn app.main:app --port 8080`
+4. در Valves پایپ: `TEXTBOOK_API_URL=http://localhost:8080`
+
+جزئیات: [textbook-service/README.md](textbook-service/README.md)
+
+اگر API در دسترس نباشد، یار کودک بدون کانتکست کتاب ادامه می‌دهد.
 
 ## ویرایش پرامپت‌ها
 

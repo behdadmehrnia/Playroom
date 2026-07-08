@@ -11,3 +11,7 @@ build/
 venv/
 .env
 pipe_embedded.py
+textbook-service/data/index.sqlite
+textbook-service/data/pdfs/*.pdf
+textbook-service/data/pages/*.png
+.DS_Store

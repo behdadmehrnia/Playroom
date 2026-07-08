@@ -1,0 +1,221 @@
+{
+  "books": [
+    {
+      "file": "C301.pdf",
+      "grade": 3,
+      "subject": "quran",
+      "title": "قرآن پایه سوم",
+      "page_offset": 12,
+      "_comment": "page_offset: printed_page = pdf_page_index - 12 (adjust per book)"
+    },
+    {
+      "file": "C302.pdf",
+      "grade": 3,
+      "subject": "gifts",
+      "title": "هدیه های آسمان پایه سوم",
+      "page_offset": 0
+    },
+    {
+      "file": "C303.pdf",
+      "grade": 3,
+      "subject": "persian",
+      "title": "فارسی پایه سوم",
+      "page_offset": 0
+    },
+    {
+      "file": "C304.pdf",
+      "grade": 3,
+      "subject": "writing",
+      "title": "نگارش پایه سوم",
+      "page_offset": 0
+    },
+    {
+      "file": "C305.pdf",
+      "grade": 3,
+      "subject": "math",
+      "title": "ریاضی پایه سوم",
+      "page_offset": 0
+    },
+    {
+      "file": "C306.pdf",
+      "grade": 3,
+      "subject": "science",
+      "title": "علوم تجربی پایه سوم",
+      "page_offset": 0
+    },
+    {
+      "file": "C307.pdf",
+      "grade": 3,
+      "subject": "social",
+      "title": "مطالعات اجتماعی پایه سوم",
+      "page_offset": 6
+    },
+    {
+      "file": "C401.pdf",
+      "grade": 4,
+      "subject": "quran",
+      "title": "قرآن پایه چهارم",
+      "page_offset": 12
+    },
+    {
+      "file": "C402.pdf",
+      "grade": 4,
+      "subject": "gifts",
+      "title": "هدیه های آسمان پایه چهارم",
+      "page_offset": 0
+    },
+    {
+      "file": "C403.pdf",
+      "grade": 4,
+      "subject": "persian",
+      "title": "فارسی پایه چهارم",
+      "page_offset": 0
+    },
+    {
+      "file": "C404.pdf",
+      "grade": 4,
+      "subject": "writing",
+      "title": "نگارش پایه چهارم",
+      "page_offset": 0
+    },
+    {
+      "file": "C405.pdf",
+      "grade": 4,
+      "subject": "math",
+      "title": "ریاضی پایه چهارم",
+      "page_offset": 6
+    },
+    {
+      "file": "C406.pdf",
+      "grade": 4,
+      "subject": "science",
+      "title": "علوم تجربی پایه چهارم",
+      "page_offset": 8
+    },
+    {
+      "file": "C407.pdf",
+      "grade": 4,
+      "subject": "social",
+      "title": "مطالعات اجتماعی پایه چهارم",
+      "page_offset": 8
+    },
+    {
+      "file": "C501.pdf",
+      "grade": 5,
+      "subject": "quran",
+      "title": "قرآن پایه پنجم",
+      "page_offset": 14
+    },
+    {
+      "file": "C502.pdf",
+      "grade": 5,
+      "subject": "gifts",
+      "title": "هدیه های آسمان پایه پنجم",
+      "page_offset": 0
+    },
+    {
+      "file": "C503.pdf",
+      "grade": 5,
+      "subject": "persian",
+      "title": "فارسی پایه پنجم",
+      "page_offset": 0
+    },
+    {
+      "file": "C504.pdf",
+      "grade": 5,
+      "subject": "writing",
+      "title": "نگارش پایه پنجم",
+      "page_offset": 0
+    },
+    {
+      "file": "C505.pdf",
+      "grade": 5,
+      "subject": "math",
+      "title": "ریاضی پایه پنجم",
+      "page_offset": 0
+    },
+    {
+      "file": "C506.pdf",
+      "grade": 5,
+      "subject": "science",
+      "title": "علوم تجربی پایه پنجم",
+      "page_offset": 8
+    },
+    {
+      "file": "C507.pdf",
+      "grade": 5,
+      "subject": "social",
+      "title": "مطالعات اجتماعی پایه پنجم",
+      "page_offset": 6
+    },
+    {
+      "file": "C601.pdf",
+      "grade": 6,
+      "subject": "quran",
+      "title": "قرآن پایه ششم",
+      "page_offset": 12
+    },
+    {
+      "file": "C602.pdf",
+      "grade": 6,
+      "subject": "gifts",
+      "title": "هدیه های آسمان پایه ششم",
+      "page_offset": 0
+    },
+    {
+      "file": "C603.pdf",
+      "grade": 6,
+      "subject": "persian",
+      "title": "فارسی پایه ششم",
+      "page_offset": 0
+    },
+    {
+      "file": "C604.pdf",
+      "grade": 6,
+      "subject": "writing",
+      "title": "نگارش پایه ششم",
+      "page_offset": 0
+    },
+    {
+      "file": "C605.pdf",
+      "grade": 6,
+      "subject": "math",
+      "title": "ریاضی پایه ششم",
+      "page_offset": 8
+    },
+    {
+      "file": "C606.pdf",
+      "grade": 6,
+      "subject": "science",
+      "title": "علوم تجربی پایه ششم",
+      "page_offset": 6
+    },
+    {
+      "file": "C607.pdf",
+      "grade": 6,
+      "subject": "social",
+      "title": "مطالعات اجتماعی پایه ششم",
+      "page_offset": 0
+    },
+    {
+      "file": "C612.pdf",
+      "grade": 6,
+      "subject": "thinking",
+      "title": "تفکر و پژوهش پایه ششم",
+      "page_offset": 0
+    },
+    {
+      "file": "C617.pdf",
+      "grade": 6,
+      "subject": "technology",
+      "title": "کار و فناوری پایه ششم",
+      "page_offset": 0
+    }
+  ],
+  "_instructions": {
+    "file": "نام فایل PDF داخل data/pdfs/",
+    "page_offset": "اگر صفحه چاپی با شماره PDF فرق دارد، offset را تنظیم کنید",
+    "subjects": "math, science, persian, writing, social, quran, gifts, thinking, technology",
+    "topics": "زیرموضوع‌ها در data/subject_topics.json — مثلاً تاریخ/مدنی → social"
+  }
+}
