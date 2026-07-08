@@ -37,7 +37,118 @@ REVISION_INSTRUCTION_HEADER = "بازبینی لازم است. پاسخ قبلی
 TEXTBOOK_CONTEXT_HEADER = (
     "متن کتاب درسی بازیابی‌شده (مرجع — برای راهنمایی آموزشی؛ جواب نهایی را بدون آموزش روش نده):"
 )
+TEXTBOOK_CONTEXT_INSTRUCTION = (
+    "مهم: متن واقعی صفحهٔ کتاب درسی در ادامه آمده است. "
+    "فقط و فقط از همین متن برای کمک به کودک استفاده کن. "
+    "چیزی از خودت به متن اضافه نکن و محتوای صفحه را حدس نزن. "
+    "اگر تصویر مرجع کتاب درسی هم ضمیمه شد، بدان آن تصویر را «سیستم» از پایگاه کتاب اضافه کرده "
+    "و کاربر آن را نفرستاده است؛ پس هرگز نگو «تصویری که فرستادی» مگر اینکه واقعاً در تاریخچهٔ کاربر تصویر آمده باشد."
+)
+TEXTBOOK_IMAGE_ONLY_INSTRUCTION = (
+    "مهم: متن این صفحه از فایل کتاب به‌درستی استخراج نشد و متنِ زیر ناخواناست، "
+    "اما تصویر صفحه پیوست شده است. "
+    "فقط و فقط محتوای صفحه را از روی «تصویر پیوست‌شده» بخوان و به کودک کمک کن. "
+    "به متن ناخوانای زیر استناد نکن و محتوای صفحه را از خودت حدس نزن. "
+    "این تصویر، ضمیمهٔ مرجعِ سیستمی از پایگاه کتاب است و تصویر ارسالیِ کاربر نیست؛ "
+    "پس هرگز نگو «تصویری که فرستادی» مگر اینکه واقعاً کاربر تصویری فرستاده باشد."
+)
+TEXTBOOK_UNREADABLE_INSTRUCTION = (
+    "توجه مهم: صفحهٔ درخواستی پیدا شد، اما متن آن از فایل کتاب ناخوانا استخراج شد "
+    "و تصویری هم برای نمایش در دسترس نیست. "
+    "به‌هیچ‌وجه محتوای صفحه، شعر، متن یا تمرین را از خودت نساز و حدس نزن. "
+    "صادقانه و مهربان به کودک بگو الان نتوانستی متن این صفحه را درست بخوانی، "
+    "و از او بخواه بخشی از متن یا سوالش را خودش بنویسد تا با هم کار کنید."
+)
+TEXTBOOK_LOOKUP_FAILED_INSTRUCTION = (
+    "توجه مهم: کودک به صفحه/درسی از کتاب اشاره کرده، اما هنوز اطلاعات کافی برای باز کردن "
+    "دقیق آن نداری (یا آن صفحه پیدا نشد). "
+    "به‌هیچ‌وجه محتوای آن صفحه/درس، شعر، متن یا تمرین را از خودت نساز و حدس نزن "
+    "(حتی نام یا موضوع درس را هم از خودت نگو). "
+    "**هرگز نگو «به کتابت دسترسی ندارم» یا «نمی‌توانم کتاب/عکس را ببینم».** "
+    "به‌جایش مثبت و مهربان همان چند اطلاعاتی را که برای باز کردن صفحه لازم داری بپرس: "
+    "۱) شمارهٔ صفحه چند است؟ ۲) کلاس چندمی (پایه)؟ ۳) کدام کتاب یا درس (مثلاً ریاضی، فارسی)؟ "
+    "به کودک اطمینان بده که وقتی این‌ها را بگوید، همان صفحهٔ کتاب را برایش باز می‌کنی. "
+    "هرگز وانمود نکن که متن یا تصویری را می‌بینی که نداری."
+)
+TEXTBOOK_NEED_INFO_INSTRUCTION = (
+    "توجه: کودک دربارهٔ تمرین/درس/صفحهٔ کتاب صحبت می‌کند، اما هنوز اطلاعات کافی برای "
+    "باز کردن دقیق صفحه نداری. "
+    "**هرگز نگو «به کتابت دسترسی ندارم» یا «نمی‌توانم کتاب/عکس را ببینم».** "
+    "برعکس، مثبت و مهربان به کودک بگو می‌توانی صفحهٔ کتابش را باز کنی و کمکش کنی، "
+    "فقط کافی است چند چیز را بدانی. سپس کوتاه فقط مواردی را که از گفت‌وگو هنوز "
+    "نمی‌دانی از او بپرس: ۱) شمارهٔ صفحه چند است؟ ۲) کلاس چندمی (پایه)؟ "
+    "۳) کدام کتاب یا درس (مثلاً ریاضی، فارسی)؟ "
+    "محتوای صفحه، تمرین یا سوال را از خودت نساز و حدس نزن؛ فقط اطلاعات لازم را بپرس."
+)
 DEFAULT_TEXTBOOK_TIMEOUT_SEC = 5.0
+
+# Lightweight heuristic (pipe-side) — mirrors textbook-service page queries
+_TEXTBOOK_PAGE_QUERY_RE = re.compile(
+    r"(?:صفحه|صفحهٔ|ص\.?)\s*[\d۰-۹٠-٩]+",
+    re.IGNORECASE,
+)
+# Anchor detection for Persian number-words like «بیست و یکم»:
+# we only need to detect the presence of the page marker keyword.
+_TEXTBOOK_PAGE_MARKER_RE = re.compile(r"(?:صفحه|صفحهٔ|ص\.?)", re.IGNORECASE)
+# Lesson / chapter reference (درس دوازدهم، فصل سوم، درس ۱۲) — also anchors a query.
+_TEXTBOOK_LESSON_RE = re.compile(
+    r"(?:درس|فصل)\s*(?:[\d۰-۹٠-٩]+|اول|یکم|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم|"
+    r"یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم)",
+    re.IGNORECASE,
+)
+# Explicit page number after a page marker (Persian or ASCII digits).
+_TEXTBOOK_PAGE_NUMBER_RE = re.compile(
+    r"(?:صفحه|صفحهٔ|صفحه‌ی|ص\.?)\s*([\d۰-۹٠-٩]+)",
+    re.IGNORECASE,
+)
+# Relative page references: «صفحه بعد/بعدی»، «بعدش»، «صفحه قبل/قبلی»، «قبلش».
+_TEXTBOOK_NEXT_PAGE_RE = re.compile(
+    r"صفحه[\s\u200cٔی]*بعد|بعدش|بعدی|صفحهٔ?\s*بعد",
+    re.IGNORECASE,
+)
+_TEXTBOOK_PREV_PAGE_RE = re.compile(
+    r"صفحه[\s\u200cٔی]*قبل|قبلش|قبلی|صفحهٔ?\s*قبل",
+    re.IGNORECASE,
+)
+_PERSIAN_DIGIT_MAP = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+# Persian number words that can follow «صفحه» to form a page reference.
+_TEXTBOOK_PAGE_NUMBER_WORDS: frozenset[str] = frozenset({
+    "اول", "یکم", "یک", "دوم", "دو", "سوم", "سه", "چهارم", "چهار", "پنجم", "پنج",
+    "ششم", "شش", "هفتم", "هفت", "هشتم", "هشت", "نهم", "نه", "دهم", "ده",
+    "یازدهم", "یازده", "دوازدهم", "دوازده", "سیزدهم", "سیزده", "چهاردهم", "چهارده",
+    "پانزدهم", "پانزده", "شانزدهم", "شانزده", "هفدهم", "هفده", "هجدهم", "هجده",
+    "نوزدهم", "نوزده", "بیست", "بیستم", "سی", "چهل", "پنجاه", "شصت", "هفتاد",
+    "هشتاد", "نود", "صد",
+})
+_TEXTBOOK_PAGE_WORD_AFTER_RE = re.compile(
+    r"(?:صفحه|صفحهٔ|صفحه‌ی|ص\.?)\s+(\S+)",
+    re.IGNORECASE,
+)
+_TEXTBOOK_GRADE_QUERY_RE = re.compile(
+    r"(?:پایه|کلاس)\s*[\d۳۴۵۶سومچهارمپنجمشش]+|پایه\s*(?:سوم|چهارم|پنجم|ششم)",
+    re.IGNORECASE,
+)
+# Standalone grade token (e.g. bare «ششم») used to carry the grade forward
+# across turns without dragging along an old page reference.
+_TEXTBOOK_GRADE_TOKEN_RE = re.compile(
+    r"(?:پایه|کلاس)\s*[\d۳۴۵۶٣٤٥٦]+|سوم|چهارم|پنجم|ششم",
+    re.IGNORECASE,
+)
+_TEXTBOOK_SUBJECT_KEYWORDS: tuple[str, ...] = (
+    "ریاضی",
+    "فارسی",
+    "علوم",
+    "نگارش",
+    "مطالعات",
+    "اجتماعی",
+    "قرآن",
+    "هدیه",
+    "تفکر",
+    "فناوری",
+    "کتاب",
+)
+# Real subjects (excludes the generic word «کتاب») for carrying forward.
+_TEXTBOOK_SUBJECT_TOKENS: tuple[str, ...] = _TEXTBOOK_SUBJECT_KEYWORDS[:-1]
 
 SAFE_FALLBACK_RESPONSE = (
     "متأسفم، الان نتوانستم پاسخ مناسبی برایت بدهم. "
@@ -117,6 +228,10 @@ class TextbookContext(BaseModel):
     context_text: str | None = None
     needs_image: bool = False
     image_base64: str | None = None
+    page_query_failed: bool = False
+    need_info: bool = False
+    text_usable: bool = True
+    error: str | None = None
 
 
 class LLMClient(Protocol):
@@ -205,6 +320,63 @@ def status_fetching_textbook() -> str:
     return "📖 دارم صفحهٔ کتاب درسی رو پیدا می‌کنم..."
 
 
+def status_textbook_unavailable() -> str:
+    return "⚠️ نتونستم به سرویس کتاب درسی وصل بشم..."
+
+
+def _format_textbook_debug(*, query: str, api_url: str, context: TextbookContext) -> str:
+    short_query = query if len(query) <= 60 else query[:57] + "..."
+    if context.error:
+        return f"🐞 دیباگ کتاب | خطا: {context.error} | URL: {api_url}"
+    if context.matched:
+        return (
+            f"🐞 دیباگ کتاب | ✅ یافت شد: پایه {context.grade} "
+            f"{context.subject_title or context.subject} صفحه {context.page} "
+            f"({context.match_type}) | کوئری: «{short_query}»"
+        )
+    return (
+        f"🐞 دیباگ کتاب | ❌ چیزی یافت نشد (matched=false) | "
+        f"کوئری: «{short_query}» | URL: {api_url}"
+    )
+
+
+def looks_like_textbook_page_query(text: str) -> bool:
+    """True when the user message likely refers to a specific textbook page/lesson."""
+    if not text.strip():
+        return False
+    has_page = bool(_TEXTBOOK_PAGE_MARKER_RE.search(text))
+    has_lesson = _textbook_has_lesson(text)
+    has_grade = bool(_TEXTBOOK_GRADE_QUERY_RE.search(text))
+    has_subject = any(kw in text for kw in _TEXTBOOK_SUBJECT_KEYWORDS)
+    if has_lesson:
+        return True
+    return has_page and (has_grade or has_subject)
+
+
+# Words that signal the child is talking about their schoolbook / homework
+# exercise but may not yet have given enough detail (grade + book + page) to
+# run a lookup. Used to ask for the missing info instead of guessing.
+_TEXTBOOK_HELP_MARKERS: tuple[str, ...] = (
+    "کتاب",
+    "تمرین",
+    "صفحه",
+    "درس",
+    "فصل",
+    "مسئله",
+    "مسأله",
+    "سوال",
+    "سؤال",
+    "تکلیف",
+)
+
+
+def looks_like_textbook_help_request(text: str) -> bool:
+    """True when the child references their schoolbook/homework in some way."""
+    if not text.strip():
+        return False
+    return any(marker in text for marker in _TEXTBOOK_HELP_MARKERS)
+
+
 async def clear_status_message(
     __event_emitter__: Callable[[dict[str, Any]], Awaitable[None]] | None,
 ) -> None:
@@ -276,6 +448,186 @@ def _get_latest_user_message(messages: list[ChatMessage]) -> str:
     for message in reversed(messages):
         if message.role == "user" and message.content.strip():
             return message.content.strip()
+    return ""
+
+
+def _textbook_has_page(text: str) -> bool:
+    return bool(_TEXTBOOK_PAGE_MARKER_RE.search(text))
+
+
+def _textbook_has_lesson(text: str) -> bool:
+    return bool(_TEXTBOOK_LESSON_RE.search(text))
+
+
+def _textbook_has_page_reference(text: str) -> bool:
+    """A resolvable page reference: «صفحه ۸» or «صفحه بیست و یکم» (not a bare «صفحه»)."""
+    if _extract_page_number(text) is not None:
+        return True
+    match = _TEXTBOOK_PAGE_WORD_AFTER_RE.search(text)
+    if match and match.group(1) in _TEXTBOOK_PAGE_NUMBER_WORDS:
+        return True
+    return False
+
+
+def _textbook_has_anchor(text: str) -> bool:
+    """A concrete reference the service can resolve: a numbered page or a lesson."""
+    return _textbook_has_page_reference(text) or _textbook_has_lesson(text)
+
+
+def _textbook_has_grade(text: str) -> bool:
+    return bool(_TEXTBOOK_GRADE_TOKEN_RE.search(text))
+
+
+def _textbook_has_subject(text: str) -> bool:
+    return any(kw in text for kw in _TEXTBOOK_SUBJECT_KEYWORDS)
+
+
+def _extract_grade_token(text: str) -> str | None:
+    # Avoid confusing «سوم/چهارم/...» that appears as an exercise number
+    # (e.g. «تمرین سوم») with the student's grade (e.g. «پایه ششم»).
+    exercise_context = any(
+        kw in text
+        for kw in (
+            "تمرین",
+            "سوال",
+            "سوالات",
+            "شماره",
+            "مسئله",
+            "آزمایش",
+            "صفحه تمرین",
+        )
+    )
+    has_grade_keyword = any(kw in text for kw in ("پایه", "کلاس", "دبستان"))
+
+    if exercise_context and not has_grade_keyword:
+        return None
+
+    match = _TEXTBOOK_GRADE_TOKEN_RE.search(text)
+    return match.group(0).strip() if match else None
+
+
+def _extract_subject_token(text: str) -> str | None:
+    for keyword in _TEXTBOOK_SUBJECT_TOKENS:
+        if keyword in text:
+            return keyword
+    return None
+
+
+def _extract_page_number(text: str) -> int | None:
+    match = _TEXTBOOK_PAGE_NUMBER_RE.search(text)
+    if not match:
+        return None
+    try:
+        return int(match.group(1).translate(_PERSIAN_DIGIT_MAP))
+    except ValueError:
+        return None
+
+
+def _relative_page_delta(text: str) -> int:
+    """+1 for «صفحه بعد/بعدش»، -1 for «صفحه قبل/قبلش»، 0 otherwise."""
+    if _TEXTBOOK_NEXT_PAGE_RE.search(text):
+        return 1
+    if _TEXTBOOK_PREV_PAGE_RE.search(text):
+        return -1
+    return 0
+
+
+def _resolve_relative_page(recent_user_texts: list[str]) -> int | None:
+    """Resolve «صفحه بعد/قبل» into a concrete page from earlier explicit pages.
+
+    Walks the recent user turns, tracking the last explicit page number and
+    applying +/-1 for each relative reference, so «صفحه ۷۸» → «بعدش» → «بعدش»
+    correctly resolves to 80. Returns None when the latest turn is not a
+    relative reference or no base page is known.
+    """
+    if not recent_user_texts:
+        return None
+    latest = recent_user_texts[-1]
+    if _relative_page_delta(latest) == 0 or _extract_page_number(latest) is not None:
+        return None
+    current: int | None = None
+    for text in recent_user_texts:
+        explicit = _extract_page_number(text)
+        if explicit is not None:
+            current = explicit
+            continue
+        delta = _relative_page_delta(text)
+        if delta and current is not None:
+            current += delta
+    if current is None or current < 1:
+        return None
+    return current
+
+
+def build_textbook_query(messages: list[ChatMessage], *, window: int = 8) -> str:
+    """
+    Build a focused textbook query, scoped to the current page conversation.
+
+    The query is anchored on the MOST RECENT user turn that references a page
+    (e.g. «صفحه ۸»). Only turns from that anchor onward are combined, so an
+    earlier request about a different page/book never leaks into the current one.
+    Grade and subject mentioned before the anchor are carried forward as clean
+    tokens (without dragging their old page number along).
+
+    Returns "" when the recent conversation has no textbook reference at all, so
+    the caller can skip querying the service on plain chit-chat.
+    """
+    user_texts = [
+        message.content.strip()
+        for message in messages
+        if message.role == "user" and message.content.strip()
+    ]
+    if not user_texts:
+        return ""
+    recent = user_texts[-window:]
+
+    # Relative page reference («صفحه بعد»، «بعدش»، «صفحه قبل») → concrete page.
+    relative_page = _resolve_relative_page(recent)
+    if relative_page is not None:
+        query = f"صفحه {relative_page}"
+        subject_token = None
+        grade_token = None
+        for prev in reversed(recent):
+            if subject_token is None:
+                subject_token = _extract_subject_token(prev)
+            if grade_token is None:
+                grade_token = _extract_grade_token(prev)
+            if subject_token and grade_token:
+                break
+        if subject_token:
+            query = f"{query} {subject_token}"
+        if grade_token:
+            query = f"{query} {grade_token}"
+        return query.strip()
+
+    anchor_idx: int | None = None
+    for idx in range(len(recent) - 1, -1, -1):
+        if _textbook_has_anchor(recent[idx]):
+            anchor_idx = idx
+            break
+
+    if anchor_idx is not None:
+        parts = list(recent[anchor_idx:])
+        earlier = recent[:anchor_idx]
+        query = " ".join(parts)
+        if not any(_textbook_has_subject(p) for p in parts):
+            for prev in reversed(earlier):
+                token = _extract_subject_token(prev)
+                if token:
+                    query = f"{query} {token}"
+                    break
+        # Add grade AFTER subject to avoid polluting page-number parsing.
+        # The server extracts the page number from the text following «صفحه»
+        # until it hits keywords like «ریاضی/فارسی/...»، so we want «ششم» (grade)
+        # to appear after the subject keyword.
+        if not any(_textbook_has_grade(p) for p in parts):
+            for prev in reversed(earlier):
+                token = _extract_grade_token(prev)
+                if token:
+                    query = f"{query} {token}"
+                    break
+        return query.strip()
+
     return ""
 
 
@@ -365,18 +717,25 @@ async def fetch_textbook_context(
         "include_image": include_image,
     }
 
-    def _retrieve() -> dict[str, Any] | None:
+    def _retrieve() -> tuple[dict[str, Any] | None, str | None]:
         try:
-            return _http_post_json(
+            result = _http_post_json(
                 f"{base}/v1/retrieve",
                 payload,
                 headers=headers,
                 timeout_sec=timeout_sec,
             )
-        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError):
-            return None
+            return result, None
+        except urllib.error.HTTPError as exc:
+            return None, f"HTTP {exc.code} از {base}"
+        except urllib.error.URLError as exc:
+            return None, f"اتصال ناموفق به {base}: {exc.reason}"
+        except (json.JSONDecodeError, TimeoutError, ValueError) as exc:
+            return None, f"{type(exc).__name__}: {exc}"
 
-    data = await asyncio.to_thread(_retrieve)
+    data, error = await asyncio.to_thread(_retrieve)
+    if error is not None:
+        return TextbookContext(matched=False, error=error)
     if not data or not data.get("matched"):
         return TextbookContext(matched=False)
 
@@ -390,6 +749,7 @@ async def fetch_textbook_context(
         context_text=str(data["context_text"]) if data.get("context_text") else None,
         needs_image=bool(data.get("needs_image")),
         image_base64=str(data["image_base64"]) if data.get("image_base64") else None,
+        text_usable=bool(data.get("text_usable", True)),
     )
 
     if context.needs_image and not context.image_base64:
@@ -435,10 +795,20 @@ def build_system_prompt(
         if textbook_context.page:
             meta_parts.append(f"صفحه {textbook_context.page}")
         meta = " — ".join(meta_parts)
-        header = TEXTBOOK_CONTEXT_HEADER
+        if textbook_context.text_usable:
+            instruction = TEXTBOOK_CONTEXT_INSTRUCTION
+        elif textbook_context.image_base64:
+            instruction = TEXTBOOK_IMAGE_ONLY_INSTRUCTION
+        else:
+            instruction = TEXTBOOK_UNREADABLE_INSTRUCTION
+        header = f"{instruction}\n\n{TEXTBOOK_CONTEXT_HEADER}"
         if meta:
             header = f"{header}\n({meta})"
         sections.append(f"{header}\n{textbook_context.context_text}")
+    elif textbook_context and textbook_context.page_query_failed:
+        sections.append(TEXTBOOK_LOOKUP_FAILED_INSTRUCTION)
+    elif textbook_context and textbook_context.need_info:
+        sections.append(TEXTBOOK_NEED_INFO_INSTRUCTION)
 
     if revision_reasons:
         reasons_text = "\n".join(f"- {reason}" for reason in revision_reasons)
@@ -457,22 +827,23 @@ def _attach_textbook_image_to_messages(
         return messages
 
     data_uri = f"data:image/png;base64,{textbook_context.image_base64}"
-    image_note = "تصویر صفحهٔ کتاب درسی پیوست شده — اگر تمرین شکل یا جدول دارد از تصویر هم استفاده کن."
+    image_note = (
+        "[ضمیمهٔ مرجع سیستمی]\n"
+        "این تصویر را سیستم از پایگاه کتاب درسی بازیابی کرده است (کاربر آن را نفرستاده است).\n"
+        "این تصویر فقط مرجعِ صفحهٔ کتاب است؛ اگر لازم بود از آن برای خواندن متن/شکل/جدول استفاده کن."
+    )
 
     updated = list(messages)
-    for index in range(len(updated) - 1, -1, -1):
-        if updated[index].get("role") != "user":
-            continue
-        original = updated[index].get("content", "")
-        text_part = original if isinstance(original, str) else image_note
-        updated[index] = {
-            "role": "user",
+    updated.append(
+        {
+            # نقشِ system نشان می‌دهد که این پیام از طرف سیستم است
+            "role": "system",
             "content": [
-                {"type": "text", "text": f"{text_part}\n\n{image_note}"},
+                {"type": "text", "text": image_note},
                 {"type": "image_url", "image_url": {"url": data_uri}},
             ],
         }
-        break
+    )
     return updated
 
 
@@ -847,6 +1218,10 @@ class Pipe:
             default="auto",
             description='ارسال تصویر صفحه: never | auto | always',
         )
+        TEXTBOOK_DEBUG: bool = Field(
+            default=False,
+            description="نمایش اطلاعات دیباگ بازیابی کتاب در نوار وضعیت (برای عیب‌یابی).",
+        )
 
     class UserValves(BaseModel):
         """
@@ -1013,26 +1388,55 @@ class Pipe:
 
         textbook_context: TextbookContext | None = None
         user_message = _get_latest_user_message(conversation_messages)
-        if (
+        textbook_query = build_textbook_query(conversation_messages)
+        # Textbook knowledge base is available ONLY for teacher/homework personas.
+        should_fetch_textbook = bool(
             self.valves.ENABLE_TEXTBOOK_CONTEXT
-            and persona in TEXTBOOK_PERSONAS
-            and user_message
+            and textbook_query
             and self.valves.TEXTBOOK_API_URL.strip()
-        ):
+            and persona in TEXTBOOK_PERSONAS
+        )
+        if should_fetch_textbook:
             if on_status:
                 await on_status(status_fetching_textbook())
             include_image = self.valves.TEXTBOOK_INCLUDE_IMAGE.strip().lower()
             if include_image not in {"never", "auto", "always"}:
                 include_image = "auto"
             textbook_context = await fetch_textbook_context(
-                user_message,
+                textbook_query,
                 api_url=self.valves.TEXTBOOK_API_URL,
                 api_key=self.valves.TEXTBOOK_API_KEY or None,
                 include_neighbors=self.valves.TEXTBOOK_NEIGHBOR_PAGES,
                 include_image=include_image,  # type: ignore[arg-type]
                 timeout_sec=self.valves.TEXTBOOK_REQUEST_TIMEOUT_SEC,
             )
+            if self.valves.TEXTBOOK_DEBUG and on_status and textbook_context:
+                await on_status(
+                    _format_textbook_debug(
+                        query=textbook_query,
+                        api_url=self.valves.TEXTBOOK_API_URL,
+                        context=textbook_context,
+                    )
+                )
+                await asyncio.sleep(1.2)
+            if textbook_context and not textbook_context.matched:
+                if looks_like_textbook_page_query(textbook_query):
+                    textbook_context.page_query_failed = True
+                else:
+                    textbook_context.need_info = True
+                if on_status and not self.valves.TEXTBOOK_DEBUG:
+                    await on_status(status_textbook_unavailable())
+        elif (
+            self.valves.ENABLE_TEXTBOOK_CONTEXT
+            and persona in TEXTBOOK_PERSONAS
+            and looks_like_textbook_help_request(user_message)
+        ):
+            # Child is clearly asking about their schoolbook/homework but has not
+            # yet given enough detail (grade + book + page) to run a lookup.
+            # Ask for the missing info instead of guessing or claiming no access.
+            textbook_context = TextbookContext(need_info=True)
 
+        # Persona is already teacher/homework here (gate above); no switch needed.
         return await run_response_loop(
             llm_client,
             backend_model=backend_model,
