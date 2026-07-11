@@ -1131,13 +1131,15 @@ async def run_response_loop(
     temperature: float | None = None,
     on_status: Callable[[str], Awaitable[None]] | None = None,
     textbook_context: TextbookContext | None = None,
+    enable_reflection: bool = True,
 ) -> str:
     revision_reasons: list[str] = []
     user_message = _get_latest_user_message(conversation_messages)
+    max_attempts = MAX_GENERATION_ATTEMPTS if enable_reflection else 1
 
-    for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
+    for attempt in range(1, max_attempts + 1):
         if on_status:
-            await on_status(status_generating_response(attempt, MAX_GENERATION_ATTEMPTS))
+            await on_status(status_generating_response(attempt, max_attempts))
 
         candidate = await generate_response(
             llm_client,
@@ -1148,6 +1150,9 @@ async def run_response_loop(
             temperature=temperature,
             textbook_context=textbook_context,
         )
+
+        if not enable_reflection:
+            return candidate
 
         if on_status:
             await on_status(status_reviewing_response())
@@ -1192,6 +1197,10 @@ class Pipe:
         ENABLE_STATUS_UPDATES: bool = Field(
             default=True,
             description="نمایش وضعیت پردازش در رابط کاربری.",
+        )
+        ENABLE_REFLECTION: bool = Field(
+            default=True,
+            description="فعال‌سازی ایجنت بازبینی کیفیت پاسخ (Reflection). اگر خاموش باشد، پاسخ بدون بازبینی ارسال می‌شود.",
         )
         ENABLE_TEXTBOOK_CONTEXT: bool = Field(
             default=True,
@@ -1448,4 +1457,5 @@ class Pipe:
             temperature=self.valves.TEMPERATURE,
             on_status=on_status,
             textbook_context=textbook_context,
+            enable_reflection=self.valves.ENABLE_REFLECTION,
         )
