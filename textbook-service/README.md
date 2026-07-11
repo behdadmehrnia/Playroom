@@ -15,13 +15,27 @@ pip install -r requirements.txt
 
 1. فایل‌های PDF را در `data/pdfs/` قرار دهید.
 2. `data/catalog.json` را با نام فایل‌ها و `page_offset` هر کتاب تنظیم کنید.
-3. ایندکس را بسازید:
+3. وابستگی‌های ایندکس (شامل [MinerU](https://github.com/opendatalab/mineru)) را نصب کنید — جدا از ایمیج runtime API است:
+
+```bash
+pip install -r requirements-indexer.txt
+# اگر HuggingFace در دسترس نیست:
+export MINERU_MODEL_SOURCE=modelscope
+```
+
+4. ایندکس را بسازید (پیش‌فرض: MinerU با `pipeline` + `lang=arabic` برای فارسی):
 
 ```bash
 python indexer/build_index.py
 # یا با مسیر سفارشی:
 python indexer/build_index.py --pdf-dir /path/to/pdfs
+# اجبار به اجرای دوبارهٔ MinerU (بدون cache):
+python indexer/build_index.py --mineru-force
+# فقط اگر MinerU نصب نیست:
+python indexer/build_index.py --ocr-engine tesseract
 ```
+
+خروجی خام MinerU در `data/mineru/` کش می‌شود تا ایندکس‌های بعدی سریع‌تر ساخته شوند.
 
 ## اجرای API
 

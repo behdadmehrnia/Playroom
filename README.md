@@ -91,9 +91,10 @@ Chat Controls → Valves → **شخصیت یار کودک**
 برای پرسوناهای **معلم** و **کمک‌درسی**، Pipe از API جداگانهٔ `textbook-service` کانتکست صفحهٔ کتاب را می‌گیرد.
 
 1. PDFها را در `textbook-service/data/pdfs/` بگذارید و `catalog.json` را تنظیم کنید.
-2. ایندکس بسازید: `python textbook-service/indexer/build_index.py`
-3. API را اجرا کنید: `cd textbook-service && docker compose up` یا `uvicorn app.main:app --port 8080`
-4. در Valves پایپ: `TEXTBOOK_API_URL=http://localhost:8080`
+2. وابستگی ایندکس را نصب کنید: `pip install -r textbook-service/requirements-indexer.txt` (شامل MinerU).
+3. ایندکس بسازید: `python textbook-service/indexer/build_index.py` (پیش‌فرض: MinerU؛ کش در `data/mineru/`).
+4. API را اجرا کنید: `cd textbook-service && docker compose up` یا `uvicorn app.main:app --port 8080`
+5. در Valves پایپ: `TEXTBOOK_API_URL=http://localhost:8080`
 
 جزئیات: [textbook-service/README.md](textbook-service/README.md)
 
