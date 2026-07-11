@@ -41,47 +41,51 @@ TEXTBOOK_CONTEXT_INSTRUCTION = (
     "مهم: متن واقعی صفحهٔ کتاب درسی در ادامه آمده است. "
     "فقط و فقط از همین متن برای کمک به کودک استفاده کن. "
     "چیزی از خودت به متن اضافه نکن و محتوای صفحه را حدس نزن. "
-    "**همین حالا همین صفحه را در اختیار داری؛ پس دیگر از کودک نپرس «کدام کتاب/پایه/صفحه؟» "
-    "و منتظر تأیید نمان.** مستقیم و مهربان با محتوای همین صفحه کمکش را شروع کن "
-    "(مثلاً بگو در این صفحه چه چیزی هست و از کجا شروع کنیم). "
-    "اگر تصویر مرجع کتاب درسی هم ضمیمه شد، بدان آن تصویر را «سیستم» از پایگاه کتاب اضافه کرده "
-    "و کاربر آن را نفرستاده است؛ پس هرگز نگو «تصویری که فرستادی» مگر اینکه واقعاً در تاریخچهٔ کاربر تصویر آمده باشد."
+    "**همین حالا همین صفحه را در اختیار داری.** "
+    "مستقیم و مهربان با محتوای همین صفحه کمک را شروع کن "
+    "(مثلاً بگو در این صفحه چه تمرینی هست و از کجا شروع کنیم). "
+    "ممنوع: پرسیدن دوبارهٔ پایه/کتاب/صفحه؛ گفتن «صبر کن صفحه را باز کنم»؛ "
+    "نوشتن پرانتز یا توضیح دربارهٔ سیستم/پرامپت/کانتکست؛ "
+    "وانمود کردن که هنوز صفحه نرسیده. "
+    "اگر تصویر صفحه هم ضمیمه شد، آن را «صفحهٔ کتاب» بنام — نه تصویر ارسالی کودک "
+    "(مگر واقعاً در تاریخچهٔ کاربر تصویر آمده باشد)."
 )
 TEXTBOOK_IMAGE_ONLY_INSTRUCTION = (
     "مهم: متن این صفحه از فایل کتاب به‌درستی استخراج نشد و متنِ زیر ناخواناست، "
     "اما تصویر صفحه پیوست شده است. "
     "فقط و فقط محتوای صفحه را از روی «تصویر پیوست‌شده» بخوان و به کودک کمک کن. "
     "به متن ناخوانای زیر استناد نکن و محتوای صفحه را از خودت حدس نزن. "
-    "این تصویر، ضمیمهٔ مرجعِ سیستمی از پایگاه کتاب است و تصویر ارسالیِ کاربر نیست؛ "
-    "پس هرگز نگو «تصویری که فرستادی» مگر اینکه واقعاً کاربر تصویری فرستاده باشد."
+    "این تصویر، ضمیمهٔ مرجع از پایگاه کتاب است و تصویر ارسالیِ کاربر نیست؛ "
+    "پس هرگز نگو «تصویری که فرستادی» مگر اینکه واقعاً کاربر تصویری فرستاده باشد. "
+    "دربارهٔ سیستم یا فرستادن تصویر حرف نزن؛ مستقیم از روی صفحه کمک کن."
 )
 TEXTBOOK_UNREADABLE_INSTRUCTION = (
     "توجه مهم: صفحهٔ درخواستی پیدا شد، اما متن آن از فایل کتاب ناخوانا استخراج شد "
     "و تصویری هم برای نمایش در دسترس نیست. "
     "به‌هیچ‌وجه محتوای صفحه، شعر، متن یا تمرین را از خودت نساز و حدس نزن. "
     "صادقانه و مهربان به کودک بگو الان نتوانستی متن این صفحه را درست بخوانی، "
-    "و از او بخواه بخشی از متن یا سوالش را خودش بنویسد تا با هم کار کنید."
+    "و از او بخواه بخشی از متن یا سوالش را خودش بنویسد تا با هم کار کنید. "
+    "دربارهٔ سیستم یا پرامپت حرف نزن."
 )
 TEXTBOOK_LOOKUP_FAILED_INSTRUCTION = (
-    "توجه مهم: کودک به صفحه/درسی از کتاب اشاره کرده، اما هنوز اطلاعات کافی برای باز کردن "
-    "دقیق آن نداری (یا آن صفحه پیدا نشد). "
-    "به‌هیچ‌وجه محتوای آن صفحه/درس، شعر، متن یا تمرین را از خودت نساز و حدس نزن "
+    "توجه مهم: کودک صفحه/درس مشخصی خواسته، اما متن آن صفحه الان در پرامپت نیست "
+    "(پیدا نشد یا سرویس در دسترس نبود). "
+    "به‌هیچ‌وجه محتوای آن صفحه/درس را از خودت نساز و حدس نزن "
     "(حتی نام یا موضوع درس را هم از خودت نگو). "
-    "**هرگز نگو «به کتابت دسترسی ندارم» یا «نمی‌توانم کتاب/عکس را ببینم».** "
-    "به‌جایش مثبت و مهربان همان چند اطلاعاتی را که برای باز کردن صفحه لازم داری بپرس: "
-    "۱) شمارهٔ صفحه چند است؟ ۲) کلاس چندمی (پایه)؟ ۳) کدام کتاب یا درس (مثلاً ریاضی، فارسی)؟ "
-    "به کودک اطمینان بده که وقتی این‌ها را بگوید، همان صفحهٔ کتاب را برایش باز می‌کنی. "
+    "**هرگز نگو «به کتابت دسترسی ندارم» و هرگز دربارهٔ سیستم/پرامپت/صبر برای باز شدن صفحه حرف نزن.** "
+    "اگر پایه و کتاب و شمارهٔ صفحه را قبلاً گفته: مهربان بگو الان نتوانستی همان صفحه را پیدا کنی "
+    "و بخواه یک خط از تمرین یا صورت سوال را خودش بنویسد. "
+    "اگر یکی از این سه تا را نگفته: فقط همان موردِ گم‌شده را بپرس "
+    "(صفحه؟ پایه؟ کدام کتاب؟). "
     "هرگز وانمود نکن که متن یا تصویری را می‌بینی که نداری."
 )
 TEXTBOOK_NEED_INFO_INSTRUCTION = (
     "توجه: کودک دربارهٔ تمرین/درس/صفحهٔ کتاب صحبت می‌کند، اما هنوز اطلاعات کافی برای "
-    "باز کردن دقیق صفحه نداری. "
-    "**هرگز نگو «به کتابت دسترسی ندارم» یا «نمی‌توانم کتاب/عکس را ببینم».** "
-    "برعکس، مثبت و مهربان به کودک بگو می‌توانی صفحهٔ کتابش را باز کنی و کمکش کنی، "
-    "فقط کافی است چند چیز را بدانی. سپس کوتاه فقط مواردی را که از گفت‌وگو هنوز "
-    "نمی‌دانی از او بپرس: ۱) شمارهٔ صفحه چند است؟ ۲) کلاس چندمی (پایه)؟ "
-    "۳) کدام کتاب یا درس (مثلاً ریاضی، فارسی)؟ "
-    "محتوای صفحه، تمرین یا سوال را از خودت نساز و حدس نزن؛ فقط اطلاعات لازم را بپرس."
+    "پیدا کردن دقیق صفحه نداری. "
+    "**هرگز نگو «به کتابت دسترسی ندارم» و دربارهٔ سیستم حرف نزن.** "
+    "مهربان و کوتاه فقط مواردی را که هنوز نمی‌دانی بپرس: "
+    "۱) شمارهٔ صفحه؟ ۲) کلاس چندم؟ ۳) کدام کتاب/درس؟ "
+    "محتوای صفحه را از خودت نساز؛ فقط اطلاعات لازم را بپرس."
 )
 DEFAULT_TEXTBOOK_TIMEOUT_SEC = 5.0
 
@@ -319,12 +323,40 @@ def status_reviewing_response() -> str:
     return "🔍 یه لحظه! دارم چک می‌کنم همه‌چیز عالی باشه..."
 
 
+def status_reflection_disabled() -> str:
+    return "⚡ بازبینی پاسخ خاموش است — مستقیم جواب می‌دم..."
+
+
 def status_fetching_textbook() -> str:
     return "📖 دارم صفحهٔ کتاب درسی رو پیدا می‌کنم..."
 
 
 def status_textbook_unavailable() -> str:
     return "⚠️ نتونستم به سرویس کتاب درسی وصل بشم..."
+
+
+def coerce_bool(value: Any, *, default: bool = True) -> bool:
+    """Robust bool coercion for OpenWebUI valves (bool / 0-1 / 'true'|'false')."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on", "بله"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "خیر", ""}:
+            return False
+    return default
+
+
+def read_valve_bool(valves: Any, name: str, *, default: bool = True) -> bool:
+    """Read a boolean valve whether valves is a Pydantic model or a plain dict."""
+    if valves is None:
+        return default
+    if isinstance(valves, dict):
+        return coerce_bool(valves.get(name, default), default=default)
+    return coerce_bool(getattr(valves, name, default), default=default)
 
 
 def _format_textbook_debug(*, query: str, api_url: str, context: TextbookContext) -> str:
@@ -1100,10 +1132,34 @@ async def reflect_on_response(
     backend_model: str,
     user_message: str,
     candidate_response: str,
+    textbook_context: TextbookContext | None = None,
 ) -> ReflectionResult:
+    textbook_note = ""
+    if textbook_context and textbook_context.matched:
+        meta_bits: list[str] = []
+        if textbook_context.subject_title:
+            meta_bits.append(textbook_context.subject_title)
+        if textbook_context.grade:
+            meta_bits.append(f"پایه {textbook_context.grade}")
+        if textbook_context.page:
+            meta_bits.append(f"صفحه {textbook_context.page}")
+        meta = "، ".join(meta_bits) if meta_bits else "صفحهٔ کتاب"
+        textbook_note = (
+            f"\n\nتوجه بازبین: سیستم متن/تصویر واقعیِ {meta} را به نویسنده داده است. "
+            "اگر پاسخ بر اساس همان صفحه صحبت می‌کند، آن را توهم حساب نکن و PASS بده "
+            "(مگر اینکه ناامن یا نامناسب باشد)."
+        )
+    elif textbook_context and (
+        textbook_context.page_query_failed or textbook_context.need_info
+    ):
+        textbook_note = (
+            "\n\nتوجه بازبین: نویسنده متن صفحه را نداشته؛ اگر محتوای دقیق صفحه را ساخته، REVISE."
+        )
+
     review_prompt = (
         f"پیام کودک:\n{user_message}\n\n"
-        f"پاسخ پیشنهادی:\n{candidate_response}\n\n"
+        f"پاسخ پیشنهادی:\n{candidate_response}"
+        f"{textbook_note}\n\n"
         "فقط JSON خروجی بده."
     )
     request = LLMCompletionRequest(
@@ -1135,11 +1191,24 @@ async def run_response_loop(
 ) -> str:
     revision_reasons: list[str] = []
     user_message = _get_latest_user_message(conversation_messages)
-    max_attempts = MAX_GENERATION_ATTEMPTS if enable_reflection else 1
-
-    for attempt in range(1, max_attempts + 1):
+    # When reflection is off, generate once and return — never SAFE_FALLBACK.
+    if not enable_reflection:
         if on_status:
-            await on_status(status_generating_response(attempt, max_attempts))
+            await on_status(status_reflection_disabled())
+            await on_status(status_generating_response(1, 1))
+        return await generate_response(
+            llm_client,
+            backend_model=backend_model,
+            persona=persona,
+            conversation_messages=conversation_messages,
+            revision_reasons=None,
+            temperature=temperature,
+            textbook_context=textbook_context,
+        )
+
+    for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
+        if on_status:
+            await on_status(status_generating_response(attempt, MAX_GENERATION_ATTEMPTS))
 
         candidate = await generate_response(
             llm_client,
@@ -1151,9 +1220,6 @@ async def run_response_loop(
             textbook_context=textbook_context,
         )
 
-        if not enable_reflection:
-            return candidate
-
         if on_status:
             await on_status(status_reviewing_response())
 
@@ -1162,6 +1228,7 @@ async def run_response_loop(
             backend_model=backend_model,
             user_message=user_message,
             candidate_response=candidate,
+            textbook_context=textbook_context,
         )
 
         if reflection.status == "PASS":
@@ -1200,7 +1267,12 @@ class Pipe:
         )
         ENABLE_REFLECTION: bool = Field(
             default=True,
-            description="فعال‌سازی ایجنت بازبینی کیفیت پاسخ (Reflection). اگر خاموش باشد، پاسخ بدون بازبینی ارسال می‌شود.",
+            title="ایجنت بازبینی پاسخ",
+            description=(
+                "اگر روشن باشد، پاسخ قبل از ارسال توسط ایجنت Reflection بررسی می‌شود. "
+                "اگر خاموش باشد، پاسخ بلافاصله بدون بازبینی ارسال می‌شود "
+                "(پیام وضعیت: «بازبینی پاسخ خاموش است»)."
+            ),
         )
         ENABLE_TEXTBOOK_CONTEXT: bool = Field(
             default=True,
@@ -1449,6 +1521,9 @@ class Pipe:
             textbook_context = TextbookContext(need_info=True)
 
         # Persona is already teacher/homework here (gate above); no switch needed.
+        enable_reflection = read_valve_bool(
+            self.valves, "ENABLE_REFLECTION", default=True
+        )
         return await run_response_loop(
             llm_client,
             backend_model=backend_model,
@@ -1457,5 +1532,5 @@ class Pipe:
             temperature=self.valves.TEMPERATURE,
             on_status=on_status,
             textbook_context=textbook_context,
-            enable_reflection=self.valves.ENABLE_REFLECTION,
+            enable_reflection=enable_reflection,
         )
