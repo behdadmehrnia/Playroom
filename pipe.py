@@ -542,10 +542,31 @@ def _extract_grade_token(text: str) -> str | None:
 
 
 def _extract_subject_token(text: str) -> str | None:
+    """Pick the subject the user most likely means right now.
+
+    When several subjects appear (e.g. «ریاضی تموم شد بریم سراغ فارسی صفحه ۴۱»),
+    prefer the one closest to the page marker; otherwise the last mentioned.
+    """
+    hits: list[tuple[int, str]] = []
     for keyword in _TEXTBOOK_SUBJECT_TOKENS:
-        if keyword in text:
-            return keyword
-    return None
+        start = 0
+        while True:
+            idx = text.find(keyword, start)
+            if idx < 0:
+                break
+            hits.append((idx, keyword))
+            start = idx + len(keyword)
+    if not hits:
+        return None
+
+    page_match = _TEXTBOOK_PAGE_MARKER_RE.search(text)
+    if page_match:
+        page_pos = page_match.start()
+        hits.sort(key=lambda item: (abs(item[0] - page_pos), -item[0]))
+        return hits[0][1]
+
+    hits.sort(key=lambda item: item[0])
+    return hits[-1][1]
 
 
 def _extract_page_number(text: str) -> int | None:
@@ -556,6 +577,59 @@ def _extract_page_number(text: str) -> int | None:
         return int(match.group(1).translate(_PERSIAN_DIGIT_MAP))
     except ValueError:
         return None
+
+
+def _extract_page_word_phrase(text: str) -> str | None:
+    """Return Persian number-word phrase after «صفحه» when digits are absent."""
+    if _extract_page_number(text) is not None:
+        return None
+    match = _TEXTBOOK_PAGE_WORD_AFTER_RE.search(text)
+    if not match:
+        return None
+    first = match.group(1)
+    if first not in _TEXTBOOK_PAGE_NUMBER_WORDS:
+        return None
+    # Keep a short trailing phrase of number words (e.g. «بیست و یکم»).
+    tail = text[match.start(1) :]
+    tokens = re.split(r"\s+", tail.strip())
+    kept: list[str] = []
+    for token in tokens[:4]:
+        cleaned = token.strip("،,.!?؟")
+        if cleaned in _TEXTBOOK_PAGE_NUMBER_WORDS or cleaned == "و":
+            kept.append(cleaned)
+        else:
+            break
+    return " ".join(kept) if kept else None
+
+
+def _extract_lesson_phrase(text: str) -> str | None:
+    match = _TEXTBOOK_LESSON_RE.search(text)
+    return match.group(0).strip() if match else None
+
+
+def _compose_textbook_query(
+    *,
+    page: int | None = None,
+    page_words: str | None = None,
+    lesson_phrase: str | None = None,
+    subject: str | None = None,
+    grade: str | None = None,
+) -> str:
+    """Build a minimal query so old subjects in chat prose cannot leak in."""
+    parts: list[str] = []
+    if page is not None:
+        parts.append(f"صفحه {page}")
+    elif page_words:
+        parts.append(f"صفحه {page_words}")
+    elif lesson_phrase:
+        parts.append(lesson_phrase)
+    else:
+        return ""
+    if subject:
+        parts.append(subject)
+    if grade:
+        parts.append(grade)
+    return " ".join(parts)
 
 
 def _relative_page_delta(text: str) -> int:
@@ -599,13 +673,11 @@ def build_textbook_query(messages: list[ChatMessage], *, window: int = 8) -> str
     Build a focused textbook query, scoped to the current page conversation.
 
     The query is anchored on the MOST RECENT user turn that references a page
-    (e.g. «صفحه ۸»). Only turns from that anchor onward are combined, so an
-    earlier request about a different page/book never leaks into the current one.
-    Grade and subject mentioned before the anchor are carried forward as clean
-    tokens (without dragging their old page number along).
+    or lesson. Only clean tokens are emitted (صفحه N + subject + grade) so
+    conversational leftovers like «ریاضی تموم شد بریم سراغ فارسی» cannot make
+    the server pick the wrong book.
 
-    Returns "" when the recent conversation has no textbook reference at all, so
-    the caller can skip querying the service on plain chit-chat.
+    Returns "" when the recent conversation has no textbook reference at all.
     """
     user_texts = [
         message.content.strip()
@@ -616,24 +688,38 @@ def build_textbook_query(messages: list[ChatMessage], *, window: int = 8) -> str
         return ""
     recent = user_texts[-window:]
 
+    def _lookup_subject(from_idx: int) -> str | None:
+        # Prefer subject in/after the anchor turn; else carry from earlier turns.
+        for text in reversed(recent[from_idx:]):
+            token = _extract_subject_token(text)
+            if token:
+                return token
+        for text in reversed(recent[:from_idx]):
+            token = _extract_subject_token(text)
+            if token:
+                return token
+        return None
+
+    def _lookup_grade(from_idx: int) -> str | None:
+        for text in reversed(recent[from_idx:]):
+            token = _extract_grade_token(text)
+            if token:
+                return token
+        for text in reversed(recent[:from_idx]):
+            token = _extract_grade_token(text)
+            if token:
+                return token
+        return None
+
     # Relative page reference («صفحه بعد»، «بعدش»، «صفحه قبل») → concrete page.
     relative_page = _resolve_relative_page(recent)
     if relative_page is not None:
-        query = f"صفحه {relative_page}"
-        subject_token = None
-        grade_token = None
-        for prev in reversed(recent):
-            if subject_token is None:
-                subject_token = _extract_subject_token(prev)
-            if grade_token is None:
-                grade_token = _extract_grade_token(prev)
-            if subject_token and grade_token:
-                break
-        if subject_token:
-            query = f"{query} {subject_token}"
-        if grade_token:
-            query = f"{query} {grade_token}"
-        return query.strip()
+        anchor_idx = len(recent) - 1
+        return _compose_textbook_query(
+            page=relative_page,
+            subject=_lookup_subject(anchor_idx),
+            grade=_lookup_grade(anchor_idx),
+        )
 
     anchor_idx: int | None = None
     for idx in range(len(recent) - 1, -1, -1):
@@ -641,29 +727,21 @@ def build_textbook_query(messages: list[ChatMessage], *, window: int = 8) -> str
             anchor_idx = idx
             break
 
-    if anchor_idx is not None:
-        parts = list(recent[anchor_idx:])
-        earlier = recent[:anchor_idx]
-        query = " ".join(parts)
-        if not any(_textbook_has_subject(p) for p in parts):
-            for prev in reversed(earlier):
-                token = _extract_subject_token(prev)
-                if token:
-                    query = f"{query} {token}"
-                    break
-        # Add grade AFTER subject to avoid polluting page-number parsing.
-        # The server extracts the page number from the text following «صفحه»
-        # until it hits keywords like «ریاضی/فارسی/...»، so we want «ششم» (grade)
-        # to appear after the subject keyword.
-        if not any(_textbook_has_grade(p) for p in parts):
-            for prev in reversed(earlier):
-                token = _extract_grade_token(prev)
-                if token:
-                    query = f"{query} {token}"
-                    break
-        return query.strip()
+    if anchor_idx is None:
+        return ""
 
-    return ""
+    anchor = recent[anchor_idx]
+    page = _extract_page_number(anchor)
+    page_words = _extract_page_word_phrase(anchor) if page is None else None
+    lesson_phrase = _extract_lesson_phrase(anchor) if page is None and not page_words else None
+
+    return _compose_textbook_query(
+        page=page,
+        page_words=page_words,
+        lesson_phrase=lesson_phrase,
+        subject=_lookup_subject(anchor_idx),
+        grade=_lookup_grade(anchor_idx),
+    )
 
 
 def _normalize_persona(value: str | None) -> PersonaId | None:

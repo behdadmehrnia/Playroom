@@ -164,6 +164,53 @@ def _find_longest_match(text: str, lower: str, mapping: dict[str, str]) -> tuple
     return found_id, matched_alias
 
 
+def _find_subject_near_page(
+    text: str,
+    lower: str,
+    mapping: dict[str, str],
+) -> tuple[str | None, str | None]:
+    """
+    Resolve book subject when several may appear in one sentence.
+
+    Prefers the synonym closest to a page marker («صفحه …»); otherwise the
+    last synonym in the text — so «ریاضی تموم شد بریم سراغ فارسی صفحه ۴۱»
+    resolves to فارسی, not ریاضی.
+    """
+    hits: list[tuple[int, int, str, str]] = []  # start, length, canonical, alias
+    for synonym, canonical in mapping.items():
+        if not synonym:
+            continue
+        haystacks = ((text, synonym), (lower, synonym.lower()))
+        for haystack, needle in haystacks:
+            start = 0
+            while True:
+                idx = haystack.find(needle, start)
+                if idx < 0:
+                    break
+                hits.append((idx, len(needle), canonical, synonym))
+                start = idx + len(needle)
+    if not hits:
+        return None, None
+
+    # Deduplicate identical spans (same start from text/lower double scan).
+    unique: dict[tuple[int, int, str], tuple[int, int, str, str]] = {}
+    for hit in hits:
+        key = (hit[0], hit[1], hit[2])
+        unique[key] = hit
+    hits = list(unique.values())
+
+    page_match = re.search(r"(?:صفحه|صفحهٔ|ص\.?)", text, flags=re.IGNORECASE)
+    if page_match:
+        page_pos = page_match.start()
+        hits.sort(key=lambda item: (abs(item[0] - page_pos), -item[1], -item[0]))
+        best = hits[0]
+        return best[2], best[3]
+
+    hits.sort(key=lambda item: (item[0], item[1]))
+    best = hits[-1]
+    return best[2], best[3]
+
+
 def parse_persian_query(text: str) -> ParsedQuery:
     """
     Extract grade, book subject, optional topic, and page from a Persian query.
@@ -234,8 +281,8 @@ def parse_persian_query(text: str) -> ParsedQuery:
         if lesson_word_match:
             result.lesson = LESSON_ORDINAL_WORDS.get(lesson_word_match.group(1))
 
-    # 1) Book-level subject
-    book_subject, book_alias = _find_longest_match(text, lower, BOOK_SUBJECT_SYNONYMS)
+    # 1) Book-level subject (prefer subject nearest to «صفحه», else last mention)
+    book_subject, book_alias = _find_subject_near_page(text, lower, BOOK_SUBJECT_SYNONYMS)
 
     # 2) Topic → parent subject (only if no book subject, or topic is more specific)
     topic_subject, topic_alias = _find_longest_match(text, lower, TOPIC_ALIASES)
