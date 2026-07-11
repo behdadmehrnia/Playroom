@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 IncludeImageMode = Literal["never", "auto", "always"]
-MatchType = Literal["exact_page", "lesson", "topic_search", "none"]
+MatchType = Literal["exact_page", "lesson", "lesson_span", "topic_search", "none"]
 
 
 class RetrieveRequest(BaseModel):

@@ -89,15 +89,25 @@ PAGE_NUMBER_WORDS: dict[str, int] = {
 LESSON_ORDINAL_WORDS: dict[str, int] = {
     "اول": 1,
     "یکم": 1,
+    "یک": 1,
     "دوم": 2,
+    "دو": 2,
     "سوم": 3,
+    "سه": 3,
     "چهارم": 4,
+    "چهار": 4,
     "پنجم": 5,
+    "پنج": 5,
     "ششم": 6,
+    "شش": 6,
     "هفتم": 7,
+    "هفت": 7,
     "هشتم": 8,
+    "هشت": 8,
     "نهم": 9,
+    "نه": 9,
     "دهم": 10,
+    "ده": 10,
     "یازدهم": 11,
     "دوازدهم": 12,
     "سیزدهم": 13,
@@ -114,6 +124,12 @@ LESSON_ORDINAL_WORDS: dict[str, int] = {
     "بیست و دوم": 22,
 }
 
+_LESSON_ORDINAL_ALT = (
+    "اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش|"
+    "هفتم|هفت|هشتم|هشت|نهم|نه|دهم|ده|"
+    "یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم"
+)
+
 
 @dataclass
 class ParsedQuery:
@@ -123,6 +139,9 @@ class ParsedQuery:
     topic_alias: str | None = None
     page: int | None = None
     lesson: int | None = None
+    search_text: str | None = None
+    wants_topic_search: bool = False
+    wants_whole_lesson: bool = False
     confidence: float = 0.0
 
 
@@ -263,21 +282,32 @@ def parse_persian_query(text: str) -> ParsedQuery:
             if parsed_page is not None:
                 result.page = parsed_page
 
-    # Lesson / chapter (درس دوازدهم، فصل سوم، درس ۱۲)
+    # Lesson / chapter (درس دوازدهم، فصل سوم، درس ۱۲، ۳ فصل)
     lesson_match = re.search(
         r"(?:درس|فصل)\s*(\d{1,2})",
         normalized,
         flags=re.IGNORECASE,
     )
+    if not lesson_match:
+        lesson_match = re.search(
+            r"(?<!\d)(\d{1,2})\s*(?:درس|فصل)",
+            normalized,
+            flags=re.IGNORECASE,
+        )
     if lesson_match:
         result.lesson = int(lesson_match.group(1))
     else:
         lesson_word_match = re.search(
-            r"(?:درس|فصل)\s+(اول|یکم|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم|"
-            r"یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم)",
+            rf"(?:درس|فصل)\s+({_LESSON_ORDINAL_ALT})",
             text,
             flags=re.IGNORECASE,
         )
+        if not lesson_word_match:
+            lesson_word_match = re.search(
+                rf"({_LESSON_ORDINAL_ALT})\s*(?:درس|فصل)",
+                text,
+                flags=re.IGNORECASE,
+            )
         if lesson_word_match:
             result.lesson = LESSON_ORDINAL_WORDS.get(lesson_word_match.group(1))
 
@@ -303,13 +333,20 @@ def parse_persian_query(text: str) -> ParsedQuery:
     # Standalone grade ordinal fallback (e.g. "ششم" without پایه/کلاس).
     # Only applied when a subject or page is present, to avoid confusing
     # lesson ordinals ("درس سوم") with grade in generic chat.
-    if result.grade is None and (result.subject or result.page):
+    if result.grade is None and (result.subject or result.page or result.lesson):
         for word in ("ششم", "پنجم", "چهارم", "سوم"):
             # Skip when the ordinal is actually a lesson/chapter reference
-            # («درس ششم»)، not the student's grade.
-            if word in text and not re.search(rf"(?:درس|فصل)\s*{word}", text):
+            # («درس ششم» / «فصل سوم»)، not the student's grade.
+            if word in text and not re.search(
+                rf"(?:درس|فصل)\s*{word}|{word}\s*(?:درس|فصل)", text
+            ):
                 result.grade = GRADE_WORDS[word]
                 break
+
+    # Free-text topic / named-content search («میرزا کوچک خان»، «شعر ستایش»)
+    result.search_text = _extract_search_text(normalized, result)
+    result.wants_topic_search = _wants_topic_search(text, result)
+    result.wants_whole_lesson = _wants_whole_lesson(text)
 
     # Confidence
     score = 0.0
@@ -323,6 +360,130 @@ def parse_persian_query(text: str) -> ParsedQuery:
         score += 0.35
     elif result.lesson:
         score += 0.25
+    elif result.search_text:
+        score += 0.2
+    if result.wants_whole_lesson:
+        score = min(score + 0.1, 1.0)
     result.confidence = min(score, 1.0)
 
     return result
+
+
+_TOPIC_INTENT_MARKERS = (
+    "مربوط",
+    "کجای کتاب",
+    "کجاى کتاب",
+    "کجا در کتاب",
+    "درباره",
+    "معنی",
+    "شعر",
+    "داستان",
+    "متن",
+    "فعالیت",
+    "کار در کلاس",
+    "تمرین",
+)
+
+_WHOLE_LESSON_RE = re.compile(
+    r"(?:"
+    r"کل\s*درس|تمام\s*درس|همهٔ?\s*(?:ی\s*)?درس|کلّ?\s*درس|"
+    r"بقیهٔ?\s*(?:ی\s*)?درس|ادامهٔ?\s*(?:ی\s*)?درس|"
+    r"صفحه\s*های\s*(?:این\s+)?درس|کل\s*صفحه\s*های\s*درس|"
+    r"کلم(?:ه|ات)\s*(?:سخت\s*)?(?:ی\s*)?(?:داخل\s+|توی\s+|در\s+)?(?:کل\s+|تمام\s+)?درس|"
+    r"همهٔ?\s*(?:ی\s*)?صفحه\s*های\s*درس"
+    r")",
+    flags=re.IGNORECASE,
+)
+
+
+def _wants_whole_lesson(text: str) -> bool:
+    return bool(_WHOLE_LESSON_RE.search(text))
+
+
+def _wants_topic_search(text: str, parsed: ParsedQuery) -> bool:
+    if parsed.page or parsed.lesson:
+        return False
+    if parsed.topic:
+        return True
+    if any(marker in text for marker in _TOPIC_INTENT_MARKERS):
+        return True
+    # Named content with grade/subject but no page (e.g. «میرزا کوچک خان فارسی ششم»)
+    if parsed.search_text and (parsed.grade or parsed.subject):
+        # Ignore tiny leftover phrases like «شروع کنیم»
+        if len(parsed.search_text.split()) >= 2 or len(parsed.search_text) >= 6:
+            return True
+    return False
+
+
+def _extract_search_text(normalized: str, parsed: ParsedQuery) -> str | None:
+    """Strip structural tokens; keep distinctive content words for FTS."""
+    cleaned = normalized
+    # Remove page / lesson / grade / subject scaffolding.
+    cleaned = re.sub(
+        r"(?:صفحه|صفحهٔ|ص\.?)\s*\d{1,4}",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        rf"(?:درس|فصل)\s*(?:\d{{1,2}}|{_LESSON_ORDINAL_ALT})",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"(?:پایه|کلاس)\s*(?:\d|سوم|چهارم|پنجم|ششم|سه|چهار|پنج|شش)",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    drop_words = {
+        "کتاب",
+        "کجا",
+        "کجای",
+        "مربوط",
+        "به",
+        "درباره",
+        "درباره‌ی",
+        "برام",
+        "برایم",
+        "لطفا",
+        "لطفاً",
+        "میشه",
+        "می‌شه",
+        "میخوای",
+        "می‌خوای",
+        "میخوام",
+        "می‌خوام",
+        "حل",
+        "کنی",
+        "کنید",
+        "رو",
+        "را",
+        "از",
+        "در",
+        "با",
+        "که",
+        "این",
+        "اون",
+        "آن",
+        "های",
+        "ها",
+        "تموم",
+        "تمام",
+        "شد",
+        "بریم",
+        "سراغ",
+        "بعد",
+        "قبل",
+        *GRADE_WORDS.keys(),
+        *BOOK_SUBJECT_SYNONYMS.keys(),
+    }
+    tokens = [
+        t
+        for t in re.split(r"\s+", cleaned.strip())
+        if t and t not in drop_words and len(t) >= 2
+    ]
+    if not tokens:
+        return None
+    return " ".join(tokens[:8])

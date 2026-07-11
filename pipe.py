@@ -44,7 +44,11 @@ TEXTBOOK_CONTEXT_INSTRUCTION = (
     "**همین حالا همین صفحه را در اختیار داری.** "
     "مستقیم و مهربان با محتوای همین صفحه کمک را شروع کن "
     "(مثلاً بگو در این صفحه چه تمرینی هست و از کجا شروع کنیم). "
+    "اگر کودک خواست متن را بنویسی یا کلمات سخت را مشخص کنی، از همین متن استفاده کن. "
+    "اگر چند صفحه از یک درس آمده، برای «کل درس / بقیهٔ درس / کلمات سخت درس» از همهٔ صفحات استفاده کن "
+    "و از کودک نخواه صفحهٔ بعد را خودش باز کند. "
     "ممنوع: پرسیدن دوبارهٔ پایه/کتاب/صفحه؛ گفتن «صبر کن صفحه را باز کنم»؛ "
+    "خواستنِ «یک خط از صفحه را بنویس» وقتی متن صفحه را داری؛ "
     "نوشتن پرانتز یا توضیح دربارهٔ سیستم/پرامپت/کانتکست؛ "
     "وانمود کردن که هنوز صفحه نرسیده. "
     "اگر تصویر صفحه هم ضمیمه شد، آن را «صفحهٔ کتاب» بنام — نه تصویر ارسالی کودک "
@@ -57,7 +61,8 @@ TEXTBOOK_IMAGE_ONLY_INSTRUCTION = (
     "به متن ناخوانای زیر استناد نکن و محتوای صفحه را از خودت حدس نزن. "
     "این تصویر، ضمیمهٔ مرجع از پایگاه کتاب است و تصویر ارسالیِ کاربر نیست؛ "
     "پس هرگز نگو «تصویری که فرستادی» مگر اینکه واقعاً کاربر تصویری فرستاده باشد. "
-    "دربارهٔ سیستم یا فرستادن تصویر حرف نزن؛ مستقیم از روی صفحه کمک کن."
+    "دربارهٔ سیستم یا فرستادن تصویر حرف نزن؛ مستقیم از روی صفحه کمک کن. "
+    "**ممنوع:** گفتن «کتاب‌ها ممکن است تغییر کنند» یا خواستنِ یک خط از صفحه وقتی تصویر صفحه را داری."
 )
 TEXTBOOK_UNREADABLE_INSTRUCTION = (
     "توجه مهم: صفحهٔ درخواستی پیدا شد، اما متن آن از فایل کتاب ناخوانا استخراج شد "
@@ -97,9 +102,10 @@ _TEXTBOOK_PAGE_QUERY_RE = re.compile(
 # Anchor detection for Persian number-words like «بیست و یکم»:
 # we only need to detect the presence of the page marker keyword.
 _TEXTBOOK_PAGE_MARKER_RE = re.compile(r"(?:صفحه|صفحهٔ|ص\.?)", re.IGNORECASE)
-# Lesson / chapter reference (درس دوازدهم، فصل سوم، درس ۱۲) — also anchors a query.
+# Lesson / chapter reference (درس دوازدهم، فصل سوم، فصل یک، درس ۱۲).
 _TEXTBOOK_LESSON_RE = re.compile(
-    r"(?:درس|فصل)\s*(?:[\d۰-۹٠-٩]+|اول|یکم|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم|"
+    r"(?:درس|فصل)\s*(?:[\d۰-۹٠-٩]+|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش|"
+    r"هفتم|هفت|هشتم|هشت|نهم|نه|دهم|ده|"
     r"یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم)",
     re.IGNORECASE,
 )
@@ -108,13 +114,14 @@ _TEXTBOOK_PAGE_NUMBER_RE = re.compile(
     r"(?:صفحه|صفحهٔ|صفحه‌ی|ص\.?)\s*([\d۰-۹٠-٩]+)",
     re.IGNORECASE,
 )
-# Relative page references: «صفحه بعد/بعدی»، «بعدش»، «صفحه قبل/قبلی»، «قبلش».
+# Relative page references: «صفحه بعد/بعدی»، «بعدش»، «صفحه قبل/قبلی»، «قبلش»،
+# «بریم صفحه بعد»، «صفحه بعدی».
 _TEXTBOOK_NEXT_PAGE_RE = re.compile(
-    r"صفحه[\s\u200cٔی]*بعد|بعدش|بعدی|صفحهٔ?\s*بعد",
+    r"(?:صفحه[\s\u200cٔی]*بعد(?:ی|ش)?|بعدش|صفحه‌ی?\s*بعد|بریم\s+(?:به\s+)?صفحه\s*بعد)",
     re.IGNORECASE,
 )
 _TEXTBOOK_PREV_PAGE_RE = re.compile(
-    r"صفحه[\s\u200cٔی]*قبل|قبلش|قبلی|صفحهٔ?\s*قبل",
+    r"(?:صفحه[\s\u200cٔی]*قبل(?:ی|ش)?|قبلش|صفحه‌ی?\s*قبل|بریم\s+(?:به\s+)?صفحه\s*قبل)",
     re.IGNORECASE,
 )
 _PERSIAN_DIGIT_MAP = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
@@ -139,6 +146,11 @@ _TEXTBOOK_GRADE_QUERY_RE = re.compile(
 # across turns without dragging along an old page reference.
 _TEXTBOOK_GRADE_TOKEN_RE = re.compile(
     r"(?:پایه|کلاس)\s*[\d۳۴۵۶٣٤٥٦]+|سوم|چهارم|پنجم|ششم",
+    re.IGNORECASE,
+)
+# Also accept «چهارمم / ششمی» spoken forms.
+_TEXTBOOK_GRADE_CASUAL_RE = re.compile(
+    r"(?:کلاس|پایه)?\s*(سوم|چهارم|پنجم|ششم)م?",
     re.IGNORECASE,
 )
 _TEXTBOOK_SUBJECT_KEYWORDS: tuple[str, ...] = (
@@ -235,6 +247,7 @@ class TextbookContext(BaseModel):
     context_text: str | None = None
     needs_image: bool = False
     image_base64: str | None = None
+    images_base64: list[str] = Field(default_factory=list)
     page_query_failed: bool = False
     need_info: bool = False
     text_usable: bool = True
@@ -376,12 +389,20 @@ def _format_textbook_debug(*, query: str, api_url: str, context: TextbookContext
 
 
 def looks_like_textbook_page_query(text: str) -> bool:
-    """True when the user message likely refers to a specific textbook page/lesson."""
+    """True when the user message likely refers to a specific textbook page/lesson/topic."""
     if not text.strip():
         return False
+    if _relative_page_delta(text) != 0:
+        return True
+    if _textbook_wants_whole_lesson(text):
+        return True
+    if _textbook_has_topic_intent(text):
+        return True
     has_page = bool(_TEXTBOOK_PAGE_MARKER_RE.search(text))
     has_lesson = _textbook_has_lesson(text)
-    has_grade = bool(_TEXTBOOK_GRADE_QUERY_RE.search(text))
+    has_grade = bool(_TEXTBOOK_GRADE_QUERY_RE.search(text)) or bool(
+        _TEXTBOOK_GRADE_TOKEN_RE.search(text)
+    )
     has_subject = any(kw in text for kw in _TEXTBOOK_SUBJECT_KEYWORDS)
     if has_lesson:
         return True
@@ -402,6 +423,32 @@ _TEXTBOOK_HELP_MARKERS: tuple[str, ...] = (
     "سوال",
     "سؤال",
     "تکلیف",
+    "فعالیت",
+    "مربوط",
+)
+
+_TEXTBOOK_TOPIC_INTENT_MARKERS: tuple[str, ...] = (
+    "مربوط",
+    "کجای کتاب",
+    "کجاى کتاب",
+    "کجا در کتاب",
+    "درباره",
+    "معنی",
+    "شعر",
+    "داستان",
+    "فعالیت",
+    "کار در کلاس",
+)
+
+_TEXTBOOK_WHOLE_LESSON_RE = re.compile(
+    r"(?:"
+    r"کل\s*درس|تمام\s*درس|همهٔ?\s*(?:ی\s*)?درس|کلّ?\s*درس|"
+    r"بقیهٔ?\s*(?:ی\s*)?درس|ادامهٔ?\s*(?:ی\s*)?درس|"
+    r"صفحه\s*های\s*(?:این\s+)?درس|کل\s*صفحه\s*های\s*درس|"
+    r"کلم(?:ه|ات)\s*(?:سخت\s*)?(?:ی\s*)?(?:داخل\s+|توی\s+|در\s+)?(?:کل\s+|تمام\s+)?درس|"
+    r"همهٔ?\s*(?:ی\s*)?صفحه\s*های\s*درس"
+    r")",
+    re.IGNORECASE,
 )
 
 
@@ -410,6 +457,14 @@ def looks_like_textbook_help_request(text: str) -> bool:
     if not text.strip():
         return False
     return any(marker in text for marker in _TEXTBOOK_HELP_MARKERS)
+
+
+def _textbook_has_topic_intent(text: str) -> bool:
+    return any(marker in text for marker in _TEXTBOOK_TOPIC_INTENT_MARKERS)
+
+
+def _textbook_wants_whole_lesson(text: str) -> bool:
+    return bool(_TEXTBOOK_WHOLE_LESSON_RE.search(text))
 
 
 async def clear_status_message(
@@ -505,7 +560,9 @@ def _textbook_has_page_reference(text: str) -> bool:
 
 
 def _textbook_has_anchor(text: str) -> bool:
-    """A concrete reference the service can resolve: a numbered page or a lesson."""
+    """A concrete reference the service can resolve: page, lesson, or relative page."""
+    if _relative_page_delta(text) != 0:
+        return True
     return _textbook_has_page_reference(text) or _textbook_has_lesson(text)
 
 
@@ -538,7 +595,13 @@ def _extract_grade_token(text: str) -> str | None:
         return None
 
     match = _TEXTBOOK_GRADE_TOKEN_RE.search(text)
-    return match.group(0).strip() if match else None
+    if match:
+        return match.group(0).strip()
+    casual = _TEXTBOOK_GRADE_CASUAL_RE.search(text)
+    if casual and (has_grade_keyword or casual.group(1)):
+        # Normalize «چهارمم» → «چهارم»
+        return casual.group(1)
+    return None
 
 
 def _extract_subject_token(text: str) -> str | None:
@@ -668,7 +731,7 @@ def _resolve_relative_page(recent_user_texts: list[str]) -> int | None:
     return current
 
 
-def build_textbook_query(messages: list[ChatMessage], *, window: int = 8) -> str:
+def build_textbook_query(messages: list[ChatMessage], *, window: int = 12) -> str:
     """
     Build a focused textbook query, scoped to the current page conversation.
 
@@ -676,6 +739,9 @@ def build_textbook_query(messages: list[ChatMessage], *, window: int = 8) -> str
     or lesson. Only clean tokens are emitted (صفحه N + subject + grade) so
     conversational leftovers like «ریاضی تموم شد بریم سراغ فارسی» cannot make
     the server pick the wrong book.
+
+    Also supports topic/named-content queries («میرزا کوچک خان»، «کجای کتاب مربوط به …»)
+    by combining distinctive words with carried grade/subject.
 
     Returns "" when the recent conversation has no textbook reference at all.
     """
@@ -727,21 +793,66 @@ def build_textbook_query(messages: list[ChatMessage], *, window: int = 8) -> str
             anchor_idx = idx
             break
 
-    if anchor_idx is None:
-        return ""
+    if anchor_idx is not None:
+        anchor = recent[anchor_idx]
+        page = _extract_page_number(anchor)
+        page_words = _extract_page_word_phrase(anchor) if page is None else None
+        lesson_phrase = (
+            _extract_lesson_phrase(anchor) if page is None and not page_words else None
+        )
+        query = _compose_textbook_query(
+            page=page,
+            page_words=page_words,
+            lesson_phrase=lesson_phrase,
+            subject=_lookup_subject(anchor_idx),
+            grade=_lookup_grade(anchor_idx),
+        )
+        # If a later turn asks for the whole lesson, keep the page anchor and
+        # mark the query so the server expands to all lesson pages.
+        if any(_textbook_wants_whole_lesson(t) for t in recent[anchor_idx:]):
+            query = f"کل درس {query}".strip()
+        return query
 
-    anchor = recent[anchor_idx]
-    page = _extract_page_number(anchor)
-    page_words = _extract_page_word_phrase(anchor) if page is None else None
-    lesson_phrase = _extract_lesson_phrase(anchor) if page is None and not page_words else None
+    # Whole-lesson follow-up without a new page number («بقیه درس»، «کلمات سخت کل درس»).
+    latest_idx = len(recent) - 1
+    latest = recent[latest_idx]
+    if _textbook_wants_whole_lesson(latest):
+        page = None
+        for text in reversed(recent):
+            page = _extract_page_number(text)
+            if page is not None:
+                break
+        lesson_phrase = None
+        if page is None:
+            for text in reversed(recent):
+                lesson_phrase = _extract_lesson_phrase(text)
+                if lesson_phrase:
+                    break
+        query = _compose_textbook_query(
+            page=page,
+            lesson_phrase=lesson_phrase,
+            subject=_lookup_subject(latest_idx),
+            grade=_lookup_grade(latest_idx),
+        )
+        if query:
+            return f"کل درس {query}".strip()
 
-    return _compose_textbook_query(
-        page=page,
-        page_words=page_words,
-        lesson_phrase=lesson_phrase,
-        subject=_lookup_subject(anchor_idx),
-        grade=_lookup_grade(anchor_idx),
-    )
+    # Topic / named-content query without an explicit page number.
+    if _textbook_has_topic_intent(latest) or (
+        _extract_subject_token(latest) and _extract_grade_token(latest)
+        and any(m in latest for m in ("تمرین", "شعر", "داستان", "معنی", "متن", "فعالیت"))
+    ):
+        subject = _lookup_subject(latest_idx)
+        grade = _lookup_grade(latest_idx)
+        # Keep the child's content words; server strips scaffolding.
+        parts = [latest]
+        if subject and subject not in latest:
+            parts.append(subject)
+        if grade and grade not in latest:
+            parts.append(grade)
+        return " ".join(parts).strip()
+
+    return ""
 
 
 def _normalize_persona(value: str | None) -> PersonaId | None:
@@ -852,6 +963,11 @@ async def fetch_textbook_context(
     if not data or not data.get("matched"):
         return TextbookContext(matched=False)
 
+    raw_image = str(data["image_base64"]) if data.get("image_base64") else None
+    images: list[str] = []
+    if raw_image:
+        images = [part.strip() for part in raw_image.split("\n---YK_IMAGE---\n") if part.strip()]
+
     context = TextbookContext(
         matched=True,
         match_type=str(data.get("match_type")) if data.get("match_type") else None,
@@ -861,11 +977,12 @@ async def fetch_textbook_context(
         page=int(data["page"]) if data.get("page") is not None else None,
         context_text=str(data["context_text"]) if data.get("context_text") else None,
         needs_image=bool(data.get("needs_image")),
-        image_base64=str(data["image_base64"]) if data.get("image_base64") else None,
+        image_base64=images[0] if images else None,
+        images_base64=images,
         text_usable=bool(data.get("text_usable", True)),
     )
 
-    if context.needs_image and not context.image_base64:
+    if context.needs_image and not context.images_base64:
         image_url = data.get("image_url")
         if isinstance(image_url, str) and image_url.strip():
 
@@ -878,7 +995,9 @@ async def fetch_textbook_context(
 
             image_bytes = await asyncio.to_thread(_fetch_image)
             if image_bytes:
-                context.image_base64 = base64.b64encode(image_bytes).decode("ascii")
+                encoded = base64.b64encode(image_bytes).decode("ascii")
+                context.image_base64 = encoded
+                context.images_base64 = [encoded]
 
     return context
 
@@ -936,27 +1055,30 @@ def _attach_textbook_image_to_messages(
 ) -> list[dict[str, Any]]:
     if not textbook_context or not textbook_context.needs_image:
         return messages
-    if not textbook_context.image_base64:
+    images = textbook_context.images_base64 or (
+        [textbook_context.image_base64] if textbook_context.image_base64 else []
+    )
+    images = [img for img in images if img]
+    if not images:
         return messages
 
-    data_uri = f"data:image/png;base64,{textbook_context.image_base64}"
     image_note = (
         "[ضمیمهٔ مرجع سیستمی]\n"
-        "این تصویر را سیستم از پایگاه کتاب درسی بازیابی کرده است (کاربر آن را نفرستاده است).\n"
-        "این تصویر فقط مرجعِ صفحهٔ کتاب است؛ اگر لازم بود از آن برای خواندن متن/شکل/جدول استفاده کن."
+        "این تصویر(ها) را سیستم از پایگاه کتاب درسی بازیابی کرده است "
+        "(کاربر آن‌ها را نفرستاده است).\n"
+        "فقط مرجعِ صفحه(های) کتاب هستند؛ برای خواندن متن/شکل/جدول از آن‌ها استفاده کن."
     )
+    content: list[dict[str, Any]] = [{"type": "text", "text": image_note}]
+    for encoded in images[:4]:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{encoded}"},
+            }
+        )
 
     updated = list(messages)
-    updated.append(
-        {
-            # نقشِ system نشان می‌دهد که این پیام از طرف سیستم است
-            "role": "system",
-            "content": [
-                {"type": "text", "text": image_note},
-                {"type": "image_url", "image_url": {"url": data_uri}},
-            ],
-        }
-    )
+    updated.append({"role": "system", "content": content})
     return updated
 
 

@@ -7,6 +7,7 @@ from app.parser import parse_persian_query
 from app.subjects import SUBJECT_TITLES, topic_label
 from app.store import (
     PageRecord,
+    get_lesson_pages,
     get_neighbor_pages,
     get_page,
     lesson_search,
@@ -93,26 +94,203 @@ def _attach_image(
         response.image_base64 = encoded
 
 
-def _is_topic_search_query(query: str, *, parsed_topic: str | None = None) -> bool:
+_MAX_LESSON_IMAGES = 4
+
+
+def _attach_lesson_images(
+    response: RetrieveResponse,
+    pages: list[PageRecord],
+    *,
+    include_image: IncludeImageMode,
+    prefer_page: int | None = None,
+) -> None:
+    """Attach up to N page images, prioritizing unreadable pages and the user's page."""
+    if include_image == "never" or not pages:
+        return
+    ranked = sorted(
+        pages,
+        key=lambda p: (
+            0 if prefer_page is not None and p.printed_page == prefer_page else 1,
+            0 if _needs_image(p, "auto" if include_image == "always" else include_image) else 1,
+            p.printed_page,
+        ),
+    )
+    encoded_images: list[str] = []
+    for page in ranked:
+        if include_image != "always" and not _needs_image(page, include_image):
+            continue
+        image_file = resolve_image_path(page.image_path)
+        if not image_file or not image_file.is_file():
+            continue
+        encoded_images.append(base64.b64encode(image_file.read_bytes()).decode("ascii"))
+        if len(encoded_images) >= _MAX_LESSON_IMAGES:
+            break
+    if not encoded_images:
+        return
+    response.needs_image = True
+    response.image_base64 = encoded_images[0]
+    # Stash extras in context_text header note; pipe reads image_base64 only today.
+    # Extra images are joined with a delimiter the pipe understands.
+    if len(encoded_images) > 1:
+        response.image_base64 = "\n---YK_IMAGE---\n".join(encoded_images)
+    first = pages[0]
+    response.image_url = (
+        f"/v1/page-image?grade={first.grade}&subject={first.subject}&page={first.printed_page}"
+    )
+
+
+def _build_lesson_span_response(
+    pages: list[PageRecord],
+    *,
+    lesson_number: int | None,
+    start_page: int | None,
+    end_page: int | None,
+    include_image: IncludeImageMode,
+    confidence: float,
+    prefer_page: int | None = None,
+    topic: str | None = None,
+) -> RetrieveResponse:
+    primary = pages[0]
+    label_bits = []
+    if lesson_number:
+        label_bits.append(f"درس {lesson_number}")
+    if start_page and end_page:
+        label_bits.append(f"صفحات {start_page} تا {end_page}")
+    span_label = " — ".join(label_bits) if label_bits else "کل درس"
+    header = (
+        f"توجه: متن کامل «{span_label}» در ادامه آمده است "
+        f"({primary.subject_title}، پایه {primary.grade}). "
+        "برای درخواست‌هایی مثل کلمات سختِ کل درس یا بقیهٔ درس، از همهٔ این صفحات استفاده کن؛ "
+        "از کودک نخواه صفحهٔ بعد را خودش باز کند."
+    )
+    blocks: list[str] = [header]
+    all_usable = True
+    for page in pages:
+        block, ok = _format_page_block(page, topic=topic)
+        blocks.append(block)
+        all_usable = all_usable and ok
+    response = RetrieveResponse(
+        matched=True,
+        match_type="lesson_span",
+        grade=primary.grade,
+        subject=primary.subject,
+        subject_title=primary.subject_title or SUBJECT_TITLES.get(primary.subject, primary.subject),
+        page=prefer_page or primary.printed_page,
+        context_text="\n\n".join(blocks),
+        text_usable=all_usable,
+        confidence=confidence,
+        detected_topic_label=span_label,
+    )
+    _attach_lesson_images(
+        response,
+        pages,
+        include_image=include_image,
+        prefer_page=prefer_page,
+    )
+    return response
+
+
+def _is_topic_search_query(
+    query: str,
+    *,
+    parsed_topic: str | None = None,
+    wants_topic_search: bool = False,
+    search_text: str | None = None,
+) -> bool:
     """
     Topic search should only run for real content requests, not bare subject picks.
 
     Examples that SHOULD search:
       - «درس ستایش فارسی ششم»
       - «معنی شعر ستایش»
+      - «کجای کتاب مربوط به میرزا کوچک خان»
       - «تمرین سوم ریاضی»
 
     Examples that should NOT search:
       - «ریاضی»
       - «فارسی»
     """
+    if wants_topic_search:
+        return True
+    if parsed_topic:
+        return True
+    # Only treat free-text as topical when it looks like a real name/phrase.
+    if search_text and (len(search_text.split()) >= 2 or len(search_text) >= 6):
+        return True
     normalized = query.strip()
     if not normalized:
         return False
-    if parsed_topic:
-        return True
-    content_markers = ("درس", "تمرین", "متن", "شعر", "معنی", "سوال", "بخوان", "بخوانیم")
+    content_markers = (
+        "تمرین",
+        "متن",
+        "شعر",
+        "معنی",
+        "سوال",
+        "بخوان",
+        "بخوانیم",
+        "مربوط",
+        "کجا",
+        "درباره",
+        "فعالیت",
+        "داستان",
+    )
     return any(marker in normalized for marker in content_markers)
+
+
+def _run_topic_search(
+    *,
+    query: str,
+    search_text: str | None,
+    grade: int | None,
+    subject: str | None,
+    limit: int = 3,
+) -> list[PageRecord]:
+    needle = (search_text or query).strip()
+    if not needle:
+        return []
+
+    def _score(page: PageRecord) -> int:
+        text = (page.text or "").replace("\u200c", "")
+        compact = text.replace(" ", "")
+        tokens = [t.replace("\u200c", "") for t in needle.split() if len(t) >= 2]
+        score = 0
+        for token in tokens:
+            if token in text:
+                score += 3
+        for i in range(len(tokens)):
+            for j in range(i + 1, min(i + 3, len(tokens) + 1)):
+                part = "".join(tokens[i:j])
+                if len(part) >= 4 and part in compact:
+                    score += 6
+        return score
+
+    candidates: list[PageRecord] = []
+    seen: set[tuple[int, str, int]] = set()
+
+    def _add(pages: list[PageRecord]) -> None:
+        for page in pages:
+            key = (page.grade, page.subject, page.printed_page)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(page)
+
+    _add(topic_search(needle, grade=grade, subject=subject, limit=limit))
+    if subject is not None:
+        _add(topic_search(needle, grade=grade, subject=None, limit=limit))
+    if grade is not None or subject is not None:
+        _add(topic_search(needle, grade=None, subject=None, limit=limit))
+    if not candidates:
+        _add(topic_search(needle, grade=None, subject=None, limit=limit))
+
+    if not candidates:
+        return []
+    ranked = sorted(candidates, key=_score, reverse=True)
+    # Drop clearly irrelevant pages when a strong match exists.
+    best = _score(ranked[0])
+    if best >= 6:
+        ranked = [p for p in ranked if _score(p) >= max(3, best // 2)]
+    return ranked[:limit]
 
 
 def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
@@ -123,11 +301,8 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
     lesson = parsed.lesson
     topic_display = topic_label(parsed.topic) if parsed.topic else parsed.topic_alias
 
-    # A page number is only meaningful together with a specific book.
-    # If the user gave a page but we can't resolve grade AND subject, do NOT
-    # guess a random page — report not matched so the assistant asks for the
-    # missing grade/subject instead of hallucinating.
-    if page and not (grade and subject):
+    # A page/lesson is only meaningful together with a specific book + grade.
+    if (page or lesson) and not (grade and subject):
         return RetrieveResponse(
             matched=False,
             match_type="none",
@@ -138,8 +313,30 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             confidence=parsed.confidence,
         )
 
+    # Whole-lesson span (کل درس / بقیه درس / کلمات سخت کل درس)
+    if parsed.wants_whole_lesson and grade and subject and (page or lesson):
+        pages, lesson_no, start_page, end_page = get_lesson_pages(
+            grade,
+            subject,
+            lesson_number=lesson,
+            page=page,
+        )
+        if pages:
+            return _build_lesson_span_response(
+                pages,
+                lesson_number=lesson_no or lesson,
+                start_page=start_page,
+                end_page=end_page,
+                include_image=request.include_image,
+                confidence=max(parsed.confidence, 0.9),
+                prefer_page=page,
+                topic=topic_display,
+            )
+
     # Exact page lookup
     if grade and subject and page:
+        # If user asked for a numbered lesson without "کل درس", still prefer
+        # the single page they named; whole-lesson is handled above.
         center = get_page(grade, subject, page)
         if center:
             neighbors = get_neighbor_pages(grade, subject, page, request.include_neighbors)
@@ -173,8 +370,25 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             confidence=parsed.confidence,
         )
 
-    # Lesson / chapter lookup (درس دوازدهم، فصل سوم) — resolve to its start page.
+    # Lesson / chapter lookup — return the full lesson span (all its pages).
     if grade and subject and lesson:
+        pages, lesson_no, start_page, end_page = get_lesson_pages(
+            grade,
+            subject,
+            lesson_number=lesson,
+        )
+        if pages:
+            return _build_lesson_span_response(
+                pages,
+                lesson_number=lesson_no or lesson,
+                start_page=start_page,
+                end_page=end_page,
+                include_image=request.include_image,
+                confidence=max(parsed.confidence, 0.85),
+                prefer_page=start_page,
+                topic=topic_display,
+            )
+        # Fallback to start page only (legacy behavior)
         center = lesson_search(grade, subject, lesson)
         if center:
             neighbors = get_neighbor_pages(
@@ -199,7 +413,6 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             )
             _attach_image(response, center, needs_image=needs_image)
             return response
-        # Lesson requested but not found → not matched (do not guess)
         return RetrieveResponse(
             matched=False,
             match_type="none",
@@ -209,30 +422,47 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             confidence=parsed.confidence,
         )
 
-    # Topic FTS search — only for real topical content requests
-    if grade and subject and _is_topic_search_query(request.query, parsed_topic=parsed.topic):
-        hits = topic_search(request.query, grade=grade, subject=subject, limit=2)
-        if hits:
-            blocks: list[str] = []
-            all_usable = True
-            for hit in hits:
-                block, ok = _format_page_block(hit)
-                blocks.append(block)
-                all_usable = all_usable and ok
-            primary = hits[0]
-            needs_image = _needs_image(primary, request.include_image)
-            response = RetrieveResponse(
-                matched=True,
-                match_type="topic_search",
+    # Topic / named-content FTS search
+    if _is_topic_search_query(
+        request.query,
+        parsed_topic=parsed.topic,
+        wants_topic_search=parsed.wants_topic_search,
+        search_text=parsed.search_text,
+    ):
+        # Prefer having at least one of grade/subject; still allow global search
+        # for distinctive names like «میرزا کوچک خان».
+        if grade or subject or (parsed.search_text and len(parsed.search_text) >= 4):
+            hits = _run_topic_search(
+                query=request.query,
+                search_text=parsed.search_text,
                 grade=grade,
                 subject=subject,
-                subject_title=primary.subject_title or SUBJECT_TITLES.get(subject, subject),
-                page=primary.printed_page,
-                context_text="\n\n".join(blocks),
-                text_usable=all_usable,
-                confidence=max(parsed.confidence, 0.6),
+                limit=3,
             )
-            _attach_image(response, primary, needs_image=needs_image)
-            return response
+            if hits:
+                blocks: list[str] = []
+                all_usable = True
+                for hit in hits:
+                    block, ok = _format_page_block(hit)
+                    blocks.append(block)
+                    all_usable = all_usable and ok
+                primary = hits[0]
+                needs_image = _needs_image(primary, request.include_image)
+                response = RetrieveResponse(
+                    matched=True,
+                    match_type="topic_search",
+                    grade=primary.grade,
+                    subject=primary.subject,
+                    subject_title=primary.subject_title
+                    or SUBJECT_TITLES.get(primary.subject, primary.subject),
+                    page=primary.printed_page,
+                    context_text="\n\n".join(blocks),
+                    text_usable=all_usable,
+                    confidence=max(parsed.confidence, 0.6),
+                    detected_topic=parsed.topic,
+                    detected_topic_label=topic_display or parsed.search_text,
+                )
+                _attach_image(response, primary, needs_image=needs_image)
+                return response
 
     return RetrieveResponse(matched=False, match_type="none", confidence=0.0)
