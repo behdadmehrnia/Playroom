@@ -1,0 +1,126 @@
+"""Configuration for the Yar Kids API.
+
+All settings are read from environment variables, mirroring the ``Pipe``
+``Valves`` (admin configuration) plus the LLM provider credentials needed to
+replace OpenWebUI's internal ``generate_chat_completion`` and a couple of
+server knobs. Bool parsing reuses ``pipe.coerce_bool`` so the same tolerant
+semantics (``1``/``true``/``yes``/``بله`` ...) apply.
+"""
+
+from __future__ import annotations
+
+import os
+
+from pydantic import BaseModel, Field
+
+from pipe import DEFAULT_TEXTBOOK_TIMEOUT_SEC, coerce_bool
+
+
+class Settings(BaseModel):
+    """Runtime configuration loaded once at startup from the environment."""
+
+    # --- LLM provider (replaces OpenWebUI's internal completion API) ---
+    backend_model: str = Field(
+        default="",
+        description="مدل LLM پشتیبان (الزامی برای تولید پاسخ).",
+    )
+    llm_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        description="آدرس پایهٔ API سازگار با OpenAI (بدون /chat/completions).",
+    )
+    llm_api_key: str = Field(
+        default="",
+        description="کلید API (Bearer token) برای سرویس LLM.",
+    )
+    llm_timeout_sec: float = Field(
+        default=120.0,
+        ge=5.0,
+        description="مهلت درخواست به سرویس LLM (ثانیه).",
+    )
+
+    # --- Generation / agents (mirrors Pipe.Valves) ---
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    enable_reflection: bool = Field(default=True)
+    enable_status_updates: bool = Field(default=True)
+
+    # --- Textbook service (mirrors Pipe.Valves) ---
+    enable_textbook_context: bool = Field(default=True)
+    textbook_api_url: str = Field(default="http://localhost:8080")
+    textbook_api_key: str = Field(default="")
+    textbook_request_timeout_sec: float = Field(
+        default=DEFAULT_TEXTBOOK_TIMEOUT_SEC, ge=1.0, le=30.0
+    )
+    textbook_neighbor_pages: int = Field(default=1, ge=0, le=3)
+    textbook_include_image: str = Field(default="auto")
+    textbook_debug: bool = Field(default=False)
+
+    # --- Server ---
+    host: str = Field(default="0.0.0.0")
+    port: int = Field(default=8000, ge=1, le=65535)
+    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        def env(name: str, default: str = "") -> str:
+            return os.environ.get(name, default)
+
+        def env_int(name: str, default: int) -> int:
+            raw = env(name).strip()
+            if not raw:
+                return default
+            try:
+                return int(raw)
+            except ValueError:
+                return default
+
+        def env_float(name: str, default: float) -> float:
+            raw = env(name).strip()
+            if not raw:
+                return default
+            try:
+                return float(raw)
+            except ValueError:
+                return default
+
+        def env_bool(name: str, default: bool) -> bool:
+            raw = env(name)
+            if not raw.strip():
+                # Unset / empty env var must fall back to the default —
+                # pipe.coerce_bool treats "" as False, which would silently
+                # disable features that default to on.
+                return default
+            return coerce_bool(raw, default=default)
+
+        cors_raw = env("YARKIDS_CORS_ORIGINS", "*").strip()
+        if cors_raw:
+            cors_origins = [item.strip() for item in cors_raw.split(",") if item.strip()]
+        else:
+            cors_origins = ["*"]
+
+        return cls(
+            backend_model=env("YARKIDS_BACKEND_MODEL").strip(),
+            llm_base_url=env("YARKIDS_LLM_BASE_URL", "https://api.openai.com/v1").strip(),
+            llm_api_key=env("YARKIDS_LLM_API_KEY").strip(),
+            llm_timeout_sec=env_float("YARKIDS_LLM_TIMEOUT_SEC", 120.0),
+            temperature=env_float("YARKIDS_TEMPERATURE", 0.7),
+            enable_reflection=env_bool("YARKIDS_ENABLE_REFLECTION", True),
+            enable_status_updates=env_bool("YARKIDS_ENABLE_STATUS_UPDATES", True),
+            enable_textbook_context=env_bool("YARKIDS_ENABLE_TEXTBOOK_CONTEXT", True),
+            textbook_api_url=env("YARKIDS_TEXTBOOK_API_URL", "http://localhost:8080").strip(),
+            textbook_api_key=env("YARKIDS_TEXTBOOK_API_KEY").strip(),
+            textbook_request_timeout_sec=env_float(
+                "YARKIDS_TEXTBOOK_REQUEST_TIMEOUT_SEC", DEFAULT_TEXTBOOK_TIMEOUT_SEC
+            ),
+            textbook_neighbor_pages=env_int("YARKIDS_TEXTBOOK_NEIGHBOR_PAGES", 1),
+            textbook_include_image=env("YARKIDS_TEXTBOOK_INCLUDE_IMAGE", "auto").strip().lower(),
+            textbook_debug=env_bool("YARKIDS_TEXTBOOK_DEBUG", False),
+            host=env("YARKIDS_API_HOST", "0.0.0.0").strip(),
+            port=env_int("YARKIDS_API_PORT", 8000),
+            cors_origins=cors_origins,
+        )
+
+    def normalized_include_image(self) -> str:
+        value = self.textbook_include_image.strip().lower()
+        if value not in {"never", "auto", "always"}:
+            return "auto"
+        return value
