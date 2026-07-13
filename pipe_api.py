@@ -251,7 +251,7 @@ class Pipe:
 
     class Valves(BaseModel):
         API_BASE_URL: str = Field(
-            default="http://localhost:8000",
+            default="http://host.docker.internal:8090",
             description="آدرس پایهٔ API مستقل یار کودک (api/main.py) — بدون / در انتها.",
         )
         API_KEY: str = Field(
@@ -381,9 +381,9 @@ class Pipe:
     ) -> AsyncIterator[tuple[str, str]]:
         """Yield normalized ``(event_kind, text)`` tuples from the API stream.
 
-        event_kind is one of: ``status``, ``status_clear``, ``chunk``, ``done``.
-        The generator ends naturally when the SSE stream completes, ensuring
-        clean teardown of the background reader thread.
+        event_kind is one of: ``status``, ``status_clear``, ``chunk``,
+        ``error``, ``done``. The generator ends naturally when the SSE stream
+        completes, ensuring clean teardown of the background reader thread.
         """
         payload = self._build_api_payload(body, __user__)
         async for event_type, data in consume_sse_stream(
@@ -407,6 +407,12 @@ class Pipe:
                     text = data
                 if text:
                     yield "chunk", text
+            elif event_type == "error":
+                try:
+                    message = json.loads(data).get("message", data)
+                except json.JSONDecodeError:
+                    message = data
+                yield "error", message
             elif event_type == "done":
                 yield "done", ""
 
@@ -444,6 +450,9 @@ class Pipe:
                 elif kind == "chunk":
                     yield value
                     await asyncio.sleep(0)
+                elif kind == "error":
+                    await clear_status_message(__event_emitter__)
+                    yield f"\n\n⚠️ {value}"
         except RuntimeError as exc:
             await clear_status_message(__event_emitter__)
             yield f"\n\n⚠️ {exc}"
@@ -458,6 +467,7 @@ class Pipe:
     ) -> str:
         emit_status = self._build_status_emitter(__event_emitter__)
         chunks: list[str] = []
+        error_message: str | None = None
         try:
             async for kind, value in self._iter_api_events(body, __user__):
                 if kind == "status":
@@ -467,8 +477,11 @@ class Pipe:
                     await clear_status_message(__event_emitter__)
                 elif kind == "chunk":
                     chunks.append(value)
+                elif kind == "error":
+                    error_message = value
         except RuntimeError as exc:
-            await clear_status_message(__event_emitter__)
-            return f"⚠️ {exc}"
+            error_message = str(exc)
         await clear_status_message(__event_emitter__)
+        if error_message:
+            return f"⚠️ {error_message}"
         return "".join(chunks) if chunks else SAFE_FALLBACK_RESPONSE

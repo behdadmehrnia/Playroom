@@ -444,6 +444,13 @@ async def _chat_event_stream(
                 "event": "chunk",
                 "data": json.dumps({"text": event["text"]}, ensure_ascii=False),
             }
+        elif etype == "error":
+            yield {
+                "event": "error",
+                "data": json.dumps(
+                    {"message": event["message"]}, ensure_ascii=False
+                ),
+            }
         elif etype == "done":
             out = chat_result_to_out(event["result"])
             yield {"event": "done", "data": out.model_dump_json()}

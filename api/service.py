@@ -344,11 +344,17 @@ async def run_chat_stream(
       - ``{"type": "status", "description": str}`` — live status updates
       - ``{"type": "status_clear"}`` — status bar should be hidden
       - ``{"type": "chunk", "text": str}`` — a piece of the final response
+      - ``{"type": "error", "message": str}`` — a fatal error during the run
       - ``{"type": "done", "result": ChatResult}`` — final metadata
 
     Mirrors ``Pipe._stream_chat``: status events are emitted live while the
     generation loop runs; only after it completes is the final response
     chunked and streamed (the backing LLM is always called non-streaming).
+
+    Exceptions raised during the run are caught and surfaced as ``error``
+    events — they must NOT propagate, because by the time the run executes
+    the SSE response headers have already been sent and FastAPI's exception
+    handler can no longer replace them (``"response already started"``).
     """
     status_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -382,7 +388,14 @@ async def run_chat_stream(
         if enable_status:
             yield {"type": "status", "description": description}
 
-    chat_result = await task
+    try:
+        chat_result = await task
+    except Exception as exc:  # noqa: BLE001 — surface as SSE error, don't crash
+        if enable_status:
+            await asyncio.sleep(STATUS_DISPLAY_PAUSE_SEC)
+            yield {"type": "status_clear"}
+        yield {"type": "error", "message": f"{type(exc).__name__}: {exc}"}
+        return
 
     if enable_status:
         await asyncio.sleep(STATUS_DISPLAY_PAUSE_SEC)
