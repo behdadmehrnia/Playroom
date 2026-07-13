@@ -25,6 +25,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from api import __version__
 from api.config import Settings
 from api.llm import LLMError, OpenAICompatibleLLMClient

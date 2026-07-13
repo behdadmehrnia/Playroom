@@ -27,8 +27,8 @@ from pydantic import BaseModel, Field
 # Configuration
 # ---------------------------------------------------------------------------
 
-MODEL_ID = "yarkids"
-MODEL_NAME = "یار کودک"
+MODEL_ID = "yarkids_api"
+MODEL_NAME = "یار کودک مستقل"
 MANUAL_PERSONA_METADATA_KEY = "yarkids_persona"
 SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework")
 DEFAULT_API_TIMEOUT_SEC = 300.0
