@@ -121,12 +121,14 @@ class TextbookRetrieveResponse(BaseModel):
 
 class WebSearchQueryRequest(BaseModel):
     messages: list[MessageIn]
+    persona: str | None = None
 
 
 class WebSearchQueryResponse(BaseModel):
     query: str
     looks_like_search_request: bool
     latest_user_message: str
+    persona: str | None = None
 
 
 class WebSearchRetrieveRequest(BaseModel):

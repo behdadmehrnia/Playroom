@@ -379,8 +379,11 @@ async def web_search_query_endpoint(
     latest = _get_latest_user_message(messages)
     return WebSearchQueryResponse(
         query=query,
-        looks_like_search_request=looks_like_web_search_request(latest),
+        looks_like_search_request=looks_like_web_search_request(
+            latest, persona=req.persona
+        ),
         latest_user_message=latest,
+        persona=req.persona,
     )
 
 
@@ -389,17 +392,20 @@ async def retrieve_web_search_endpoint(
     req: WebSearchRetrieveRequest,
     settings: Settings = Depends(get_settings),
 ) -> WebSearchRetrieveResponse:
+    """Same query builder + fetch as Pipe (``build_web_search_query`` / ``fetch_web_search_context``)."""
+    messages = to_chat_messages(req.messages) if req.messages else []
+
     if req.query is not None:
         query = req.query.strip()
-    elif req.messages:
-        query = build_web_search_query(to_chat_messages(req.messages))
+    elif messages:
+        query = build_web_search_query(messages)
     else:
         query = ""
 
     if req.user_message is not None:
         user_message = req.user_message.strip()
-    elif req.messages:
-        user_message = _get_latest_user_message(to_chat_messages(req.messages))
+    elif messages:
+        user_message = _get_latest_user_message(messages)
     else:
         user_message = ""
 
@@ -437,7 +443,7 @@ async def retrieve_web_search_endpoint(
     debug: str | None = None
 
     if should_fetch:
-        provider = (req.provider or settings.web_search_provider).strip().lower()
+        provider = (req.provider or settings.normalized_web_search_provider()).strip().lower()
         if provider not in {"auto", "api", "duckduckgo"}:
             provider = "auto"
         timeout = (

@@ -32,33 +32,27 @@ from pipe import (
     ReflectionResult,
     TextbookContext,
     TEXTBOOK_PERSONAS,
-    WEB_SEARCH_PERSONAS,
     WebSearchContext,
     _format_textbook_debug,
-    _format_web_search_debug,
     _get_latest_user_message,
     build_textbook_query,
-    build_web_search_query,
     detect_intent,
     fetch_textbook_context,
-    fetch_web_search_context,
     generate_response,
     iter_text_chunks,
     looks_like_textbook_help_request,
     looks_like_textbook_page_query,
-    looks_like_web_search_request,
     reflect_on_response,
     resolve_active_persona,
     resolve_manual_persona,
+    resolve_web_search_context,
     status_detecting_persona,
     status_fetching_textbook,
-    status_fetching_web_search,
     status_generating_response,
     status_persona_selected,
     status_reflection_disabled,
     status_reviewing_response,
     status_textbook_unavailable,
-    status_web_search_unavailable,
 )
 
 from api.config import Settings
@@ -195,42 +189,22 @@ async def _resolve_web_search_context(
     enable_web_search: bool | None,
     emit: Callable[[str], Awaitable[None]],
 ) -> WebSearchContext | None:
-    """Fetch web search context using the same gate/heuristic as the Pipe."""
+    """Delegate to ``pipe.resolve_web_search_context`` (same logic as Pipe)."""
     search_enabled = (
         enable_web_search if enable_web_search is not None else settings.enable_web_search
     )
-    user_message = _get_latest_user_message(messages)
-    query = build_web_search_query(messages)
-
-    should_fetch = bool(
-        search_enabled
-        and persona in WEB_SEARCH_PERSONAS
-        and query
-        and looks_like_web_search_request(user_message, persona=persona)
-    )
-    if not should_fetch:
-        return None
-
-    await emit(status_fetching_web_search())
-    provider = settings.normalized_web_search_provider()
-    context = await fetch_web_search_context(
-        query,
-        provider=provider,
+    return await resolve_web_search_context(
+        messages=messages,
+        persona=persona,
+        enable_web_search=search_enabled,
+        provider=settings.normalized_web_search_provider(),
         api_url=settings.web_search_api_url,
         api_key=settings.web_search_api_key or None,
         max_results=settings.web_search_max_results,
         timeout_sec=settings.web_search_request_timeout_sec,
+        debug=settings.web_search_debug,
+        on_status=emit,
     )
-    if settings.web_search_debug and context:
-        await emit(
-            _format_web_search_debug(
-                query=query, provider=provider, context=context
-            )
-        )
-        await asyncio.sleep(1.2)
-    if context and not context.matched and not settings.web_search_debug:
-        await emit(status_web_search_unavailable())
-    return context
 
 
 async def _run_response_loop(

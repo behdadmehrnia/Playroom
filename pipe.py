@@ -1804,6 +1804,60 @@ async def fetch_web_search_context(
     return await asyncio.to_thread(_run)
 
 
+async def resolve_web_search_context(
+    *,
+    messages: list[ChatMessage],
+    persona: PersonaId,
+    enable_web_search: bool,
+    provider: str = "auto",
+    api_url: str = "",
+    api_key: str | None = None,
+    max_results: int = DEFAULT_WEB_SEARCH_MAX_RESULTS,
+    timeout_sec: float = DEFAULT_WEB_SEARCH_TIMEOUT_SEC,
+    debug: bool = False,
+    on_status: Callable[[str], Awaitable[None]] | None = None,
+) -> WebSearchContext | None:
+    """Gate + fetch web search — shared by Pipe and API (single source of truth).
+
+    Same rules everywhere:
+      - only ``WEB_SEARCH_PERSONAS``
+      - natural query from ``build_web_search_query`` (no aliases)
+      - heuristic via ``looks_like_web_search_request``
+    """
+    user_message = _get_latest_user_message(messages)
+    query = build_web_search_query(messages)
+    should_fetch = bool(
+        enable_web_search
+        and persona in WEB_SEARCH_PERSONAS
+        and query
+        and looks_like_web_search_request(user_message, persona=persona)
+    )
+    if not should_fetch:
+        return None
+
+    if on_status:
+        await on_status(status_fetching_web_search())
+
+    context = await fetch_web_search_context(
+        query,
+        provider=provider,
+        api_url=api_url,
+        api_key=api_key,
+        max_results=max_results,
+        timeout_sec=timeout_sec,
+    )
+    if debug and on_status and context:
+        await on_status(
+            _format_web_search_debug(
+                query=query, provider=provider, context=context
+            )
+        )
+        await asyncio.sleep(1.2)
+    if context and not context.matched and on_status and not debug:
+        await on_status(status_web_search_unavailable())
+    return context
+
+
 # ---------------------------------------------------------------------------
 # Prompt builder
 # ---------------------------------------------------------------------------
@@ -2601,41 +2655,18 @@ class Pipe:
             # Ask for the missing info instead of guessing or claiming no access.
             textbook_context = TextbookContext(need_info=True)
 
-        web_search_context: WebSearchContext | None = None
-        web_search_query = build_web_search_query(conversation_messages)
-        should_fetch_web = bool(
-            self.valves.ENABLE_WEB_SEARCH
-            and persona in WEB_SEARCH_PERSONAS
-            and web_search_query
-            and looks_like_web_search_request(user_message, persona=persona)
+        web_search_context = await resolve_web_search_context(
+            messages=conversation_messages,
+            persona=persona,
+            enable_web_search=self.valves.ENABLE_WEB_SEARCH,
+            provider=self.valves.WEB_SEARCH_PROVIDER,
+            api_url=self.valves.WEB_SEARCH_API_URL,
+            api_key=self.valves.WEB_SEARCH_API_KEY or None,
+            max_results=self.valves.WEB_SEARCH_MAX_RESULTS,
+            timeout_sec=self.valves.WEB_SEARCH_REQUEST_TIMEOUT_SEC,
+            debug=self.valves.WEB_SEARCH_DEBUG,
+            on_status=on_status,
         )
-        if should_fetch_web:
-            if on_status:
-                await on_status(status_fetching_web_search())
-            web_search_context = await fetch_web_search_context(
-                web_search_query,
-                provider=self.valves.WEB_SEARCH_PROVIDER,
-                api_url=self.valves.WEB_SEARCH_API_URL,
-                api_key=self.valves.WEB_SEARCH_API_KEY or None,
-                max_results=self.valves.WEB_SEARCH_MAX_RESULTS,
-                timeout_sec=self.valves.WEB_SEARCH_REQUEST_TIMEOUT_SEC,
-            )
-            if self.valves.WEB_SEARCH_DEBUG and on_status and web_search_context:
-                await on_status(
-                    _format_web_search_debug(
-                        query=web_search_query,
-                        provider=self.valves.WEB_SEARCH_PROVIDER,
-                        context=web_search_context,
-                    )
-                )
-                await asyncio.sleep(1.2)
-            if (
-                web_search_context
-                and not web_search_context.matched
-                and on_status
-                and not self.valves.WEB_SEARCH_DEBUG
-            ):
-                await on_status(status_web_search_unavailable())
 
         # Persona is already teacher/homework here (gate above); no switch needed.
         enable_reflection = read_valve_bool(
