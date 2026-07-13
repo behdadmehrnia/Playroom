@@ -16,6 +16,7 @@ from pipe import (
     IntentDetectionResult,
     ReflectionResult,
     TextbookContext,
+    WebSearchContext,
 )
 
 Role = Literal["system", "user", "assistant"]
@@ -37,6 +38,8 @@ class HealthResponse(BaseModel):
     llm_ready: bool
     textbook_api_url: str
     textbook_enabled: bool
+    web_search_enabled: bool
+    web_search_provider: str
     reflection_enabled: bool
     warnings: list[str] = Field(default_factory=list)
 
@@ -49,6 +52,7 @@ class PersonaInfo(BaseModel):
 class PersonasResponse(BaseModel):
     personas: list[PersonaInfo]
     textbook_personas: list[str]
+    web_search_personas: list[str]
 
 
 class IntentRequest(BaseModel):
@@ -115,12 +119,55 @@ class TextbookRetrieveResponse(BaseModel):
     debug: str | None = None
 
 
+class WebSearchQueryRequest(BaseModel):
+    messages: list[MessageIn]
+
+
+class WebSearchQueryResponse(BaseModel):
+    query: str
+    looks_like_search_request: bool
+    latest_user_message: str
+
+
+class WebSearchRetrieveRequest(BaseModel):
+    """Retrieve web search context (same gate as Pipe for creative/storyteller/gamer).
+
+    When ``persona`` is provided and is not a web-search persona, nothing is
+    fetched. When ``persona`` is omitted the endpoint behaves as a standalone
+    diagnostic tool and fetches regardless of persona.
+    """
+
+    query: str | None = None
+    messages: list[MessageIn] | None = None
+    persona: str | None = None
+    user_message: str | None = None
+    provider: str | None = None
+    max_results: int | None = Field(default=None, ge=1, le=10)
+    timeout_sec: float | None = Field(default=None, ge=1.0, le=30.0)
+    enable_web_search: bool | None = None
+    force: bool = Field(
+        default=False,
+        description="اگر True باشد heuristic را رد می‌کند و حتماً جستجو می‌کند.",
+    )
+    debug: bool | None = None
+
+
+class WebSearchRetrieveResponse(BaseModel):
+    query: str
+    fetched: bool
+    gate_blocked: bool = False
+    gate_reason: str | None = None
+    web_search_context: WebSearchContext | None = None
+    debug: str | None = None
+
+
 class GenerateRequest(BaseModel):
     model: str | None = None
     persona: str
     messages: list[MessageIn]
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     textbook_context: TextbookContext | None = None
+    web_search_context: WebSearchContext | None = None
     revision_reasons: list[str] | None = None
 
 
@@ -133,6 +180,7 @@ class ReflectRequest(BaseModel):
     user_message: str
     candidate_response: str
     textbook_context: TextbookContext | None = None
+    web_search_context: WebSearchContext | None = None
 
 
 class ReflectResponse(BaseModel):
@@ -148,6 +196,7 @@ class ChatRequest(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     enable_reflection: bool | None = None
     enable_textbook_context: bool | None = None
+    enable_web_search: bool | None = None
     metadata: dict[str, Any] | None = None
     stream: bool = False
 
@@ -157,6 +206,7 @@ class ChatResultOut(BaseModel):
     persona: str
     persona_source: PersonaSource
     textbook_context: TextbookContext | None = None
+    web_search_context: WebSearchContext | None = None
     attempts: int
     reflection: ReflectionResult | None = None
     revised: bool

@@ -19,17 +19,22 @@ from pipe import (
     PERSONA_DROPDOWN_OPTIONS,
     SUPPORTED_PERSONAS,
     TEXTBOOK_PERSONAS,
+    WEB_SEARCH_PERSONAS,
     ChatMessage,
     LLMClient,
     TextbookContext,
     VALID_PERSONAS,
     _format_textbook_debug,
+    _format_web_search_debug,
     _get_latest_user_message,
     build_textbook_query,
+    build_web_search_query,
     fetch_textbook_context,
+    fetch_web_search_context,
     generate_response,
     looks_like_textbook_help_request,
     looks_like_textbook_page_query,
+    looks_like_web_search_request,
     normalize_messages,
     reflect_on_response,
     resolve_manual_persona,
@@ -57,6 +62,10 @@ from api.models import (
     TextbookQueryResponse,
     TextbookRetrieveRequest,
     TextbookRetrieveResponse,
+    WebSearchQueryRequest,
+    WebSearchQueryResponse,
+    WebSearchRetrieveRequest,
+    WebSearchRetrieveResponse,
 )
 from api.service import detect_intent_for, run_chat, run_chat_stream
 
@@ -105,6 +114,7 @@ def chat_result_to_out(result: Any) -> ChatResultOut:
         persona=result.persona,
         persona_source=result.persona_source,
         textbook_context=result.textbook_context,
+        web_search_context=result.web_search_context,
         attempts=result.attempts,
         reflection=result.reflection,
         revised=result.revised,
@@ -158,6 +168,8 @@ async def health(
         llm_ready=llm_ready,
         textbook_api_url=settings.textbook_api_url,
         textbook_enabled=settings.enable_textbook_context,
+        web_search_enabled=settings.enable_web_search,
+        web_search_provider=settings.normalized_web_search_provider(),
         reflection_enabled=settings.enable_reflection,
         warnings=warnings,
     )
@@ -171,6 +183,7 @@ async def personas() -> PersonasResponse:
             for opt in PERSONA_DROPDOWN_OPTIONS
         ],
         textbook_personas=sorted(TEXTBOOK_PERSONAS),
+        web_search_personas=sorted(WEB_SEARCH_PERSONAS),
     )
 
 
@@ -353,6 +366,115 @@ async def retrieve_textbook_endpoint(
 
 
 # ---------------------------------------------------------------------------
+# Web search query building + retrieval
+# ---------------------------------------------------------------------------
+
+
+@router.post("/v1/web-search/query", response_model=WebSearchQueryResponse)
+async def web_search_query_endpoint(
+    req: WebSearchQueryRequest,
+) -> WebSearchQueryResponse:
+    messages = to_chat_messages(req.messages)
+    query = build_web_search_query(messages)
+    latest = _get_latest_user_message(messages)
+    return WebSearchQueryResponse(
+        query=query,
+        looks_like_search_request=looks_like_web_search_request(latest),
+        latest_user_message=latest,
+    )
+
+
+@router.post("/v1/web-search/retrieve", response_model=WebSearchRetrieveResponse)
+async def retrieve_web_search_endpoint(
+    req: WebSearchRetrieveRequest,
+    settings: Settings = Depends(get_settings),
+) -> WebSearchRetrieveResponse:
+    if req.query is not None:
+        query = req.query.strip()
+    elif req.messages:
+        query = build_web_search_query(to_chat_messages(req.messages))
+    else:
+        query = ""
+
+    if req.user_message is not None:
+        user_message = req.user_message.strip()
+    elif req.messages:
+        user_message = _get_latest_user_message(to_chat_messages(req.messages))
+    else:
+        user_message = ""
+
+    persona = req.persona
+    search_enabled = (
+        req.enable_web_search
+        if req.enable_web_search is not None
+        else settings.enable_web_search
+    )
+
+    gate_blocked = False
+    gate_reason: str | None = None
+    eligible = persona is None or persona in WEB_SEARCH_PERSONAS
+    if persona is not None and not eligible:
+        gate_blocked = True
+        gate_reason = "persona_not_eligible"
+    elif not search_enabled:
+        gate_blocked = True
+        gate_reason = "web_search_disabled"
+
+    needs_heuristic = looks_like_web_search_request(user_message) if user_message else True
+    should_fetch = bool(
+        search_enabled
+        and query
+        and eligible
+        and (req.force or needs_heuristic or persona is None)
+    )
+
+    context = None
+    fetched = False
+    debug: str | None = None
+
+    if should_fetch:
+        provider = (req.provider or settings.web_search_provider).strip().lower()
+        if provider not in {"auto", "api", "duckduckgo"}:
+            provider = "auto"
+        timeout = (
+            req.timeout_sec
+            if req.timeout_sec is not None
+            else settings.web_search_request_timeout_sec
+        )
+        max_results = (
+            req.max_results
+            if req.max_results is not None
+            else settings.web_search_max_results
+        )
+        context = await fetch_web_search_context(
+            query,
+            provider=provider,
+            api_url=settings.web_search_api_url,
+            api_key=settings.web_search_api_key or None,
+            max_results=max_results,
+            timeout_sec=timeout,
+        )
+        fetched = True
+        debug_enabled = req.debug if req.debug is not None else settings.web_search_debug
+        if debug_enabled and context:
+            debug = _format_web_search_debug(
+                query=query, provider=provider, context=context
+            )
+    elif not gate_blocked and not needs_heuristic and not req.force:
+        gate_blocked = True
+        gate_reason = "not_a_search_request"
+
+    return WebSearchRetrieveResponse(
+        query=query,
+        fetched=fetched,
+        gate_blocked=gate_blocked,
+        gate_reason=gate_reason,
+        web_search_context=context,
+        debug=debug,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Single-shot generation + reflection
 # ---------------------------------------------------------------------------
 
@@ -381,6 +503,7 @@ async def generate_endpoint(
         revision_reasons=req.revision_reasons,
         temperature=temperature,
         textbook_context=req.textbook_context,
+        web_search_context=req.web_search_context,
     )
     return GenerateResponse(response=response)
 
@@ -398,6 +521,7 @@ async def reflect_endpoint(
         user_message=req.user_message,
         candidate_response=req.candidate_response,
         textbook_context=req.textbook_context,
+        web_search_context=req.web_search_context,
     )
     return ReflectResponse(reflection=reflection)
 
@@ -427,6 +551,7 @@ async def _chat_event_stream(
         temperature=req.temperature,
         enable_reflection=req.enable_reflection,
         enable_textbook_context=req.enable_textbook_context,
+        enable_web_search=req.enable_web_search,
         enable_status=enable_status,
     ):
         etype = event["type"]
@@ -490,6 +615,7 @@ async def chat_endpoint(
         temperature=req.temperature,
         enable_reflection=req.enable_reflection,
         enable_textbook_context=req.enable_textbook_context,
+        enable_web_search=req.enable_web_search,
         on_status=None,
     )
     return chat_result_to_out(result)

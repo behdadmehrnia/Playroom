@@ -1,8 +1,8 @@
 """
 title: یار کودک
 author: Yar Kids
-version: 0.5.0
-description: دستیار کودک‌دوست با معماری Persona، Intent Detection و Reflection
+version: 0.6.0
+description: دستیار کودک‌دوست با معماری Persona، Intent Detection، Reflection و Web Search
 required_open_webui_version: 0.5.0
 """
 
@@ -14,6 +14,7 @@ import inspect
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import AsyncIterator
 from collections.abc import Iterator
@@ -93,6 +94,23 @@ TEXTBOOK_NEED_INFO_INSTRUCTION = (
     "محتوای صفحه را از خودت نساز؛ فقط اطلاعات لازم را بپرس."
 )
 DEFAULT_TEXTBOOK_TIMEOUT_SEC = 5.0
+
+WEB_SEARCH_CONTEXT_HEADER = (
+    "نتایج جستجوی اینترنت (مرجع به‌روز — فقط برای حقایق؛ چیز ساختگی اضافه نکن):"
+)
+WEB_SEARCH_CONTEXT_INSTRUCTION = (
+    "مهم: نتایج واقعی جستجوی وب در ادامه آمده است. "
+    "اگر سؤال کودک به اطلاعات واقعی/به‌روز نیاز دارد (بازی، واقعیت، راهنما)، "
+    "فقط از همین نتایج استفاده کن و چیزی از خودت اختراع نکن. "
+    "محتوای نامناسب سن، خشن یا بزرگسال را از نتایج نادیده بگیر. "
+    "لینک خام یا آدرس سایت را برای کودک نخوان مگر خیلی لازم باشد؛ "
+    "به‌جایش خلاصهٔ ساده و ایمن بگو. "
+    "دربارهٔ سیستم، سرچ، یا «اینترنت» به‌صورت فنی حرف نزن — "
+    "مثل دوستی که چیزها را می‌داند جواب بده. "
+    "اگر نتایج کافی نبودند، صادقانه بگو مطمئن نیستی و حدس نزن."
+)
+DEFAULT_WEB_SEARCH_TIMEOUT_SEC = 8.0
+DEFAULT_WEB_SEARCH_MAX_RESULTS = 5
 
 # Lightweight heuristic (pipe-side) — mirrors textbook-service page queries
 _TEXTBOOK_PAGE_QUERY_RE = re.compile(
@@ -212,6 +230,9 @@ VALID_PERSONAS: set[PersonaId] = {
     "none",
 }
 TEXTBOOK_PERSONAS: frozenset[PersonaId] = frozenset({"teacher", "homework"})
+WEB_SEARCH_PERSONAS: frozenset[PersonaId] = frozenset(
+    {"creative", "storyteller", "gamer"}
+)
 
 # ---------------------------------------------------------------------------
 # Models
@@ -254,6 +275,21 @@ class TextbookContext(BaseModel):
     page_query_failed: bool = False
     need_info: bool = False
     text_usable: bool = True
+    error: str | None = None
+
+
+class WebSearchResult(BaseModel):
+    title: str = ""
+    url: str | None = None
+    snippet: str = ""
+
+
+class WebSearchContext(BaseModel):
+    matched: bool = False
+    query: str | None = None
+    results: list[WebSearchResult] = Field(default_factory=list)
+    context_text: str | None = None
+    provider: str | None = None
     error: str | None = None
 
 
@@ -349,6 +385,14 @@ def status_fetching_textbook() -> str:
 
 def status_textbook_unavailable() -> str:
     return "⚠️ نتونستم به سرویس کتاب درسی وصل بشم..."
+
+
+def status_fetching_web_search() -> str:
+    return "🔎 دارم توی اینترنت دنبال اطلاعات می‌گردم..."
+
+
+def status_web_search_unavailable() -> str:
+    return "⚠️ جستجوی اینترنت الان در دسترس نبود..."
 
 
 def coerce_bool(value: Any, *, default: bool = True) -> bool:
@@ -460,6 +504,79 @@ def looks_like_textbook_help_request(text: str) -> bool:
     if not text.strip():
         return False
     return any(marker in text for marker in _TEXTBOOK_HELP_MARKERS)
+
+
+# Factual / info-seeking cues — web search is only useful when the child asks
+# for real-world or game facts, not pure play/story prompts.
+_WEB_SEARCH_NEED_RE = re.compile(
+    r"(?:"
+    r"چطور|چگونه|چیه|چیست|چی\s*هست|چی\s*شده|کجاست|کجا\s*(?:پیدا|میس?شه)|"
+    r"کی\s*(?:هست|بود|ساخته)|چرا\s*(?:این|اون)|آپدیت|نسخه|ورژن|"
+    r"اسم\s*(?:بازی|شخصیت)|قهرمان|آیتم|آیتم|الماس|کرافت|مود|اسکین|"
+    r"minecraft|roblox|fortnite|among\s*us|mario|lego|"
+    r"ماینکرفت|ماینکرافت|روبلاکس|فورتنایت|سوپر\s*ماریو|"
+    r"how\s+to|what\s+is|where\s+(?:is|can)|who\s+is|"
+    r"\?|؟"
+    r")",
+    re.IGNORECASE,
+)
+
+# Pure creative/play turns where injecting search snippets is usually noise.
+_WEB_SEARCH_SKIP_RE = re.compile(
+    r"(?:"
+    r"داستان\s*(?:بگو|کوتاه)|قصه\s*بگو|ادامه\s*بده|"
+    r"بازی\s*کنیم|یه\s*بازی|یه\s*ایده|ایده\s*بده|"
+    r"حوصله.?م\s*سر|چی\s*کار\s*کنم|نقاشی\s*کن|"
+    r"بسازیم|بیا\s*بازی"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def looks_like_web_search_request(text: str) -> bool:
+    """True when the latest user turn likely needs fresh/factual web info."""
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+    if _WEB_SEARCH_NEED_RE.search(cleaned):
+        return True
+    # Skip pure play/story prompts that have no factual cue.
+    if _WEB_SEARCH_SKIP_RE.search(cleaned):
+        return False
+    # Short greetings / acknowledgements — no search.
+    if len(cleaned) < 12:
+        return False
+    return False
+
+
+def build_web_search_query(messages: list[ChatMessage], *, max_len: int = 200) -> str:
+    """Use the latest user message as the web search query (trimmed)."""
+    latest = _get_latest_user_message(messages).strip()
+    if not latest:
+        return ""
+    # Collapse whitespace; keep Persian/English as-is.
+    collapsed = re.sub(r"\s+", " ", latest)
+    if len(collapsed) <= max_len:
+        return collapsed
+    return collapsed[: max_len - 1].rstrip() + "…"
+
+
+def _format_web_search_debug(
+    *, query: str, provider: str, context: WebSearchContext
+) -> str:
+    short_query = query if len(query) <= 60 else query[:57] + "..."
+    if context.error:
+        return f"🐞 دیباگ سرچ | خطا: {context.error} | provider={provider}"
+    if context.matched:
+        n = len(context.results)
+        return (
+            f"🐞 دیباگ سرچ | ✅ {n} نتیجه | provider={context.provider or provider} "
+            f"| کوئری: «{short_query}»"
+        )
+    return (
+        f"🐞 دیباگ سرچ | ❌ چیزی یافت نشد | provider={provider} "
+        f"| کوئری: «{short_query}»"
+    )
 
 
 def _textbook_has_topic_intent(text: str) -> bool:
@@ -1005,6 +1122,315 @@ async def fetch_textbook_context(
     return context
 
 
+def _format_web_search_results(results: list[WebSearchResult]) -> str:
+    lines: list[str] = []
+    for idx, item in enumerate(results, start=1):
+        title = item.title.strip() or f"نتیجه {idx}"
+        snippet = item.snippet.strip()
+        url = (item.url or "").strip()
+        block = f"{idx}. {title}"
+        if snippet:
+            block = f"{block}\n{snippet}"
+        if url:
+            block = f"{block}\nمنبع: {url}"
+        lines.append(block)
+    return "\n\n".join(lines)
+
+
+def _parse_external_web_search_payload(
+    data: dict[str, Any], *, query: str, provider: str
+) -> WebSearchContext:
+    results: list[WebSearchResult] = []
+    raw_results = data.get("results")
+    if isinstance(raw_results, list):
+        for item in raw_results:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            snippet = str(item.get("snippet") or item.get("content") or "").strip()
+            url_raw = item.get("url") or item.get("link")
+            url = str(url_raw).strip() if url_raw else None
+            if title or snippet:
+                results.append(WebSearchResult(title=title, url=url, snippet=snippet))
+
+    context_text = str(data.get("context_text") or "").strip()
+    if not context_text and results:
+        context_text = _format_web_search_results(results)
+
+    matched = bool(data.get("matched", bool(context_text or results)))
+    return WebSearchContext(
+        matched=matched,
+        query=query,
+        results=results,
+        context_text=context_text or None,
+        provider=provider,
+    )
+
+
+def _duckduckgo_instant_answer(
+    query: str, *, timeout_sec: float
+) -> list[WebSearchResult]:
+    params = urllib.parse.urlencode(
+        {
+            "q": query,
+            "format": "json",
+            "no_html": "1",
+            "skip_disambig": "1",
+            "t": "yarkids",
+        }
+    )
+    url = f"https://api.duckduckgo.com/?{params}"
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "YarKids/1.0 (child-assistant)"},
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+        raw = response.read().decode("utf-8")
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        return []
+
+    results: list[WebSearchResult] = []
+    abstract = str(data.get("AbstractText") or "").strip()
+    heading = str(data.get("Heading") or "").strip()
+    abstract_url = str(data.get("AbstractURL") or "").strip() or None
+    if abstract:
+        results.append(
+            WebSearchResult(
+                title=heading or "خلاصه",
+                url=abstract_url,
+                snippet=abstract,
+            )
+        )
+
+    answer = str(data.get("Answer") or "").strip()
+    if answer and answer != abstract:
+        results.append(WebSearchResult(title="پاسخ سریع", snippet=answer))
+
+    related = data.get("RelatedTopics")
+    if isinstance(related, list):
+        for item in related:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("Text") or "").strip()
+            first_url = str(item.get("FirstURL") or "").strip() or None
+            if text:
+                title = text.split(" - ", 1)[0][:80]
+                results.append(
+                    WebSearchResult(title=title, url=first_url, snippet=text)
+                )
+            if len(results) >= DEFAULT_WEB_SEARCH_MAX_RESULTS:
+                break
+    return results[:DEFAULT_WEB_SEARCH_MAX_RESULTS]
+
+
+def _duckduckgo_html_results(
+    query: str, *, max_results: int, timeout_sec: float
+) -> list[WebSearchResult]:
+    params = urllib.parse.urlencode({"q": query, "kp": "1"})  # kp=1 → safe search
+    # html.duckduckgo.com often serves a bot interstitial; lite is more reliable.
+    url = f"https://lite.duckduckgo.com/lite/?{params}"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (compatible; YarKids/1.0; +https://github.com/yarkids)"
+            )
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+        html = response.read().decode("utf-8", errors="replace")
+
+    # DuckDuckGo lite: result-link (title+url) + result-snippet.
+    title_re = re.compile(
+        r'class=[\'"]result-link[\'"][^>]*href="([^"]+)"[^>]*>(.*?)</a>'
+        r'|href="([^"]+)"[^>]*class=[\'"]result-link[\'"][^>]*>(.*?)</a>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    snippet_re = re.compile(
+        r'class=[\'"]result-snippet[\'"][^>]*>(.*?)</(?:td|div|a|span)>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    raw_titles = title_re.findall(html)
+    snippets = snippet_re.findall(html)
+
+    def _strip_tags(value: str) -> str:
+        cleaned = re.sub(r"<[^>]+>", " ", value)
+        cleaned = cleaned.replace("&amp;", "&").replace("&quot;", '"').replace(
+            "&#x27;", "'"
+        )
+        cleaned = urllib.parse.unquote(cleaned)
+        return re.sub(r"\s+", " ", cleaned).strip()
+
+    def _unwrap_ddg_link(href: str) -> str:
+        link = href.replace("&amp;", "&")
+        if "uddg=" in link:
+            # May be protocol-relative: //duckduckgo.com/l/?uddg=...
+            if link.startswith("//"):
+                link = "https:" + link
+            parsed = urllib.parse.urlparse(link)
+            qs = urllib.parse.parse_qs(parsed.query)
+            encoded = qs.get("uddg", [None])[0]
+            if encoded:
+                return urllib.parse.unquote(encoded)
+        return link
+
+    results: list[WebSearchResult] = []
+    for idx, groups in enumerate(raw_titles[:max_results]):
+        href = groups[0] or groups[2]
+        title_html = groups[1] or groups[3]
+        title = _strip_tags(title_html)
+        snippet = _strip_tags(snippets[idx]) if idx < len(snippets) else ""
+        link = _unwrap_ddg_link(href)
+        if title or snippet:
+            results.append(WebSearchResult(title=title, url=link, snippet=snippet))
+    return results
+
+
+def _search_duckduckgo(
+    query: str, *, max_results: int, timeout_sec: float
+) -> WebSearchContext:
+    results: list[WebSearchResult] = []
+    try:
+        results = _duckduckgo_instant_answer(query, timeout_sec=timeout_sec)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, ValueError):
+        results = []
+
+    if len(results) < max_results:
+        try:
+            html_results = _duckduckgo_html_results(
+                query, max_results=max_results, timeout_sec=timeout_sec
+            )
+            seen = {(r.title, r.url) for r in results}
+            for item in html_results:
+                key = (item.title, item.url)
+                if key in seen:
+                    continue
+                results.append(item)
+                seen.add(key)
+                if len(results) >= max_results:
+                    break
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
+            pass
+
+    results = results[:max_results]
+    if not results:
+        return WebSearchContext(matched=False, query=query, provider="duckduckgo")
+    return WebSearchContext(
+        matched=True,
+        query=query,
+        results=results,
+        context_text=_format_web_search_results(results),
+        provider="duckduckgo",
+    )
+
+
+def _search_via_api(
+    query: str,
+    *,
+    api_url: str,
+    api_key: str | None,
+    max_results: int,
+    timeout_sec: float,
+) -> WebSearchContext:
+    base = _normalize_api_base_url(api_url)
+    if not base:
+        return WebSearchContext(
+            matched=False, query=query, provider="api", error="no_api_url"
+        )
+
+    headers: dict[str, str] = {}
+    if api_key and api_key.strip():
+        headers["Authorization"] = f"Bearer {api_key.strip()}"
+
+    payload = {"query": query, "max_results": max_results}
+    try:
+        data = _http_post_json(
+            f"{base}/v1/search",
+            payload,
+            headers=headers,
+            timeout_sec=timeout_sec,
+        )
+    except urllib.error.HTTPError as exc:
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="api",
+            error=f"HTTP {exc.code} از {base}",
+        )
+    except urllib.error.URLError as exc:
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="api",
+            error=f"اتصال ناموفق به {base}: {exc.reason}",
+        )
+    except (json.JSONDecodeError, TimeoutError, ValueError) as exc:
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="api",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+    if not data:
+        return WebSearchContext(matched=False, query=query, provider="api")
+    return _parse_external_web_search_payload(data, query=query, provider="api")
+
+
+async def fetch_web_search_context(
+    query: str,
+    *,
+    provider: str = "auto",
+    api_url: str = "",
+    api_key: str | None = None,
+    max_results: int = DEFAULT_WEB_SEARCH_MAX_RESULTS,
+    timeout_sec: float = DEFAULT_WEB_SEARCH_TIMEOUT_SEC,
+) -> WebSearchContext | None:
+    """
+    Fetch web search snippets for creative/storyteller/gamer personas.
+
+    Providers:
+      - ``api``: POST ``{WEB_SEARCH_API_URL}/v1/search``
+      - ``duckduckgo``: built-in Instant Answer + HTML (safe search)
+      - ``auto``: use API when URL is set, otherwise DuckDuckGo
+
+    Returns None only when the query is empty; otherwise always a context
+    (matched=False on failure — graceful degrade).
+    """
+    cleaned = query.strip()
+    if not cleaned:
+        return None
+
+    max_results = max(1, min(int(max_results), 10))
+    normalized = (provider or "auto").strip().lower()
+    if normalized not in {"auto", "api", "duckduckgo"}:
+        normalized = "auto"
+
+    def _run() -> WebSearchContext:
+        use_api = normalized == "api" or (
+            normalized == "auto" and bool(_normalize_api_base_url(api_url))
+        )
+        if use_api:
+            ctx = _search_via_api(
+                cleaned,
+                api_url=api_url,
+                api_key=api_key,
+                max_results=max_results,
+                timeout_sec=timeout_sec,
+            )
+            # Fall back to DuckDuckGo if the custom API failed hard.
+            if ctx.matched or normalized == "api":
+                return ctx
+        return _search_duckduckgo(
+            cleaned, max_results=max_results, timeout_sec=timeout_sec
+        )
+
+    return await asyncio.to_thread(_run)
+
+
 # ---------------------------------------------------------------------------
 # Prompt builder
 # ---------------------------------------------------------------------------
@@ -1014,6 +1440,7 @@ def build_system_prompt(
     persona: PersonaId,
     revision_reasons: list[str] | None = None,
     textbook_context: TextbookContext | None = None,
+    web_search_context: WebSearchContext | None = None,
 ) -> str:
     sections: list[str] = [get_core_prompt()]
 
@@ -1044,6 +1471,17 @@ def build_system_prompt(
         sections.append(TEXTBOOK_LOOKUP_FAILED_INSTRUCTION)
     elif textbook_context and textbook_context.need_info:
         sections.append(TEXTBOOK_NEED_INFO_INSTRUCTION)
+
+    if (
+        web_search_context
+        and web_search_context.matched
+        and web_search_context.context_text
+    ):
+        sections.append(
+            f"{WEB_SEARCH_CONTEXT_INSTRUCTION}\n\n"
+            f"{WEB_SEARCH_CONTEXT_HEADER}\n"
+            f"{web_search_context.context_text}"
+        )
 
     if revision_reasons:
         reasons_text = "\n".join(f"- {reason}" for reason in revision_reasons)
@@ -1091,6 +1529,7 @@ def build_prompt_messages(
     conversation_messages: list[ChatMessage],
     revision_reasons: list[str] | None = None,
     textbook_context: TextbookContext | None = None,
+    web_search_context: WebSearchContext | None = None,
 ) -> list[dict[str, Any]]:
     llm_messages: list[dict[str, Any]] = [
         {
@@ -1099,6 +1538,7 @@ def build_prompt_messages(
                 persona,
                 revision_reasons,
                 textbook_context=textbook_context,
+                web_search_context=web_search_context,
             ),
         },
     ]
@@ -1289,6 +1729,7 @@ async def generate_response(
     revision_reasons: list[str] | None = None,
     temperature: float | None = None,
     textbook_context: TextbookContext | None = None,
+    web_search_context: WebSearchContext | None = None,
 ) -> str:
     request = LLMCompletionRequest(
         model=backend_model,
@@ -1297,6 +1738,7 @@ async def generate_response(
             conversation_messages=conversation_messages,
             revision_reasons=revision_reasons,
             textbook_context=textbook_context,
+            web_search_context=web_search_context,
         ),
         stream=False,
         temperature=temperature,
@@ -1336,6 +1778,7 @@ async def reflect_on_response(
     user_message: str,
     candidate_response: str,
     textbook_context: TextbookContext | None = None,
+    web_search_context: WebSearchContext | None = None,
 ) -> ReflectionResult:
     textbook_note = ""
     if textbook_context and textbook_context.matched:
@@ -1359,10 +1802,18 @@ async def reflect_on_response(
             "\n\nتوجه بازبین: نویسنده متن صفحه را نداشته؛ اگر محتوای دقیق صفحه را ساخته، REVISE."
         )
 
+    web_note = ""
+    if web_search_context and web_search_context.matched:
+        web_note = (
+            "\n\nتوجه بازبین: سیستم نتایج واقعی جستجوی وب را به نویسنده داده است. "
+            "اگر پاسخ بر اساس همان نتایج است، آن را توهم حساب نکن و PASS بده "
+            "(مگر اینکه ناامن یا نامناسب سن باشد)."
+        )
+
     review_prompt = (
         f"پیام کودک:\n{user_message}\n\n"
         f"پاسخ پیشنهادی:\n{candidate_response}"
-        f"{textbook_note}\n\n"
+        f"{textbook_note}{web_note}\n\n"
         "فقط JSON خروجی بده."
     )
     request = LLMCompletionRequest(
@@ -1390,6 +1841,7 @@ async def run_response_loop(
     temperature: float | None = None,
     on_status: Callable[[str], Awaitable[None]] | None = None,
     textbook_context: TextbookContext | None = None,
+    web_search_context: WebSearchContext | None = None,
     enable_reflection: bool = True,
 ) -> str:
     revision_reasons: list[str] = []
@@ -1407,6 +1859,7 @@ async def run_response_loop(
             revision_reasons=None,
             temperature=temperature,
             textbook_context=textbook_context,
+            web_search_context=web_search_context,
         )
 
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
@@ -1421,6 +1874,7 @@ async def run_response_loop(
             revision_reasons=revision_reasons or None,
             temperature=temperature,
             textbook_context=textbook_context,
+            web_search_context=web_search_context,
         )
 
         if on_status:
@@ -1432,6 +1886,7 @@ async def run_response_loop(
             user_message=user_message,
             candidate_response=candidate,
             textbook_context=textbook_context,
+            web_search_context=web_search_context,
         )
 
         if reflection.status == "PASS":
@@ -1508,6 +1963,47 @@ class Pipe:
         TEXTBOOK_DEBUG: bool = Field(
             default=False,
             description="نمایش اطلاعات دیباگ بازیابی کتاب در نوار وضعیت (برای عیب‌یابی).",
+        )
+        ENABLE_WEB_SEARCH: bool = Field(
+            default=True,
+            description=(
+                "فعال‌سازی جستجوی وب برای پرسوناهای خلاق / داستان‌گو / بازی و سرگرمی "
+                "(وقتی سؤال واقعی/به‌روز باشد)."
+            ),
+        )
+        WEB_SEARCH_PROVIDER: str = Field(
+            default="auto",
+            description=(
+                "ارائه‌دهنده جستجو: auto | duckduckgo | api "
+                "(auto = اگر WEB_SEARCH_API_URL تنظیم باشد از api، وگرنه DuckDuckGo)."
+            ),
+        )
+        WEB_SEARCH_API_URL: str = Field(
+            default="",
+            description=(
+                "آدرس پایهٔ سرویس جستجوی سفارشی (POST /v1/search). "
+                "خالی = استفاده از DuckDuckGo داخلی."
+            ),
+        )
+        WEB_SEARCH_API_KEY: str = Field(
+            default="",
+            description="کلید API اختیاری برای سرویس جستجو (Bearer token).",
+        )
+        WEB_SEARCH_REQUEST_TIMEOUT_SEC: float = Field(
+            default=DEFAULT_WEB_SEARCH_TIMEOUT_SEC,
+            ge=1.0,
+            le=30.0,
+            description="مهلت درخواست جستجوی وب (ثانیه).",
+        )
+        WEB_SEARCH_MAX_RESULTS: int = Field(
+            default=DEFAULT_WEB_SEARCH_MAX_RESULTS,
+            ge=1,
+            le=10,
+            description="حداکثر تعداد نتایج جستجو برای تزریق به پرامپت.",
+        )
+        WEB_SEARCH_DEBUG: bool = Field(
+            default=False,
+            description="نمایش اطلاعات دیباگ جستجوی وب در نوار وضعیت.",
         )
 
     class UserValves(BaseModel):
@@ -1723,6 +2219,42 @@ class Pipe:
             # Ask for the missing info instead of guessing or claiming no access.
             textbook_context = TextbookContext(need_info=True)
 
+        web_search_context: WebSearchContext | None = None
+        web_search_query = build_web_search_query(conversation_messages)
+        should_fetch_web = bool(
+            self.valves.ENABLE_WEB_SEARCH
+            and persona in WEB_SEARCH_PERSONAS
+            and web_search_query
+            and looks_like_web_search_request(user_message)
+        )
+        if should_fetch_web:
+            if on_status:
+                await on_status(status_fetching_web_search())
+            web_search_context = await fetch_web_search_context(
+                web_search_query,
+                provider=self.valves.WEB_SEARCH_PROVIDER,
+                api_url=self.valves.WEB_SEARCH_API_URL,
+                api_key=self.valves.WEB_SEARCH_API_KEY or None,
+                max_results=self.valves.WEB_SEARCH_MAX_RESULTS,
+                timeout_sec=self.valves.WEB_SEARCH_REQUEST_TIMEOUT_SEC,
+            )
+            if self.valves.WEB_SEARCH_DEBUG and on_status and web_search_context:
+                await on_status(
+                    _format_web_search_debug(
+                        query=web_search_query,
+                        provider=self.valves.WEB_SEARCH_PROVIDER,
+                        context=web_search_context,
+                    )
+                )
+                await asyncio.sleep(1.2)
+            if (
+                web_search_context
+                and not web_search_context.matched
+                and on_status
+                and not self.valves.WEB_SEARCH_DEBUG
+            ):
+                await on_status(status_web_search_unavailable())
+
         # Persona is already teacher/homework here (gate above); no switch needed.
         enable_reflection = read_valve_bool(
             self.valves, "ENABLE_REFLECTION", default=True
@@ -1735,5 +2267,6 @@ class Pipe:
             temperature=self.valves.TEMPERATURE,
             on_status=on_status,
             textbook_context=textbook_context,
+            web_search_context=web_search_context,
             enable_reflection=enable_reflection,
         )

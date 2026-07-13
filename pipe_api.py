@@ -287,6 +287,13 @@ class Pipe:
             default=True,
             description="بازیابی کتاب درسی از textbook-service (معلم/کمک‌درسی).",
         )
+        ENABLE_WEB_SEARCH: bool = Field(
+            default=True,
+            description=(
+                "جستجوی وب برای پرسوناهای خلاق / داستان‌گو / بازی و سرگرمی "
+                "(وقتی سؤال واقعی/به‌روز باشد)."
+            ),
+        )
         REQUEST_TIMEOUT_SEC: float = Field(
             default=DEFAULT_API_TIMEOUT_SEC,
             ge=10.0,
@@ -370,6 +377,7 @@ class Pipe:
             payload["temperature"] = self.valves.TEMPERATURE
         payload["enable_reflection"] = self.valves.ENABLE_REFLECTION
         payload["enable_textbook_context"] = self.valves.ENABLE_TEXTBOOK_CONTEXT
+        payload["enable_web_search"] = self.valves.ENABLE_WEB_SEARCH
         metadata = body.get("metadata")
         if isinstance(metadata, dict):
             payload["metadata"] = metadata

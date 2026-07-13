@@ -64,7 +64,7 @@ python scripts/build_embedded_pipe.py
 }
 ```
 
-مقادیر مجاز: `auto` | `creative` | `storyteller` | `teacher` | `homework`
+مقادیر مجاز: `auto` | `creative` | `storyteller` | `teacher` | `homework` | `gamer`
 
 همچنین می‌توانید مستقیم روی body بفرستید: `body.yarkids_persona` یا `body.persona`
 
@@ -85,6 +85,11 @@ Chat Controls → Valves → **شخصیت یار کودک**
 | `TEXTBOOK_REQUEST_TIMEOUT_SEC` | مهلت درخواست (ثانیه) |
 | `TEXTBOOK_NEIGHBOR_PAGES` | صفحات همسایه (۰–۳) |
 | `TEXTBOOK_INCLUDE_IMAGE` | `never` / `auto` / `always` |
+| `ENABLE_WEB_SEARCH` | جستجوی وب (خلاق / داستان‌گو / بازی و سرگرمی) |
+| `WEB_SEARCH_PROVIDER` | `auto` / `duckduckgo` / `api` |
+| `WEB_SEARCH_API_URL` | آدرس سرویس جستجوی سفارشی (اختیاری) |
+| `WEB_SEARCH_API_KEY` | کلید API اختیاری |
+| `WEB_SEARCH_MAX_RESULTS` | حداکثر تعداد نتایج (۱–۱۰) |
 
 ## کتاب درسی (textbook-service)
 
@@ -99,6 +104,15 @@ Chat Controls → Valves → **شخصیت یار کودک**
 جزئیات: [textbook-service/README.md](textbook-service/README.md)
 
 اگر API در دسترس نباشد، یار کودک بدون کانتکست کتاب ادامه می‌دهد.
+
+## جستجوی وب (creative / storyteller / gamer)
+
+برای پرسوناهای **خلاق**، **داستان‌گو** و **بازی و سرگرمی**، وقتی سؤال کودک واقعی/به‌روز به نظر برسد (مثلاً نکات بازی، «چطور …؟»، نام بازی)، سیستم قبل از تولید پاسخ در اینترنت جستجو می‌کند و خلاصهٔ نتایج را به پرامپت تزریق می‌کند.
+
+- پیش‌فرض: DuckDuckGo داخلی (بدون کلید، با safe search)
+- اختیاری: سرویس سفارشی با `WEB_SEARCH_API_URL` که `POST /v1/search` را با `{ "query", "max_results" }` بپذیرد و `{ "matched", "results": [{ "title", "url", "snippet" }], "context_text" }` برگرداند
+- در API: `POST /v1/web-search/query` و `POST /v1/web-search/retrieve`
+- اگر جستجو شکست بخورد، چت بدون نتایج ادامه می‌یابد (حدس نمی‌زند)
 
 ## ویرایش پرامپت‌ها
 

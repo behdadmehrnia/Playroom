@@ -13,7 +13,7 @@ import os
 
 from pydantic import BaseModel, Field
 
-from pipe import DEFAULT_TEXTBOOK_TIMEOUT_SEC, coerce_bool
+from pipe import DEFAULT_TEXTBOOK_TIMEOUT_SEC, DEFAULT_WEB_SEARCH_TIMEOUT_SEC, coerce_bool
 
 
 class Settings(BaseModel):
@@ -53,6 +53,17 @@ class Settings(BaseModel):
     textbook_neighbor_pages: int = Field(default=1, ge=0, le=3)
     textbook_include_image: str = Field(default="auto")
     textbook_debug: bool = Field(default=False)
+
+    # --- Web search (mirrors Pipe.Valves) — creative / storyteller / gamer ---
+    enable_web_search: bool = Field(default=True)
+    web_search_provider: str = Field(default="auto")
+    web_search_api_url: str = Field(default="")
+    web_search_api_key: str = Field(default="")
+    web_search_request_timeout_sec: float = Field(
+        default=DEFAULT_WEB_SEARCH_TIMEOUT_SEC, ge=1.0, le=30.0
+    )
+    web_search_max_results: int = Field(default=5, ge=1, le=10)
+    web_search_debug: bool = Field(default=False)
 
     # --- Server ---
     host: str = Field(default="0.0.0.0")
@@ -114,6 +125,15 @@ class Settings(BaseModel):
             textbook_neighbor_pages=env_int("YARKIDS_TEXTBOOK_NEIGHBOR_PAGES", 1),
             textbook_include_image=env("YARKIDS_TEXTBOOK_INCLUDE_IMAGE", "auto").strip().lower(),
             textbook_debug=env_bool("YARKIDS_TEXTBOOK_DEBUG", False),
+            enable_web_search=env_bool("YARKIDS_ENABLE_WEB_SEARCH", True),
+            web_search_provider=env("YARKIDS_WEB_SEARCH_PROVIDER", "auto").strip().lower(),
+            web_search_api_url=env("YARKIDS_WEB_SEARCH_API_URL").strip(),
+            web_search_api_key=env("YARKIDS_WEB_SEARCH_API_KEY").strip(),
+            web_search_request_timeout_sec=env_float(
+                "YARKIDS_WEB_SEARCH_REQUEST_TIMEOUT_SEC", DEFAULT_WEB_SEARCH_TIMEOUT_SEC
+            ),
+            web_search_max_results=env_int("YARKIDS_WEB_SEARCH_MAX_RESULTS", 5),
+            web_search_debug=env_bool("YARKIDS_WEB_SEARCH_DEBUG", False),
             host=env("YARKIDS_API_HOST", "0.0.0.0").strip(),
             port=env_int("YARKIDS_API_PORT", 8000),
             cors_origins=cors_origins,
@@ -122,5 +142,11 @@ class Settings(BaseModel):
     def normalized_include_image(self) -> str:
         value = self.textbook_include_image.strip().lower()
         if value not in {"never", "auto", "always"}:
+            return "auto"
+        return value
+
+    def normalized_web_search_provider(self) -> str:
+        value = self.web_search_provider.strip().lower()
+        if value not in {"auto", "api", "duckduckgo"}:
             return "auto"
         return value

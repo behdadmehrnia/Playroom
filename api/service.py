@@ -32,25 +32,33 @@ from pipe import (
     ReflectionResult,
     TextbookContext,
     TEXTBOOK_PERSONAS,
+    WEB_SEARCH_PERSONAS,
+    WebSearchContext,
     _format_textbook_debug,
+    _format_web_search_debug,
     _get_latest_user_message,
     build_textbook_query,
+    build_web_search_query,
     detect_intent,
     fetch_textbook_context,
+    fetch_web_search_context,
     generate_response,
     iter_text_chunks,
     looks_like_textbook_help_request,
     looks_like_textbook_page_query,
+    looks_like_web_search_request,
     reflect_on_response,
     resolve_active_persona,
     resolve_manual_persona,
     status_detecting_persona,
     status_fetching_textbook,
+    status_fetching_web_search,
     status_generating_response,
     status_persona_selected,
     status_reflection_disabled,
     status_reviewing_response,
     status_textbook_unavailable,
+    status_web_search_unavailable,
 )
 
 from api.config import Settings
@@ -66,6 +74,7 @@ class ChatResult:
     persona: PersonaId
     persona_source: str  # "manual" | "intent" | "default"
     textbook_context: TextbookContext | None = None
+    web_search_context: WebSearchContext | None = None
     attempts: int = 0
     reflection: ReflectionResult | None = None
     revised: bool = False
@@ -178,6 +187,52 @@ async def _resolve_textbook_context(
     return None
 
 
+async def _resolve_web_search_context(
+    *,
+    settings: Settings,
+    messages: list[ChatMessage],
+    persona: PersonaId,
+    enable_web_search: bool | None,
+    emit: Callable[[str], Awaitable[None]],
+) -> WebSearchContext | None:
+    """Fetch web search context using the same gate/heuristic as the Pipe."""
+    search_enabled = (
+        enable_web_search if enable_web_search is not None else settings.enable_web_search
+    )
+    user_message = _get_latest_user_message(messages)
+    query = build_web_search_query(messages)
+
+    should_fetch = bool(
+        search_enabled
+        and persona in WEB_SEARCH_PERSONAS
+        and query
+        and looks_like_web_search_request(user_message)
+    )
+    if not should_fetch:
+        return None
+
+    await emit(status_fetching_web_search())
+    provider = settings.normalized_web_search_provider()
+    context = await fetch_web_search_context(
+        query,
+        provider=provider,
+        api_url=settings.web_search_api_url,
+        api_key=settings.web_search_api_key or None,
+        max_results=settings.web_search_max_results,
+        timeout_sec=settings.web_search_request_timeout_sec,
+    )
+    if settings.web_search_debug and context:
+        await emit(
+            _format_web_search_debug(
+                query=query, provider=provider, context=context
+            )
+        )
+        await asyncio.sleep(1.2)
+    if context and not context.matched and not settings.web_search_debug:
+        await emit(status_web_search_unavailable())
+    return context
+
+
 async def _run_response_loop(
     *,
     llm_client: LLMClient,
@@ -186,6 +241,7 @@ async def _run_response_loop(
     conversation_messages: list[ChatMessage],
     temperature: float | None,
     textbook_context: TextbookContext | None,
+    web_search_context: WebSearchContext | None,
     enable_reflection: bool,
     emit: Callable[[str], Awaitable[None]],
 ) -> tuple[str, int, ReflectionResult | None, bool, bool]:
@@ -208,6 +264,7 @@ async def _run_response_loop(
             revision_reasons=None,
             temperature=temperature,
             textbook_context=textbook_context,
+            web_search_context=web_search_context,
         )
         return response, 1, None, False, False
 
@@ -229,6 +286,7 @@ async def _run_response_loop(
             revision_reasons=revision_reasons or None,
             temperature=temperature,
             textbook_context=textbook_context,
+            web_search_context=web_search_context,
         )
 
         await emit(status_reviewing_response())
@@ -238,6 +296,7 @@ async def _run_response_loop(
             user_message=user_message,
             candidate_response=candidate,
             textbook_context=textbook_context,
+            web_search_context=web_search_context,
         )
         final_reflection = reflection
 
@@ -263,6 +322,7 @@ async def run_chat(
     temperature: float | None = None,
     enable_reflection: bool | None = None,
     enable_textbook_context: bool | None = None,
+    enable_web_search: bool | None = None,
     on_status: StatusEmitter = None,
 ) -> ChatResult:
     """Run the full chat orchestration (mirrors ``Pipe._run_chat``).
@@ -296,6 +356,14 @@ async def run_chat(
         emit=emit,
     )
 
+    web_search_context = await _resolve_web_search_context(
+        settings=settings,
+        messages=messages,
+        persona=resolved_persona,
+        enable_web_search=enable_web_search,
+        emit=emit,
+    )
+
     refl_enabled = (
         enable_reflection if enable_reflection is not None else settings.enable_reflection
     )
@@ -308,6 +376,7 @@ async def run_chat(
         conversation_messages=messages,
         temperature=temp,
         textbook_context=textbook_context,
+        web_search_context=web_search_context,
         enable_reflection=refl_enabled,
         emit=emit,
     )
@@ -317,6 +386,7 @@ async def run_chat(
         persona=resolved_persona,
         persona_source=persona_source,
         textbook_context=textbook_context,
+        web_search_context=web_search_context,
         attempts=attempts,
         reflection=reflection,
         revised=revised,
@@ -336,6 +406,7 @@ async def run_chat_stream(
     temperature: float | None = None,
     enable_reflection: bool | None = None,
     enable_textbook_context: bool | None = None,
+    enable_web_search: bool | None = None,
     enable_status: bool = True,
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream a chat run as a sequence of event dicts.
@@ -373,6 +444,7 @@ async def run_chat_stream(
                 temperature=temperature,
                 enable_reflection=enable_reflection,
                 enable_textbook_context=enable_textbook_context,
+                enable_web_search=enable_web_search,
                 on_status=on_status,
             )
         finally:
