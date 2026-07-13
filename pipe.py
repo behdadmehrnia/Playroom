@@ -518,26 +518,22 @@ def looks_like_textbook_help_request(text: str) -> bool:
     return any(marker in text for marker in _TEXTBOOK_HELP_MARKERS)
 
 
-# Factual / info-seeking cues — web search is only useful when the child asks
-# for real-world or game facts, not pure play/story prompts.
+# Factual / info-seeking cues — decide WHEN to search (not what the answer is).
 _WEB_SEARCH_NEED_RE = re.compile(
     r"(?:"
     r"چطور|چگونه|چیه|چیست|چی\s*هست|چی\s*شده|کجاست|کجا\s*(?:پیدا|میس?شه)|"
     r"کی\s*(?:هست|بود|ساخته)|چرا\s*(?:این|اون)|آپدیت|نسخه|ورژن|"
-    r"منتشر|اومده|اومد|اومده\s*یا|وجود\s*داره|واقعیه|"
-    r"اسم\s*(?:بازی|شخصیت)|قهرمان|آیتم|الماس|کرافت|مود|اسکین|"
-    r"minecraft|roblox|fortnite|among\s*us|mario|lego|"
-    r"forza|horizon|fifa|gta|pokemon|zelda|sonic|valorant|genshin|"
-    r"pubg|brawl|clash|spiderman|spider.?man|call\s*of\s*duty|"
-    r"ماینکرفت|ماینکرافت|روبلاکس|فورتنایت|سوپر\s*ماریو|"
-    r"فورزا|هورایزن|فیفا|جی\s*تی\s*ای|پابجی|کلش|براول|پوکیمون|"
+    r"منتشر|اومده|وجود\s*داره|واقعیه|"
+    r"تحقیق|جستجو|سرچ|اینترنت|نصب(?:ش|ش؟\s*کن)?"
+    r"|درباره(?:\s*ی|\s*ٔ)?"
+    r"|اسم\s*(?:بازی|شخصیت)|قهرمان|آیتم|مود|اسکین|"
     r"how\s+to|what\s+is|where\s+(?:is|can)|who\s+is|"
     r"\?|؟"
     r")",
     re.IGNORECASE,
 )
 
-# Named title + version (e.g. «فورزا هورایزن ۶»، «Horizon 5»، «GTA 6»).
+# Named title + version (e.g. «فورزا هورایزن ۶»، «Horizon 5»).
 _WEB_SEARCH_GAME_VERSION_RE = re.compile(
     r"(?:"
     r"[A-Za-z][A-Za-z0-9:'-]{1,}(?:\s+[A-Za-z][A-Za-z0-9:'-]{1,}){0,4}\s*[\d۰-۹]{1,2}"
@@ -550,14 +546,24 @@ _WEB_SEARCH_GAME_VERSION_RE = re.compile(
 _WEB_SEARCH_GAME_TALK_RE = re.compile(
     r"(?:"
     r"بازی\s+(?!کنیم|کنیم!|کلم|فکری|عددی)"
-    r"[\w\u0600-\u06FF]"  # «بازی فورزا...» / «بازی ماینکرفت»
+    r"[\w\u0600-\u06FF]"
     r"|"
     r"(?:دوست\s*دارم|بازی\s*می‌?کنم|بازی\s*کردم|بلدی|شناختی)\b"
     r")",
     re.IGNORECASE,
 )
 
-# Pure creative/play turns where injecting search snippets is usually noise.
+# Latest turn refers to an earlier topic («دربارش تحقیق کن»).
+_WEB_SEARCH_REFERRING_RE = re.compile(
+    r"(?:"
+    r"دربار(?:هٔ?|ه‌ی?|ش)|همین|اون(?:و)?|همان|"
+    r"تحقیق\s*کن|سرچ\s*کن|جستجو\s*کن|بیشتر\s*بگو|"
+    r"پیداش?\s*کن|بگرد|اینترنت"
+    r")",
+    re.IGNORECASE,
+)
+
+# Pure creative/play turns where search is usually noise.
 _WEB_SEARCH_SKIP_RE = re.compile(
     r"(?:"
     r"داستان\s*(?:بگو|کوتاه)|قصه\s*بگو|ادامه\s*بده|"
@@ -569,7 +575,6 @@ _WEB_SEARCH_SKIP_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Soft fillers to strip when building a cleaner search query.
 _WEB_SEARCH_LIKE_TAIL_RE = re.compile(
     r"(?:"
     r"(?:\s+من)?\s+خیلی\s+دوست\s+دارم\.?\s*$"
@@ -582,27 +587,88 @@ _WEB_SEARCH_LIKE_TAIL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Strip chat fluff so the search box gets the topic, not «میتونی تحقیق کنی».
+_WEB_SEARCH_CHAT_FILLERS: frozenset[str] = frozenset(
+    {
+        "درباره",
+        "درباره‌ی",
+        "دربارهٔ",
+        "دربارش",
+        "ی",
+        "یه",
+        "یک",
+        "من",
+        "تو",
+        "این",
+        "اون",
+        "هم",
+        "همون",
+        "همین",
+        "میتونی",
+        "می‌تونی",
+        "میشه",
+        "می‌شه",
+        "تحقیق",
+        "کنی",
+        "کن",
+        "ببینی",
+        "ببین",
+        "چیه",
+        "چیست",
+        "چی",
+        "میخوام",
+        "می‌خوام",
+        "نصبش",
+        "نصب",
+        "کنم",
+        "برام",
+        "بهم",
+        "لطفا",
+        "لطفاً",
+        "بازیه",
+        "انگار",
+        "مثل",
+        "شبیه",
+        "خب",
+        "مگه",
+        "به",
+        "از",
+        "با",
+        "رو",
+        "را",
+        "و",
+        "یا",
+        "که",
+        "اینترنت",
+        "دسترسی",
+        "نداری",
+        "داری",
+        "سرچ",
+        "جستجو",
+        "بگو",
+        "بده",
+        "بگرد",
+        "پیدا",
+    }
+)
+
 
 def looks_like_web_search_request(
     text: str, *, persona: PersonaId | str | None = None
 ) -> bool:
-    """True when the latest user turn likely needs fresh/factual web info."""
+    """True when the latest user turn likely needs a real web lookup."""
     cleaned = text.strip()
     if not cleaned:
         return False
-    # Named franchise / how-to / existence cues.
     if _WEB_SEARCH_NEED_RE.search(cleaned):
         return True
-    # «فورزا هورایزن ۶»، «GTA 6»، title + version number.
     if _WEB_SEARCH_GAME_VERSION_RE.search(cleaned):
         return True
-    # Pure play/story without a titled game — skip.
     if _WEB_SEARCH_SKIP_RE.search(cleaned):
         return False
-    # Gamer: «بازی X رو دوست دارم / بلدی؟» even without «؟» when a title-like token exists.
     if persona == "gamer" and _WEB_SEARCH_GAME_TALK_RE.search(cleaned):
         if re.search(r"[A-Za-z]{3,}", cleaned) or re.search(
-            r"[\u0600-\u06FF]{3,}\s+[\u0600-\u06FF]{3,}", cleaned
+            r"[\u0600-\u06FF]{3,}", cleaned
         ):
             return True
     if len(cleaned) < 12:
@@ -610,26 +676,68 @@ def looks_like_web_search_request(
     return False
 
 
-def build_web_search_query(messages: list[ChatMessage], *, max_len: int = 200) -> str:
-    """Use the latest user message as the web search query (trimmed)."""
-    latest = _get_latest_user_message(messages).strip()
-    if not latest:
-        return ""
-    collapsed = re.sub(r"\s+", " ", latest)
+def _strip_web_search_chat_fillers(text: str) -> str:
+    tokens = re.split(r"[\s،,.?؟!؛:]+", text)
+    kept = [
+        tok
+        for tok in tokens
+        if tok
+        and tok not in _WEB_SEARCH_CHAT_FILLERS
+        and tok.lower() not in _WEB_SEARCH_CHAT_FILLERS
+    ]
+    return " ".join(kept).strip()
+
+
+def _topic_from_user_text(text: str) -> str:
+    collapsed = re.sub(r"\s+", " ", text.strip())
     tightened = _WEB_SEARCH_LIKE_TAIL_RE.sub("", collapsed)
     tightened = re.sub(r"^\s*من\s+", "", tightened)
     tightened = re.sub(r"\s+", " ", tightened).strip(" .،!")
-    if tightened and len(tightened) >= 3:
-        collapsed = tightened
-    # Help search engines resolve Persian game-name chats.
-    if (
-        _WEB_SEARCH_GAME_VERSION_RE.search(collapsed)
-        or _WEB_SEARCH_NEED_RE.search(collapsed)
-    ) and "بازی" not in collapsed:
-        collapsed = f"{collapsed} بازی"
-    if len(collapsed) <= max_len:
-        return collapsed
-    return collapsed[: max_len - 1].rstrip() + "…"
+    return _strip_web_search_chat_fillers(tightened) or tightened
+
+
+def build_web_search_query(messages: list[ChatMessage], *, max_len: int = 200) -> str:
+    """Build a search query the way a person would type it into Google.
+
+    Uses the child's own words (minus chat fluff). If they say «تحقیق کن دربارش»,
+    pulls the topic from earlier turns — no name dictionaries / aliases.
+    """
+    user_texts = [
+        message.content.strip()
+        for message in messages
+        if message.role == "user" and message.content.strip()
+    ]
+    if not user_texts:
+        return ""
+
+    latest = user_texts[-1]
+    window = user_texts[-8:]
+
+    topic_source = latest
+    if _WEB_SEARCH_REFERRING_RE.search(latest) and len(window) >= 2:
+        for text in reversed(window[:-1]):
+            topic = _topic_from_user_text(text)
+            if topic and len(topic) >= 2:
+                topic_source = text
+                break
+
+    core = _topic_from_user_text(topic_source)
+    if not core:
+        core = re.sub(r"\s+", " ", latest).strip()
+    if len(core) <= max_len:
+        return core
+    return core[: max_len - 1].rstrip() + "…"
+
+
+def _web_search_query_variants(query: str) -> list[str]:
+    """Light natural refinements only (same words + optional «بازی»)."""
+    cleaned = query.strip()
+    if not cleaned:
+        return []
+    variants = [cleaned]
+    if "بازی" not in cleaned and "game" not in cleaned.lower():
+        variants.append(f"{cleaned} بازی")
+    return variants
 
 
 def _format_web_search_debug(
@@ -1398,6 +1506,167 @@ def _search_duckduckgo(
     )
 
 
+def _wikipedia_opensearch(
+    query: str, *, lang: str, limit: int, timeout_sec: float
+) -> list[tuple[str, str]]:
+    """Return list of (title, page_url) from MediaWiki opensearch."""
+    params = urllib.parse.urlencode(
+        {
+            "action": "opensearch",
+            "search": query,
+            "limit": str(limit),
+            "namespace": "0",
+            "format": "json",
+        }
+    )
+    url = f"https://{lang}.wikipedia.org/w/api.php?{params}"
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "YarKids/1.0 (child-assistant; web-search)"},
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    if not isinstance(data, list) or len(data) < 4:
+        return []
+    titles = data[1] if isinstance(data[1], list) else []
+    urls = data[3] if isinstance(data[3], list) else []
+    pairs: list[tuple[str, str]] = []
+    for idx, title in enumerate(titles):
+        title_s = str(title).strip()
+        if not title_s:
+            continue
+        page_url = str(urls[idx]).strip() if idx < len(urls) else ""
+        pairs.append((title_s, page_url))
+    return pairs
+
+
+def _wikipedia_summary(
+    title: str, *, lang: str, timeout_sec: float
+) -> str | None:
+    encoded = urllib.parse.quote(title.replace(" ", "_"), safe="")
+    url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{encoded}"
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "YarKids/1.0 (child-assistant; web-search)"},
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    extract = str(data.get("extract") or "").strip()
+    return extract or None
+
+
+def _wikipedia_title_relevant(query: str, title: str) -> bool:
+    q = re.sub(r"\b(game|video|بازی)\b", "", query, flags=re.IGNORECASE).strip().lower()
+    t = title.lower()
+    if not q:
+        return True
+    if q in t or t.startswith(q):
+        return True
+    token = q.split()[0] if q.split() else q
+    return len(token) >= 4 and (token in t or t.startswith(token))
+
+
+def _search_wikipedia(
+    query: str, *, max_results: int, timeout_sec: float
+) -> WebSearchContext:
+    """Reliable fallback for known games/topics when DuckDuckGo is flaky."""
+    results: list[WebSearchResult] = []
+    seen_titles: set[str] = set()
+    # Prefer English for game titles (Persian transliterations often miss).
+    for lang in ("en", "fa"):
+        try:
+            pairs = _wikipedia_opensearch(
+                query, lang=lang, limit=max(max_results, 3), timeout_sec=timeout_sec
+            )
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            TimeoutError,
+            json.JSONDecodeError,
+            ValueError,
+        ):
+            continue
+        for title, page_url in pairs:
+            key = title.lower()
+            if key in seen_titles:
+                continue
+            if not _wikipedia_title_relevant(query, title):
+                continue
+            try:
+                extract = _wikipedia_summary(
+                    title, lang=lang, timeout_sec=timeout_sec
+                )
+            except (
+                urllib.error.URLError,
+                urllib.error.HTTPError,
+                TimeoutError,
+                json.JSONDecodeError,
+                ValueError,
+            ):
+                extract = None
+            if not extract:
+                continue
+            seen_titles.add(key)
+            results.append(
+                WebSearchResult(
+                    title=title,
+                    url=page_url or None,
+                    snippet=extract[:500],
+                )
+            )
+            if len(results) >= max_results:
+                break
+        if len(results) >= max_results:
+            break
+
+    if not results:
+        return WebSearchContext(matched=False, query=query, provider="wikipedia")
+    return WebSearchContext(
+        matched=True,
+        query=query,
+        results=results,
+        context_text=_format_web_search_results(results),
+        provider="wikipedia",
+    )
+
+
+def _merge_web_search_results(
+    *contexts: WebSearchContext, query: str, max_results: int
+) -> WebSearchContext:
+    merged: list[WebSearchResult] = []
+    seen: set[tuple[str, str | None]] = set()
+    providers: list[str] = []
+    for ctx in contexts:
+        if not ctx or not ctx.matched:
+            continue
+        if ctx.provider:
+            providers.append(ctx.provider)
+        for item in ctx.results:
+            key = (item.title.lower(), item.url)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+            if len(merged) >= max_results:
+                break
+        if len(merged) >= max_results:
+            break
+    if not merged:
+        return WebSearchContext(matched=False, query=query, provider="auto")
+    provider = "+".join(dict.fromkeys(providers)) or "auto"
+    return WebSearchContext(
+        matched=True,
+        query=query,
+        results=merged,
+        context_text=_format_web_search_results(merged),
+        provider=provider,
+    )
+
+
 def _search_via_api(
     query: str,
     *,
@@ -1465,11 +1734,11 @@ async def fetch_web_search_context(
 
     Providers:
       - ``api``: POST ``{WEB_SEARCH_API_URL}/v1/search``
-      - ``duckduckgo``: built-in Instant Answer + HTML (safe search)
-      - ``auto``: use API when URL is set, otherwise DuckDuckGo
+      - ``duckduckgo``: web search (Wikipedia as backup)
+      - ``auto``: API when URL is set, else DuckDuckGo then Wikipedia
 
-    Returns None only when the query is empty; otherwise always a context
-    (matched=False on failure — graceful degrade).
+    Searches the query as written (no name dictionaries). Returns matched=False
+    on total failure (graceful degrade).
     """
     cleaned = query.strip()
     if not cleaned:
@@ -1480,23 +1749,56 @@ async def fetch_web_search_context(
     if normalized not in {"auto", "api", "duckduckgo"}:
         normalized = "auto"
 
+    variants = _web_search_query_variants(cleaned)
+
     def _run() -> WebSearchContext:
         use_api = normalized == "api" or (
             normalized == "auto" and bool(_normalize_api_base_url(api_url))
         )
         if use_api:
-            ctx = _search_via_api(
-                cleaned,
-                api_url=api_url,
-                api_key=api_key,
-                max_results=max_results,
-                timeout_sec=timeout_sec,
-            )
-            # Fall back to DuckDuckGo if the custom API failed hard.
-            if ctx.matched or normalized == "api":
-                return ctx
-        return _search_duckduckgo(
-            cleaned, max_results=max_results, timeout_sec=timeout_sec
+            for variant in variants:
+                ctx = _search_via_api(
+                    variant,
+                    api_url=api_url,
+                    api_key=api_key,
+                    max_results=max_results,
+                    timeout_sec=timeout_sec,
+                )
+                if ctx.matched:
+                    ctx.query = cleaned
+                    return ctx
+            if normalized == "api":
+                return WebSearchContext(
+                    matched=False, query=cleaned, provider="api"
+                )
+
+        # Real web search first — same idea as typing the words into a search box.
+        ddg_hits: list[WebSearchContext] = []
+        if normalized in {"auto", "duckduckgo"}:
+            for variant in variants[:2]:
+                ddg = _search_duckduckgo(
+                    variant,
+                    max_results=max_results,
+                    timeout_sec=min(timeout_sec, 6.0),
+                )
+                if ddg.matched:
+                    ddg_hits.append(ddg)
+                    break
+
+        wiki_hits: list[WebSearchContext] = []
+        if not ddg_hits:
+            for variant in variants:
+                wiki = _search_wikipedia(
+                    variant,
+                    max_results=max_results,
+                    timeout_sec=min(timeout_sec, 8.0),
+                )
+                if wiki.matched:
+                    wiki_hits.append(wiki)
+                    break
+
+        return _merge_web_search_results(
+            *ddg_hits, *wiki_hits, query=cleaned, max_results=max_results
         )
 
     return await asyncio.to_thread(_run)
