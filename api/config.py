@@ -50,7 +50,7 @@ class Settings(BaseModel):
     textbook_request_timeout_sec: float = Field(
         default=DEFAULT_TEXTBOOK_TIMEOUT_SEC, ge=1.0, le=1200.0
     )
-    textbook_neighbor_pages: int = Field(default=1, ge=0, le=10)
+    textbook_neighbor_pages: int = Field(default=1, ge=0, le=3)
     textbook_include_image: str = Field(default="auto")
     textbook_debug: bool = Field(default=False)
 
