@@ -102,12 +102,24 @@ WEB_SEARCH_CONTEXT_INSTRUCTION = (
     "مهم: نتایج واقعی جستجوی وب در ادامه آمده است. "
     "اگر سؤال کودک به اطلاعات واقعی/به‌روز نیاز دارد (بازی، واقعیت، راهنما)، "
     "فقط از همین نتایج استفاده کن و چیزی از خودت اختراع نکن. "
+    "**ممنوع بدون استناد به همین نتایج:** گفتن «این بازی وجود ندارد»، "
+    "«هنوز ساخته/منتشر نشده»، یا تصحیح نام بازی به نسخهٔ دیگر. "
+    "اگر نتایج می‌گویند بازی اعلام/منتشر شده، همان را ملایم و مناسب سن بگو؛ "
+    "اگر نتایج مبهم‌اند، بگو مطمئن نیستی — حدس نزن. "
     "محتوای نامناسب سن، خشن یا بزرگسال را از نتایج نادیده بگیر. "
     "لینک خام یا آدرس سایت را برای کودک نخوان مگر خیلی لازم باشد؛ "
     "به‌جایش خلاصهٔ ساده و ایمن بگو. "
     "دربارهٔ سیستم، سرچ، یا «اینترنت» به‌صورت فنی حرف نزن — "
     "مثل دوستی که چیزها را می‌داند جواب بده. "
     "اگر نتایج کافی نبودند، صادقانه بگو مطمئن نیستی و حدس نزن."
+)
+WEB_SEARCH_NO_RESULTS_INSTRUCTION = (
+    "توجه: کودک دربارهٔ یک بازی یا واقعیت صحبت می‌کند، اما الان نتایج جستجوی وب "
+    "در پرامپت نیست (پیدا نشد یا سرویس در دسترس نبود). "
+    "**هرگز نگو این بازی وجود ندارد / هنوز ساخته نشده / منتشر نشده** مگر کاملاً مطمئن باشی. "
+    "اگر مطمئن نیستی: هیجان‌زده با علاقه‌اش همراهی کن، بگو جزئیات دقیق را الان مطمئن نیستی، "
+    "و بپرس دوست دارد دربارهٔ چه چیز بازی حرف بزنید یا بازی کلامی کنید. "
+    "دربارهٔ سیستم یا جستجو حرف نزن."
 )
 DEFAULT_WEB_SEARCH_TIMEOUT_SEC = 8.0
 DEFAULT_WEB_SEARCH_MAX_RESULTS = 5
@@ -512,11 +524,35 @@ _WEB_SEARCH_NEED_RE = re.compile(
     r"(?:"
     r"چطور|چگونه|چیه|چیست|چی\s*هست|چی\s*شده|کجاست|کجا\s*(?:پیدا|میس?شه)|"
     r"کی\s*(?:هست|بود|ساخته)|چرا\s*(?:این|اون)|آپدیت|نسخه|ورژن|"
-    r"اسم\s*(?:بازی|شخصیت)|قهرمان|آیتم|آیتم|الماس|کرافت|مود|اسکین|"
+    r"منتشر|اومده|اومد|اومده\s*یا|وجود\s*داره|واقعیه|"
+    r"اسم\s*(?:بازی|شخصیت)|قهرمان|آیتم|الماس|کرافت|مود|اسکین|"
     r"minecraft|roblox|fortnite|among\s*us|mario|lego|"
+    r"forza|horizon|fifa|gta|pokemon|zelda|sonic|valorant|genshin|"
+    r"pubg|brawl|clash|spiderman|spider.?man|call\s*of\s*duty|"
     r"ماینکرفت|ماینکرافت|روبلاکس|فورتنایت|سوپر\s*ماریو|"
+    r"فورزا|هورایزن|فیفا|جی\s*تی\s*ای|پابجی|کلش|براول|پوکیمون|"
     r"how\s+to|what\s+is|where\s+(?:is|can)|who\s+is|"
     r"\?|؟"
+    r")",
+    re.IGNORECASE,
+)
+
+# Named title + version (e.g. «فورزا هورایزن ۶»، «Horizon 5»، «GTA 6»).
+_WEB_SEARCH_GAME_VERSION_RE = re.compile(
+    r"(?:"
+    r"[A-Za-z][A-Za-z0-9:'-]{1,}(?:\s+[A-Za-z][A-Za-z0-9:'-]{1,}){0,4}\s*[\d۰-۹]{1,2}"
+    r"|"
+    r"[\u0600-\u06FF]{2,}(?:\s+[\u0600-\u06FF]{2,}){0,4}\s*[\d۰-۹]{1,2}"
+    r")",
+)
+
+# Talking about a specific game even without a question mark.
+_WEB_SEARCH_GAME_TALK_RE = re.compile(
+    r"(?:"
+    r"بازی\s+(?!کنیم|کنیم!|کلم|فکری|عددی)"
+    r"[\w\u0600-\u06FF]"  # «بازی فورزا...» / «بازی ماینکرفت»
+    r"|"
+    r"(?:دوست\s*دارم|بازی\s*می‌?کنم|بازی\s*کردم|بلدی|شناختی)\b"
     r")",
     re.IGNORECASE,
 )
@@ -525,25 +561,50 @@ _WEB_SEARCH_NEED_RE = re.compile(
 _WEB_SEARCH_SKIP_RE = re.compile(
     r"(?:"
     r"داستان\s*(?:بگو|کوتاه)|قصه\s*بگو|ادامه\s*بده|"
-    r"بازی\s*کنیم|یه\s*بازی|یه\s*ایده|ایده\s*بده|"
+    r"بازی\s*کنیم|یه\s*بازی\s*(?:کلم|فکری|عددی|سریع)?|"
+    r"یه\s*ایده|ایده\s*بده|"
     r"حوصله.?م\s*سر|چی\s*کار\s*کنم|نقاشی\s*کن|"
     r"بسازیم|بیا\s*بازی"
     r")",
     re.IGNORECASE,
 )
 
+# Soft fillers to strip when building a cleaner search query.
+_WEB_SEARCH_LIKE_TAIL_RE = re.compile(
+    r"(?:"
+    r"(?:\s+من)?\s+خیلی\s+دوست\s+دارم\.?\s*$"
+    r"|\s+دوست\s+دارم\.?\s*$"
+    r"|\s+بازی\s+می‌?کنم\.?\s*$"
+    r"|\s+بازی\s+کردم\.?\s*$"
+    r"|\s+رو\s+بلدی\??\s*$"
+    r"|\s+رو\s+می‌?شناسی\??\s*$"
+    r")",
+    re.IGNORECASE,
+)
 
-def looks_like_web_search_request(text: str) -> bool:
+
+def looks_like_web_search_request(
+    text: str, *, persona: PersonaId | str | None = None
+) -> bool:
     """True when the latest user turn likely needs fresh/factual web info."""
     cleaned = text.strip()
     if not cleaned:
         return False
+    # Named franchise / how-to / existence cues.
     if _WEB_SEARCH_NEED_RE.search(cleaned):
         return True
-    # Skip pure play/story prompts that have no factual cue.
+    # «فورزا هورایزن ۶»، «GTA 6»، title + version number.
+    if _WEB_SEARCH_GAME_VERSION_RE.search(cleaned):
+        return True
+    # Pure play/story without a titled game — skip.
     if _WEB_SEARCH_SKIP_RE.search(cleaned):
         return False
-    # Short greetings / acknowledgements — no search.
+    # Gamer: «بازی X رو دوست دارم / بلدی؟» even without «؟» when a title-like token exists.
+    if persona == "gamer" and _WEB_SEARCH_GAME_TALK_RE.search(cleaned):
+        if re.search(r"[A-Za-z]{3,}", cleaned) or re.search(
+            r"[\u0600-\u06FF]{3,}\s+[\u0600-\u06FF]{3,}", cleaned
+        ):
+            return True
     if len(cleaned) < 12:
         return False
     return False
@@ -554,8 +615,18 @@ def build_web_search_query(messages: list[ChatMessage], *, max_len: int = 200) -
     latest = _get_latest_user_message(messages).strip()
     if not latest:
         return ""
-    # Collapse whitespace; keep Persian/English as-is.
     collapsed = re.sub(r"\s+", " ", latest)
+    tightened = _WEB_SEARCH_LIKE_TAIL_RE.sub("", collapsed)
+    tightened = re.sub(r"^\s*من\s+", "", tightened)
+    tightened = re.sub(r"\s+", " ", tightened).strip(" .،!")
+    if tightened and len(tightened) >= 3:
+        collapsed = tightened
+    # Help search engines resolve Persian game-name chats.
+    if (
+        _WEB_SEARCH_GAME_VERSION_RE.search(collapsed)
+        or _WEB_SEARCH_NEED_RE.search(collapsed)
+    ) and "بازی" not in collapsed:
+        collapsed = f"{collapsed} بازی"
     if len(collapsed) <= max_len:
         return collapsed
     return collapsed[: max_len - 1].rstrip() + "…"
@@ -1482,6 +1553,10 @@ def build_system_prompt(
             f"{WEB_SEARCH_CONTEXT_HEADER}\n"
             f"{web_search_context.context_text}"
         )
+    elif web_search_context is not None and not web_search_context.matched:
+        # We attempted a search (game/fact talk) but got nothing — block
+        # hallucinated «doesn't exist / not released» claims.
+        sections.append(WEB_SEARCH_NO_RESULTS_INSTRUCTION)
 
     if revision_reasons:
         reasons_text = "\n".join(f"- {reason}" for reason in revision_reasons)
@@ -1808,6 +1883,11 @@ async def reflect_on_response(
             "\n\nتوجه بازبین: سیستم نتایج واقعی جستجوی وب را به نویسنده داده است. "
             "اگر پاسخ بر اساس همان نتایج است، آن را توهم حساب نکن و PASS بده "
             "(مگر اینکه ناامن یا نامناسب سن باشد)."
+        )
+    elif web_search_context is not None and not web_search_context.matched:
+        web_note = (
+            "\n\nتوجه بازبین: نویسنده نتایج جستجو نداشته. "
+            "اگر ادعا کرده بازی وجود ندارد / هنوز منتشر نشده بدون شواهد، REVISE."
         )
 
     review_prompt = (
@@ -2225,7 +2305,7 @@ class Pipe:
             self.valves.ENABLE_WEB_SEARCH
             and persona in WEB_SEARCH_PERSONAS
             and web_search_query
-            and looks_like_web_search_request(user_message)
+            and looks_like_web_search_request(user_message, persona=persona)
         )
         if should_fetch_web:
             if on_status:

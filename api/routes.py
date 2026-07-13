@@ -420,7 +420,11 @@ async def retrieve_web_search_endpoint(
         gate_blocked = True
         gate_reason = "web_search_disabled"
 
-    needs_heuristic = looks_like_web_search_request(user_message) if user_message else True
+    needs_heuristic = (
+        looks_like_web_search_request(user_message, persona=persona)
+        if user_message
+        else True
+    )
     should_fetch = bool(
         search_enabled
         and query

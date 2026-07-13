@@ -206,7 +206,7 @@ async def _resolve_web_search_context(
         search_enabled
         and persona in WEB_SEARCH_PERSONAS
         and query
-        and looks_like_web_search_request(user_message)
+        and looks_like_web_search_request(user_message, persona=persona)
     )
     if not should_fetch:
         return None
