@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 MODEL_ID = "yarkids_api"
 MODEL_NAME = "یار کودک مستقل"
 MANUAL_PERSONA_METADATA_KEY = "yarkids_persona"
-SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework")
+SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework", "gamer")
 DEFAULT_API_TIMEOUT_SEC = 300.0
 
 PERSONA_DROPDOWN_OPTIONS: list[dict[str, str]] = [
@@ -39,6 +39,7 @@ PERSONA_DROPDOWN_OPTIONS: list[dict[str, str]] = [
     {"value": "storyteller", "label": "📖 داستان‌گو"},
     {"value": "teacher", "label": "📚 معلم"},
     {"value": "homework", "label": "✏️ کمک‌درس"},
+    {"value": "gamer", "label": "🎮 بازی و سرگرمی"},
 ]
 
 SAFE_FALLBACK_RESPONSE = (

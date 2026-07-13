@@ -32,7 +32,7 @@ MAX_GENERATION_ATTEMPTS = 3
 INTENT_CONFIDENCE_THRESHOLD = 0.7
 MANUAL_PERSONA_METADATA_KEY = "yarkids_persona"
 PERSONA_AUTO_VALUE = "auto"
-SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework")
+SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework", "gamer")
 REVISION_INSTRUCTION_HEADER = "بازبینی لازم است. پاسخ قبلی مناسب نبود. دلایل:"
 TEXTBOOK_CONTEXT_HEADER = (
     "متن کتاب درسی بازیابی‌شده (مرجع — برای راهنمایی آموزشی؛ جواب نهایی را بدون آموزش روش نده):"
@@ -182,6 +182,7 @@ PERSONA_UI_LABELS: dict[str, str] = {
     "storyteller": "📖 داستان‌گو",
     "teacher": "📚 معلم",
     "homework": "✏️ کمک‌درس",
+    "gamer": "🎮 بازی و سرگرمی",
     "none": "😊 یار کودک",
 }
 
@@ -191,6 +192,7 @@ PERSONA_DROPDOWN_OPTIONS: list[dict[str, str]] = [
     {"value": "storyteller", "label": "📖 داستان‌گو"},
     {"value": "teacher", "label": "📚 معلم"},
     {"value": "homework", "label": "✏️ کمک‌درس"},
+    {"value": "gamer", "label": "🎮 بازی و سرگرمی"},
 ]
 
 STREAM_CHUNK_SIZE = 16
@@ -199,13 +201,14 @@ STATUS_DISPLAY_PAUSE_SEC = 0.12
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
-PersonaId = Literal["creative", "storyteller", "teacher", "homework", "none"]
+PersonaId = Literal["creative", "storyteller", "teacher", "homework", "gamer", "none"]
 ReflectionStatus = Literal["PASS", "REVISE"]
 VALID_PERSONAS: set[PersonaId] = {
     "creative",
     "storyteller",
     "teacher",
     "homework",
+    "gamer",
     "none",
 }
 TEXTBOOK_PERSONAS: frozenset[PersonaId] = frozenset({"teacher", "homework"})
