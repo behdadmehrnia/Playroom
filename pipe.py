@@ -2117,8 +2117,52 @@ _EXPLICIT_PERSONA_TRIGGERS: dict[str, tuple[str, ...]] = {
     "storyteller": ("داستان بگو", "قصه بگو", "داستان‌گو باش", "قصه‌گو باش", "حالت داستان", "شخصیت داستان", "mode storyteller"),
     "teacher": ("معلم باش", "حالت معلم", "شخصیت معلم", "mode teacher"),
     "homework": ("کمک درس باش", "کمک‌درس باش", "حالت کمک درس", "شخصیت کمک درس", "mode homework"),
-    "gamer": ("بازی باش", "بازی کن", "حالت بازی", "شخصیت بازی", "گیمر باش", "mode gamer"),
+    "gamer": ("بازی باش", "بازی کن", "بازی کنیم", "بریم بازی", "حالت بازی", "شخصیت بازی", "گیمر باش", "mode gamer"),
 }
+
+
+def _infer_persona_from_history(messages: list[ChatMessage]) -> PersonaId | None:
+    """
+    Infer the current persona from recent conversation history.
+    Looks at assistant's recent responses for persona-specific patterns.
+    """
+    # Get last few assistant messages
+    assistant_msgs = [m.content for m in messages[-6:] if m.role == "assistant"]
+    if not assistant_msgs:
+        return None
+
+# Persona-specific keywords in assistant responses
+    PERSONA_RESPONSE_PATTERNS: dict[PersonaId, tuple[str, ...]] = {
+        "gamer": (
+            "نوبت تو", "کلمه بگو", "زنجیره", "بازی کلمات", "چیستان", "معما",
+            "بریم بازی", "حدس بزن", "نوبت من", "آماده‌", "شروع می‌کنم",
+        ),
+        "storyteller": (
+            "داستان", "قصه", "ماجراجویی", "شخصیت", "دنیای خیال", "ادامه بده",
+            "پسرک", "دخترک", "جنگل", "قلعه", "جادو", "پری",
+        ),
+        "teacher": (
+            "مثال", "مثلاً", "به زبان ساده", "قدم اول", "قدم بعد", "درک کردی",
+            "یاد بگیریم", "توضیح دهم", "چرا", "چگونه", "یعنی چی",
+        ),
+        "homework": (
+            "تمرین", "سوال", "مرحله", "حل کنیم", "مراحل", "مرحله بعد",
+            "کتاب", "صفحه", "ریاضی", "فارسی", "علوم",
+        ),
+        "creative": (
+            "ایده", "پیشنهاد", "بساز", "ترسم", "خلاق", "نقاشی", "ساختن",
+            "چی بسازم", "ایده بده", "ایده دیگر",
+        ),
+    }
+
+    # Check most recent assistant message first
+    for content in reversed(assistant_msgs):
+        lowered = content.lower()
+        for persona, patterns in PERSONA_RESPONSE_PATTERNS.items():
+            if any(p in lowered for p in patterns):
+                return persona
+
+    return None
 
 
 def _detect_explicit_persona_request(text: str) -> PersonaId | None:
@@ -2227,6 +2271,10 @@ async def resolve_active_persona(
                 normalized = _normalize_persona(prev_persona)
                 if normalized:
                     current_persona = normalized
+
+    # If still no current persona, infer from conversation history
+    if current_persona is None:
+        current_persona = _infer_persona_from_history(messages)
 
     if on_detecting_status:
         await on_detecting_status()
