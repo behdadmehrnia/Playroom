@@ -29,11 +29,11 @@ def is_text_garbled(text: str, *, min_chars: int = 40) -> bool:
         return False
 
     ratio = persian_letter_ratio(cleaned)
-    if ratio < 0.55:
+    if ratio < 0.35:
         return True
 
     garbage_hits = len(_GARBAGE_CHAR.findall(cleaned))
-    if garbage_hits >= 3:
+    if garbage_hits >= 2:
         return True
 
     return False

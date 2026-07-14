@@ -68,6 +68,8 @@ docker compose up --build
 | GET | `/health` | سلامت سرویس |
 | POST | `/v1/retrieve` | بازیابی کانتکست از متن کاربر |
 | GET | `/v1/page-image` | تصویر صفحه (`grade`, `subject`, `page`) |
+| POST | `/v1/upload-pdf` | آپلود PDF به `data/pdfs/` (با متادیتای اختیاری برای catalog) |
+| POST | `/v1/parse-pdfs` | پارس (ایندکس) PDFها — تک‌فایل یا بازسازی کل |
 
 ### نمونه retrieve
 
@@ -76,6 +78,45 @@ curl -s -X POST http://localhost:8080/v1/retrieve \
   -H 'Content-Type: application/json' \
   -d '{"query": "تمرین صفحه 72 ریاضی پایه سوم", "include_neighbors": 1}'
 ```
+
+### نمونه upload و parse
+
+آپلود PDF و ثبت در catalog (با grade و subject):
+
+```bash
+curl -s -X POST http://localhost:8080/v1/upload-pdf \
+  -F "file=@C305.pdf" \
+  -F "grade=3" \
+  -F "subject=math" \
+  -F "title=ریاضی پایه سوم" \
+  -F "page_offset=0"
+```
+
+آپلود بدون ثبت در catalog (فقط ذخیره در `data/pdfs/`):
+
+```bash
+curl -s -X POST http://localhost:8080/v1/upload-pdf \
+  -F "file=@book.pdf" \
+  -F "register_in_catalog=false"
+```
+
+پارس یک فایل (ایندکس افزایشی فقط همان کتاب — بقیه ایندکس دست‌نخورده می‌ماند):
+
+```bash
+curl -s -X POST http://localhost:8080/v1/parse-pdfs \
+  -H 'Content-Type: application/json' \
+  -d '{"filename":"C305.pdf"}'
+```
+
+بازسازی کل ایندکس از روی catalog.json (پیش‌فرض MinerU با cache):
+
+```bash
+curl -s -X POST http://localhost:8080/v1/parse-pdfs \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+> توجه: پارس MinerU نیازمند نصب وابستگی‌های `requirements-indexer.txt` است. اگر MinerU نصب نیست، با `{"ocr_engine":"tesseract"}` یا `{"no_ocr":true}` امتحان کنید.
 
 ## متغیرهای محیطی
 

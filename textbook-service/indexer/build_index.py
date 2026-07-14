@@ -27,6 +27,7 @@ from app.config import (  # noqa: E402
     PDFS_DIR,
 )
 from app.subjects import SUBJECT_TITLES  # noqa: E402
+from app.store import CatalogBook  # noqa: E402
 from app.text_quality import is_text_garbled  # noqa: E402
 from indexer.mineru_extract import (  # noqa: E402
     mineru_available,
@@ -249,8 +250,17 @@ def _resolve_page_text(
     """
     Choose the best text for a page.
 
-    Prefer clean digital text; otherwise MinerU (default) or legacy tesseract.
+    When MinerU is the OCR engine, always prefer its output over digital
+    text — Iranian textbook PDFs often embed broken CMaps that produce
+    plausible-looking but unreadable mojibake.
     """
+    if ocr_engine == "mineru" and use_ocr and mineru_text:
+        stats["ocr_pages"] += 1
+        if _text_is_usable(mineru_text):
+            stats["ocr_fixed"] += 1
+            return mineru_text, True
+        return mineru_text, False
+
     digital_ok = _text_is_usable(raw_text)
     if digital_ok:
         return raw_text, True
@@ -259,15 +269,6 @@ def _resolve_page_text(
         return raw_text, False
 
     if ocr_engine == "mineru":
-        if mineru_text:
-            stats["ocr_pages"] += 1
-            if _text_is_usable(mineru_text):
-                stats["ocr_fixed"] += 1
-                return mineru_text, True
-            # Keep MinerU text for FTS even when quality heuristics fail;
-            # still mark unusable so retrieve can attach the page image.
-            if len(mineru_text.strip()) > len(raw_text.strip()):
-                return mineru_text, False
         return raw_text, False
 
     # Legacy tesseract path
@@ -284,6 +285,92 @@ def _resolve_page_text(
     if len(ocr_text) > len(raw_text):
         return ocr_text, False
     return raw_text, False
+
+
+def _process_book(
+    conn: sqlite3.Connection,
+    *,
+    pdf_path: Path,
+    grade: int,
+    subject: str,
+    title: str,
+    page_offset: int,
+    use_ocr: bool,
+    ocr_engine: str,
+    mineru_backend: str,
+    mineru_lang: str,
+    mineru_force: bool,
+    render_dpi: int,
+    ocr_dpi: int,
+    stats: dict[str, int],
+) -> int:
+    """Index one PDF into `conn`. Returns the number of pages indexed."""
+    print(f"indexing: {pdf_path.name} (grade={grade}, subject={subject})")
+
+    mineru_pages: dict[int, str] = {}
+    if use_ocr and ocr_engine == "mineru":
+        book_out = MINERU_OUT_DIR / pdf_path.stem
+        try:
+            mineru_pages = run_mineru(
+                pdf_path,
+                book_out,
+                backend=mineru_backend,
+                lang=mineru_lang,
+                force=mineru_force,
+            )
+            print(f"  mineru pages with text: {len(mineru_pages)}")
+        except RuntimeError as exc:
+            print(f"  warning: mineru failed — {exc}", file=sys.stderr)
+            mineru_pages = {}
+
+    doc = fitz.open(pdf_path)
+    pages_indexed = 0
+    try:
+        for pdf_page_index in range(len(doc)):
+            page = doc[pdf_page_index]
+            raw_text = page.get_text("text").strip()
+            mineru_text = mineru_pages.get(pdf_page_index, "")
+
+            # Iranian schoolbook PDFs often embed broken font CMaps that
+            # produce plenty of text, but it's mojibake — OCR/MinerU then.
+            text, text_usable = _resolve_page_text(
+                raw_text=raw_text,
+                mineru_text=mineru_text,
+                ocr_engine=ocr_engine,
+                use_ocr=use_ocr,
+                page=page,
+                ocr_dpi=ocr_dpi,
+                stats=stats,
+            )
+
+            # Attach the page image whenever the text isn't reliably usable
+            # (e.g. calligraphic poems) so a vision model can read it.
+            is_scanned = not text_usable
+
+            printed_page = _printed_page_from_offset(pdf_page_index, page_offset)
+
+            image_name = f"g{grade}_{subject}_p{printed_page}.png"
+            image_path = PAGES_DIR / image_name
+            if not image_path.is_file():
+                pix = page.get_pixmap(dpi=render_dpi)
+                pix.save(str(image_path))
+
+            _insert_page(
+                conn,
+                grade=grade,
+                subject=subject,
+                subject_title=title,
+                printed_page=printed_page,
+                pdf_page_index=pdf_page_index,
+                text=text,
+                image_path=str(image_path.relative_to(DATA_DIR)),
+                is_scanned=is_scanned,
+                text_usable=text_usable,
+            )
+            pages_indexed += 1
+    finally:
+        doc.close()
+    return pages_indexed
 
 
 def build_index(
@@ -339,70 +426,22 @@ def build_index(
             title = book.get("title", SUBJECT_TITLES.get(subject, subject))
             page_offset = int(book.get("page_offset", 0))
 
-            print(f"indexing: {pdf_path.name} (grade={grade}, subject={subject})")
-
-            mineru_pages: dict[int, str] = {}
-            if use_ocr and ocr_engine == "mineru":
-                book_out = MINERU_OUT_DIR / pdf_path.stem
-                try:
-                    mineru_pages = run_mineru(
-                        pdf_path,
-                        book_out,
-                        backend=mineru_backend,
-                        lang=mineru_lang,
-                        force=mineru_force,
-                    )
-                    print(f"  mineru pages with text: {len(mineru_pages)}")
-                except RuntimeError as exc:
-                    print(f"  warning: mineru failed — {exc}", file=sys.stderr)
-                    mineru_pages = {}
-
-            doc = fitz.open(pdf_path)
-
-            for pdf_page_index in range(len(doc)):
-                page = doc[pdf_page_index]
-                raw_text = page.get_text("text").strip()
-                mineru_text = mineru_pages.get(pdf_page_index, "")
-
-                # Iranian schoolbook PDFs often embed broken font CMaps that
-                # produce plenty of text, but it's mojibake — OCR/MinerU then.
-                text, text_usable = _resolve_page_text(
-                    raw_text=raw_text,
-                    mineru_text=mineru_text,
-                    ocr_engine=ocr_engine,
-                    use_ocr=use_ocr,
-                    page=page,
-                    ocr_dpi=ocr_dpi,
-                    stats=stats,
-                )
-
-                # Attach the page image whenever the text isn't reliably usable
-                # (e.g. calligraphic poems) so a vision model can read it.
-                is_scanned = not text_usable
-
-                printed_page = _printed_page_from_offset(pdf_page_index, page_offset)
-
-                image_name = f"g{grade}_{subject}_p{printed_page}.png"
-                image_path = PAGES_DIR / image_name
-                if not image_path.is_file():
-                    pix = page.get_pixmap(dpi=render_dpi)
-                    pix.save(str(image_path))
-
-                _insert_page(
-                    conn,
-                    grade=grade,
-                    subject=subject,
-                    subject_title=title,
-                    printed_page=printed_page,
-                    pdf_page_index=pdf_page_index,
-                    text=text,
-                    image_path=str(image_path.relative_to(DATA_DIR)),
-                    is_scanned=is_scanned,
-                    text_usable=text_usable,
-                )
-                total_pages += 1
-
-            doc.close()
+            total_pages += _process_book(
+                conn,
+                pdf_path=pdf_path,
+                grade=grade,
+                subject=subject,
+                title=title,
+                page_offset=page_offset,
+                use_ocr=use_ocr,
+                ocr_engine=ocr_engine,
+                mineru_backend=mineru_backend,
+                mineru_lang=mineru_lang,
+                mineru_force=mineru_force,
+                render_dpi=render_dpi,
+                ocr_dpi=ocr_dpi,
+                stats=stats,
+            )
 
         conn.execute(
             """
@@ -418,6 +457,127 @@ def build_index(
         f"clean text for {stats['ocr_fixed']})"
     )
     return total_pages
+
+
+def _ensure_tables(conn: sqlite3.Connection) -> None:
+    """Create the pages + FTS tables if they don't already exist (no drop)."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS pages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            grade INTEGER NOT NULL,
+            subject TEXT NOT NULL,
+            subject_title TEXT NOT NULL,
+            printed_page INTEGER NOT NULL,
+            pdf_page_index INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            image_path TEXT,
+            is_scanned INTEGER NOT NULL DEFAULT 0,
+            text_usable INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(grade, subject, printed_page)
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
+            text,
+            subject_title,
+            content='pages',
+            content_rowid='id'
+        );
+        """
+    )
+
+
+def index_book(
+    book: CatalogBook,
+    *,
+    pdf_dir: Path | None = None,
+    render_dpi: int = 120,
+    ocr_dpi: int = 300,
+    use_ocr: bool = True,
+    ocr_engine: str = DEFAULT_OCR_ENGINE,
+    mineru_backend: str = "pipeline",
+    mineru_lang: str = "arabic",
+    mineru_force: bool = False,
+) -> int:
+    """
+    Incrementally index a single book, replacing any existing pages for it.
+
+    Unlike ``build_index`` this does NOT drop the whole database: it deletes
+    only the rows belonging to ``book.grade``/``book.subject`` and re-inserts
+    them, then rebuilds the FTS index.
+    """
+    pdf_dir = pdf_dir or PDFS_DIR
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    PAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not use_ocr:
+        _OCR_STATE["enabled"] = False
+
+    if use_ocr and ocr_engine == "mineru" and not mineru_available():
+        raise RuntimeError(
+            "OCR engine is mineru but the `mineru` CLI was not found. "
+            "Install with: pip install -r requirements-indexer.txt "
+            "or pass --ocr-engine tesseract / --no-ocr."
+        )
+
+    pdf_path = pdf_dir / book.file
+    if not pdf_path.is_file():
+        raise FileNotFoundError(f"Missing PDF: {pdf_path}")
+
+    stats = {"ocr_pages": 0, "ocr_fixed": 0}
+
+    with sqlite3.connect(INDEX_PATH) as conn:
+        _ensure_tables(conn)
+
+        # Remove existing pages + their FTS rows for this book before re-inserting.
+        conn.execute(
+            """
+            DELETE FROM pages_fts
+            WHERE rowid IN (
+                SELECT id FROM pages WHERE grade = ? AND subject = ?
+            )
+            """,
+            (book.grade, book.subject),
+        )
+        conn.execute(
+            "DELETE FROM pages WHERE grade = ? AND subject = ?",
+            (book.grade, book.subject),
+        )
+
+        count = _process_book(
+            conn,
+            pdf_path=pdf_path,
+            grade=book.grade,
+            subject=book.subject,
+            title=book.title,
+            page_offset=book.page_offset,
+            use_ocr=use_ocr,
+            ocr_engine=ocr_engine,
+            mineru_backend=mineru_backend,
+            mineru_lang=mineru_lang,
+            mineru_force=mineru_force,
+            render_dpi=render_dpi,
+            ocr_dpi=ocr_dpi,
+            stats=stats,
+        )
+
+        # Refresh FTS rows for the freshly inserted pages of this book.
+        conn.execute(
+            """
+            INSERT INTO pages_fts(rowid, text, subject_title)
+            SELECT id, text, subject_title FROM pages
+            WHERE grade = ? AND subject = ?
+            """,
+            (book.grade, book.subject),
+        )
+        conn.commit()
+
+    print(
+        f"Done. Indexed {count} pages for {book.file} "
+        f"(engine={ocr_engine}, OCR/parse on {stats['ocr_pages']} pages, "
+        f"clean text for {stats['ocr_fixed']})"
+    )
+    return count
 
 
 def main() -> int:

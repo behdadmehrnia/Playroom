@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -250,6 +251,83 @@ def load_page_texts(content_list_path: Path) -> dict[int, str]:
     return pages_from_content_list(data)
 
 
+def _pdf_page_count(pdf_path: Path) -> int:
+    """Get page count from a PDF using pypdfium2 (lightweight, always available with MinerU)."""
+    try:
+        import pypdfium2 as pdfium
+        doc = pdfium.PdfDocument(str(pdf_path))
+        count = len(doc)
+        doc.close()
+        return count
+    except Exception:
+        return 0
+
+
+def _collect_chunk_pages(output_dir: Path, stem: str) -> dict[int, str]:
+    """Load all content_list JSON files under output_dir and merge page texts."""
+    all_pages: dict[int, str] = {}
+    if not output_dir.is_dir():
+        return all_pages
+    for path in output_dir.rglob("*.json"):
+        name = path.name
+        if not (name.endswith("_content_list_v2.json") or name.endswith("_content_list.json")):
+            continue
+        try:
+            pages = load_page_texts(path)
+            all_pages.update(pages)
+        except (json.JSONDecodeError, OSError):
+            continue
+    return all_pages
+
+
+def _run_mineru_chunk(
+    pdf_path: Path,
+    output_dir: Path,
+    *,
+    backend: str,
+    method: str,
+    lang: str,
+    formula: bool,
+    table: bool,
+    start_page: int,
+    end_page: int,
+    env: dict[str, str],
+    timeout_sec: int | None,
+) -> None:
+    """Run MinerU on a page-range subset of a PDF."""
+    cmd = [
+        "mineru",
+        "-p", str(pdf_path),
+        "-o", str(output_dir),
+        "-b", backend,
+        "-m", method,
+        "-l", lang,
+        "-f", "true" if formula else "false",
+        "-t", "true" if table else "false",
+        "-s", str(start_page),
+        "-e", str(end_page),
+    ]
+    print(f"  mineru: pages {start_page}-{end_page}")
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"mineru timed out on {pdf_path.name} pages {start_page}-{end_page}") from exc
+
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(
+            f"mineru failed on {pdf_path.name} pages {start_page}-{end_page} "
+            f"(exit {proc.returncode}): {err[:2000]}"
+        )
+
+
 def run_mineru(
     pdf_path: Path,
     output_dir: Path,
@@ -261,11 +339,13 @@ def run_mineru(
     table: bool = True,
     force: bool = False,
     timeout_sec: int | None = None,
+    chunk_size: int = 5,
 ) -> dict[int, str]:
     """
     Parse one PDF with MinerU and return {pdf_page_index: text}.
 
     Reuses an existing content_list under output_dir unless force=True.
+    Processes the PDF in page-range chunks to bound memory usage.
     """
     if not mineru_available():
         raise RuntimeError(
@@ -278,47 +358,56 @@ def run_mineru(
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = pdf_path.stem
 
+    if not force:
+        merged_file = output_dir / f"{stem}_merged_pages.json"
+        if merged_file.is_file():
+            return json.loads(merged_file.read_text(encoding="utf-8"))
+
     existing = None if force else find_content_list_file(output_dir, stem)
     if existing is not None:
         return load_page_texts(existing)
 
-    cmd = [
-        "mineru",
-        "-p", str(pdf_path),
-        "-o", str(output_dir),
-        "-b", backend,
-        "-m", method,
-        "-l", lang,
-        "-f", "true" if formula else "false",
-        "-t", "true" if table else "false",
-    ]
-
     env = os.environ.copy()
-    # HuggingFace can be unreachable from some networks; ModelScope is a common fallback.
     env.setdefault("MINERU_MODEL_SOURCE", "modelscope")
-    # Keep cross-page table merge off so page_idx stays meaningful for textbooks.
     env.setdefault("MINERU_TABLE_MERGE_ENABLE", "false")
 
-    print(f"  mineru: {' '.join(cmd)}")
-    try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-            check=False,
-            env=env,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"mineru timed out on {pdf_path.name}") from exc
+    total_pages = _pdf_page_count(pdf_path)
+    all_pages: dict[int, str] = {}
+    chunk_idx = 0
 
-    if proc.returncode != 0:
-        err = (proc.stderr or proc.stdout or "").strip()
-        raise RuntimeError(f"mineru failed on {pdf_path.name} (exit {proc.returncode}): {err[:2000]}")
+    for start in range(0, total_pages, chunk_size):
+        end = min(start + chunk_size - 1, total_pages - 1)
+        chunk_idx += 1
+        try:
+            _run_mineru_chunk(
+                pdf_path, output_dir,
+                backend=backend, method=method, lang=lang,
+                formula=formula, table=table,
+                start_page=start, end_page=end,
+                env=env, timeout_sec=timeout_sec,
+            )
+        except RuntimeError as exc:
+            print(f"  warning: {exc}", file=sys.stderr)
 
-    content_path = find_content_list_file(output_dir, stem)
-    if content_path is None:
+        chunk_pages = _collect_chunk_pages(output_dir, stem)
+        if chunk_pages:
+            chunk_file = output_dir / f"{stem}_chunk{chunk_idx}.json"
+            chunk_file.write_text(json.dumps(chunk_pages, ensure_ascii=False), encoding="utf-8")
+            all_pages.update(chunk_pages)
+            print(f"  chunk {chunk_idx}: {len(chunk_pages)} pages extracted (cumulative: {len(all_pages)})")
+
+    if not all_pages:
         raise RuntimeError(
-            f"mineru finished but no content_list JSON found under {output_dir} for {stem}"
+            f"mineru produced no content_list JSON under {output_dir} for {stem}"
         )
-    return load_page_texts(content_path)
+
+    merged_file = output_dir / f"{stem}_merged_pages.json"
+    merged_file.write_text(json.dumps(all_pages, ensure_ascii=False), encoding="utf-8")
+
+    for stale in output_dir.glob(f"{stem}_chunk*.json"):
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
+    return all_pages

@@ -57,15 +57,27 @@ def _connect() -> sqlite3.Connection:
 
 
 def index_exists() -> bool:
-    return INDEX_PATH.is_file()
+    if not INDEX_PATH.is_file():
+        return False
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='pages'"
+            ).fetchone()
+            return row is not None
+    except sqlite3.DatabaseError:
+        return False
 
 
 def page_count() -> int:
     if not index_exists():
         return 0
-    with _connect() as conn:
-        row = conn.execute("SELECT COUNT(*) AS c FROM pages").fetchone()
-        return int(row["c"]) if row else 0
+    try:
+        with _connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS c FROM pages").fetchone()
+            return int(row["c"]) if row else 0
+    except sqlite3.OperationalError:
+        return 0
 
 
 def load_catalog() -> list[CatalogBook]:
@@ -84,6 +96,60 @@ def load_catalog() -> list[CatalogBook]:
             )
         )
     return books
+
+
+def find_book_by_file(filename: str) -> CatalogBook | None:
+    for book in load_catalog():
+        if book.file == filename:
+            return book
+    return None
+
+
+def upsert_book(book: CatalogBook) -> bool:
+    """
+    Add or update a book entry in catalog.json, matched by ``file``.
+
+    Returns True if the catalog file was modified (new entry added or an
+    existing one changed). Preserves the top-level ``_instructions`` block
+    and any other non-``books`` keys.
+    """
+    if not CATALOG_PATH.is_file():
+        raw: dict[str, object] = {"books": []}
+    else:
+        raw = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    books = raw.get("books", [])
+    if not isinstance(books, list):
+        books = []
+        raw["books"] = books
+
+    entry = {
+        "file": book.file,
+        "grade": book.grade,
+        "subject": book.subject,
+        "title": book.title,
+        "page_offset": book.page_offset,
+    }
+
+    for i, existing in enumerate(books):
+        if isinstance(existing, dict) and existing.get("file") == book.file:
+            if {k: existing.get(k) for k in entry} == entry:
+                return False
+            books[i] = {**existing, **entry}
+            _write_catalog(raw)
+            return True
+
+    books.append(entry)
+    raw["books"] = books
+    _write_catalog(raw)
+    return True
+
+
+def _write_catalog(raw: dict[str, object]) -> None:
+    CATALOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CATALOG_PATH.write_text(
+        json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def get_page(grade: int, subject: str, printed_page: int) -> PageRecord | None:

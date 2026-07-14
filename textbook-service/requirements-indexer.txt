@@ -6,4 +6,5 @@
 # If HuggingFace is unreachable: export MINERU_MODEL_SOURCE=modelscope
 
 -r requirements.txt
+numpy<2
 mineru[pipeline]>=2.0.0
