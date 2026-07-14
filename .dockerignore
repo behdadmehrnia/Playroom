@@ -1,0 +1,26 @@
+# Root .dockerignore
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.DS_Store
+.env
+*.md
+
+# Textbook service runtime data (bind-mounted)
+textbook-service/data/pdfs
+textbook-service/data/pages
+textbook-service/data/index.sqlite
+textbook-service/data/catalog.json
+textbook-service/data/mineru
+
+# IDE
+.vscode
+.idea
+
+# OS
+Thumbs.db

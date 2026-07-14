@@ -210,6 +210,13 @@
       "subject": "technology",
       "title": "کار و فناوری پایه ششم",
       "page_offset": 0
+    },
+    {
+      "file": "mybook.pdf",
+      "grade": 4,
+      "subject": "math",
+      "title": "ریاضی تست",
+      "page_offset": 0
     }
   ],
   "_instructions": {
