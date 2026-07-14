@@ -1,0 +1,58 @@
+services:
+  textbook-service:
+    build:
+      context: ./textbook-service
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./textbook-service/data:/app/data
+    environment:
+      TEXTBOOK_DATA_DIR: /app/data
+      # TEXTBOOK_API_KEY: "your-secret-key"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  yarkids-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      # LLM Provider (required for API to work)
+      YARKIDS_BACKEND_MODEL: "gpt-4o-mini"
+      YARKIDS_LLM_API_KEY: "${OPENAI_API_KEY}"
+      YARKIDS_LLM_BASE_URL: "https://api.openai.com/v1"
+      
+      # Textbook Service connection
+      YARKIDS_TEXTBOOK_API_URL: "http://textbook-service:8080"
+      YARKIDS_ENABLE_TEXTBOOK_CONTEXT: "true"
+      YARKIDS_TEXTBOOK_REQUEST_TIMEOUT_SEC: "5.0"
+      
+      # Web Search
+      YARKIDS_ENABLE_WEB_SEARCH: "true"
+      YARKIDS_WEB_SEARCH_PROVIDER: "auto"
+      
+      # Reflection
+      YARKIDS_ENABLE_REFLECTION: "true"
+      
+      # Server
+      YARKIDS_API_HOST: "0.0.0.0"
+      YARKIDS_API_PORT: "8000"
+      YARKIDS_CORS_ORIGINS: "*"
+    depends_on:
+      textbook-service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

@@ -1,0 +1,4 @@
+# Core dependencies for pipe.py
+pydantic>=2.0.0
+# open_webui is provided by the OpenWebUI environment when running as a Pipe
+# For standalone API, see api/requirements.txt
