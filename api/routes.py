@@ -201,7 +201,7 @@ async def detect_intent_endpoint(
     model = resolve_backend_model(settings, req.model)
     messages = to_chat_messages(req.messages)
     intent, user_text = await detect_intent_for(
-        llm_client=llm_client, backend_model=model, messages=messages
+        llm_client=llm_client, backend_model=model, messages=messages, current_persona=req.persona
     )
     return IntentResponse(intent=intent, latest_user_message=user_text)
 
@@ -226,7 +226,7 @@ async def resolve_persona_endpoint(
         return PersonaResolveResponse(persona=manual, source="manual")
 
     intent, _ = await detect_intent_for(
-        llm_client=llm_client, backend_model=model, messages=messages
+        llm_client=llm_client, backend_model=model, messages=messages, current_persona=req.persona
     )
     if intent.persona == "none":
         return PersonaResolveResponse(

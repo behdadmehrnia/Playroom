@@ -459,10 +459,11 @@ async def detect_intent_for(
     llm_client: LLMClient,
     backend_model: str,
     messages: list[ChatMessage],
+    current_persona: PersonaId | None = None,
 ) -> tuple[IntentDetectionResult, str]:
     """Run intent detection and return the result plus the latest user message."""
     user_text = _get_latest_user_message(messages)
     intent = await detect_intent(
-        llm_client, backend_model=backend_model, messages=messages
+        llm_client, backend_model=backend_model, messages=messages, current_persona=current_persona
     )
     return intent, user_text

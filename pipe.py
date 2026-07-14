@@ -2017,25 +2017,118 @@ async def detect_intent(
     *,
     backend_model: str,
     messages: list[ChatMessage],
+    current_persona: PersonaId | None = None,
 ) -> IntentDetectionResult:
     user_text = _get_latest_user_message(messages)
     if not user_text:
         return IntentDetectionResult(persona="none")
 
+    # Context awareness: if user is in an ongoing activity, bias against switching
+    activity = _detect_ongoing_activity(messages, current_persona)
+    system_prompt = get_intent_detection_prompt()
+    if activity and current_persona:
+        system_prompt += (
+            f"\n\n⚠️ نکته مهم: کاربر در حال «{activity}» با پرسونای «{current_persona}» است. "
+            f"مگر درخواست صریح و قاطع برای تغییر موضوع، پرسونا باید «{current_persona}» بماند. "
+            f"کلمات مانند «داستان»، «بازی»، «ریاضی» در بافت فعالیت جاری، درخواست تغییر پرسونا نیستند."
+        )
+
+    # Include recent conversation history (last 6 turns) for context
+    history = _format_recent_messages(messages, max_turns=6)
+    
     request = LLMCompletionRequest(
         model=backend_model,
         temperature=0.0,
         messages=[
-            {"role": "system", "content": get_intent_detection_prompt()},
-            {"role": "user", "content": user_text},
+            {"role": "system", "content": system_prompt},
+            *history,
         ],
     )
     return parse_intent_detection_output(await llm_client.complete(request))
 
 
 # ---------------------------------------------------------------------------
-# Persona selection
+# Context awareness helpers
 # ---------------------------------------------------------------------------
+
+
+_ACTIVITY_PATTERNS: dict[PersonaId, tuple[str, ...]] = {
+    "gamer": (
+        "بازی کلمات", "زنجیره", "آخرین حرف", "کلمه بگو", "نوبت تو", "نوبت من",
+        "چیستان", "معما", "حدس بزن", "بازی کنیم", "بریم بازی",
+    ),
+    "storyteller": (
+        "ادامه بده", "بعدش چی شد", "سپس", "و بعد", "داستان را ادامه",
+        "شخصیت داستان", "ماجرا ادامه",
+    ),
+    "teacher": (
+        "مثال دیگر", "مشکل مشابه", "بخش دیگر", "قدم بعد", "مرحله بعد",
+        "نمی‌فهمم", "معلوم نشد", "دوباره توضیح",
+    ),
+    "homework": (
+        "سوال بعد", "تمرین بعد", "بخش ب", "قسمتی دیگر", "جوابش چیه",
+        "مرحله بعد", "چطور حل", "مراحل",
+    ),
+    "creative": (
+        "ایده دیگر", "پیشنهاد دیگر", "چیزی دیگر", "نوع دیگر", "راه دیگر",
+    ),
+}
+
+
+def _detect_ongoing_activity(messages: list[ChatMessage], current_persona: PersonaId | None) -> str | None:
+    """Check if user is in the middle of an activity with the current persona."""
+    if not current_persona or current_persona == "none":
+        return None
+
+    # Get recent user messages (excluding the current one)
+    recent_user = [m.content for m in messages[-8:] if m.role == "user"]
+    if len(recent_user) < 2:
+        return None
+
+    patterns = _ACTIVITY_PATTERNS.get(current_persona, ())
+    if not patterns:
+        return None
+
+    # Check if 2-3 recent messages show ongoing activity
+    for text in recent_user[:-1]:  # Exclude current message
+        if any(p in text for p in patterns):
+            names = {
+                "gamer": "بازی کلمات/چیستان",
+                "storyteller": "قصه‌گویی تعاملی",
+                "teacher": "آموزش مفهومی",
+                "homework": "حل تمرین قدم‌به‌قدم",
+                "creative": "ایده‌پردازی خلاقانه",
+            }
+            return names.get(current_persona, current_persona)
+    return None
+
+
+def _format_recent_messages(messages: list[ChatMessage], max_turns: int = 6) -> list[dict[str, str]]:
+    """Format recent conversation for intent detection context."""
+    formatted = []
+    for m in messages[-max_turns:]:
+        if m.role != "system":
+            formatted.append({"role": m.role, "content": m.content})
+    return formatted
+
+
+_EXPLICIT_PERSONA_TRIGGERS: dict[str, tuple[str, ...]] = {
+    "creative": ("خلاق باش", "خلاق شو", "حالت خلاق", "شخصیت خلاق", "mode creative"),
+    "storyteller": ("داستان بگو", "قصه بگو", "داستان‌گو باش", "قصه‌گو باش", "حالت داستان", "شخصیت داستان", "mode storyteller"),
+    "teacher": ("معلم باش", "حالت معلم", "شخصیت معلم", "mode teacher"),
+    "homework": ("کمک درس باش", "کمک‌درس باش", "حالت کمک درس", "شخصیت کمک درس", "mode homework"),
+    "gamer": ("بازی باش", "بازی کن", "حالت بازی", "شخصیت بازی", "گیمر باش", "mode gamer"),
+}
+
+
+def _detect_explicit_persona_request(text: str) -> PersonaId | None:
+    """Detect if user explicitly asks to switch persona in their message."""
+    lowered = text.strip().lower()
+    for persona, triggers in _EXPLICIT_PERSONA_TRIGGERS.items():
+        for trigger in triggers:
+            if trigger in lowered:
+                return persona  # type: ignore[return-value]
+    return None
 
 
 def resolve_manual_persona(
@@ -2099,6 +2192,8 @@ def get_user_persona_selection(__user__: dict[str, Any] | None) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+
 async def resolve_active_persona(
     llm_client: LLMClient,
     *,
@@ -2109,13 +2204,39 @@ async def resolve_active_persona(
     on_detecting_status: Callable[[], Awaitable[None]] | None = None,
 ) -> PersonaId:
     manual_persona = resolve_manual_persona(user_persona=user_persona, body=body)
+    
+    # Check if latest user message explicitly requests a different persona
+    latest_user_msg = _get_latest_user_message(messages)
+    if latest_user_msg:
+        explicit = _detect_explicit_persona_request(latest_user_msg)
+        if explicit and explicit != manual_persona:
+            # User explicitly asked to switch persona — honor it
+            return explicit
+    
+    # If manual persona is set, use it as the current persona for context awareness
+    current_persona = manual_persona
     if manual_persona:
         return manual_persona
+
+    # Auto mode: read previous persona from metadata for context awareness
+    if body:
+        metadata = body.get("metadata") or {}
+        if isinstance(metadata, dict):
+            prev_persona = metadata.get("yarkids_active_persona")
+            if isinstance(prev_persona, str):
+                normalized = _normalize_persona(prev_persona)
+                if normalized:
+                    current_persona = normalized
 
     if on_detecting_status:
         await on_detecting_status()
 
-    intent = await detect_intent(llm_client, backend_model=backend_model, messages=messages)
+    intent = await detect_intent(
+        llm_client, 
+        backend_model=backend_model, 
+        messages=messages,
+        current_persona=current_persona,  # Pass for context awareness
+    )
     return intent.persona
 
 

@@ -58,6 +58,7 @@ class PersonasResponse(BaseModel):
 class IntentRequest(BaseModel):
     model: str | None = None
     messages: list[MessageIn]
+    persona: str | None = None  # Current persona for context-aware intent detection
 
 
 class IntentResponse(BaseModel):
