@@ -2,8 +2,8 @@
 set -e
 
 # Start textbook-service in background
-cd /app/textbook-service
-uvicorn app.main:app --host 0.0.0.0 --port 8080 &
+cd /app
+uvicorn textbook-service.app.main:app --host 0.0.0.0 --port 8080 &
 TEXTBOOK_PID=$!
 
 # Wait for textbook-service to be ready
