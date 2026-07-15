@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# Check if data volume is mounted (warn if not)
+if [ ! -d "/app/textbook_service/data" ] || [ -z "$(ls -A /app/textbook_service/data 2>/dev/null)" ]; then
+    echo "WARNING: /app/textbook_service/data appears empty or not mounted."
+    echo "For data persistence, mount a volume at /app/textbook_service/data"
+    echo "Example: docker run -v yarkids-data:/app/textbook_service/data ..."
+fi
+
 # Start textbook-service in background (from /app with full module path)
 cd /app
 uvicorn textbook_service.app.main:app --host 0.0.0.0 --port 8080 &

@@ -4,8 +4,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./data:/app/data
+      - ./data:/app/textbook_service/data
     environment:
-      TEXTBOOK_DATA_DIR: /app/data
+      TEXTBOOK_DATA_DIR: /app/textbook_service/data
       # TEXTBOOK_API_KEY: "your-secret-key"
     restart: unless-stopped

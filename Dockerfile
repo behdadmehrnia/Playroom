@@ -40,6 +40,8 @@ COPY textbook_service/indexer ./textbook_service/indexer
 COPY textbook_service/data ./textbook_service/data
 COPY scripts ./scripts
 
+VOLUME ["/app/textbook_service/data"]
+
 ENV PYTHONPATH=/app
 ENV TEXTBOOK_DATA_DIR=/app/textbook_service/data
 ENV TEXTBOOK_HOST=0.0.0.0

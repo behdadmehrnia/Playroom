@@ -1,0 +1,13 @@
+services:
+  yarkids:
+    build: .
+    ports:
+      - "8000:8000"
+      - "8080:8080"
+    volumes:
+      - ./textbook_service/data:/app/textbook_service/data
+    environment:
+      - TEXTBOOK_DATA_DIR=/app/textbook_service/data
+      - TEXTBOOK_HOST=0.0.0.0
+      - TEXTBOOK_PORT=8080
+    restart: unless-stopped
