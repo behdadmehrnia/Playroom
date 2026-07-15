@@ -1,0 +1,117 @@
+# custom-config.yml for Darkube deployment
+# Based on Darkube docs: https://docs.hamravesh.com/products/darkube/manage/custom-config/
+# This config deploys two services: textbook-service and api
+
+version: "2"
+
+services:
+  # Textbook Service - handles PDF indexing, retrieval, page images
+  textbook-service:
+    image: yarenterprise/yarkids:textbook-latest
+    build:
+      context: .
+      dockerfile: Dockerfile.textbook
+    command:
+      [
+        "uvicorn",
+        "textbook_service.app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+      ]
+    ports:
+      - "8080:8080"
+    volumes:
+      - name: textbook-data
+        mountPath: /app/textbook_service/data
+    env:
+      - name: PYTHONPATH
+        value: "/app"
+      - name: TEXTBOOK_DATA_DIR
+        value: "/app/textbook_service/data"
+      - name: TEXTBOOK_HOST
+        value: "0.0.0.0"
+      - name: TEXTBOOK_PORT
+        value: "8080"
+      - name: TEXTBOOK_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: textbook-secrets
+            key: api-key
+    healthCheck:
+      httpGet:
+        path: /health
+        port: 8080
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 3
+    resources:
+      limits:
+        memory: "3Gi"
+        cpu: "2000m"
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+
+  # Main API - handles chat, persona, intent, web search, reflection
+  api:
+    image: yarenterprise/yarkids:api-latest
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    env:
+      - name: PYTHONPATH
+        value: "/app"
+      - name: TEXTBOOK_API_URL
+        value: "http://textbook-service:8080"
+      - name: TEXTBOOK_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: textbook-secrets
+            key: api-key
+      - name: YARKIDS_BACKEND_MODEL
+        value: "gpt-4o-mini"
+      - name: YARKIDS_LLM_BASE_URL
+        value: "https://api.openai.com/v1"
+      - name: YARKIDS_LLM_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: api-secrets
+            key: llm-api-key
+      - name: YARKIDS_TEMPERATURE
+        value: "0.7"
+      - name: YARKIDS_ENABLE_REFLECTION
+        value: "true"
+      - name: YARKIDS_ENABLE_WEB_SEARCH
+        value: "true"
+      - name: YARKIDS_WEB_SEARCH_PROVIDER
+        value: "auto"
+    dependsOn:
+      - textbook-service
+    healthCheck:
+      httpGet:
+        path: /health
+        port: 8000
+      initialDelaySeconds: 15
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 3
+    resources:
+      limits:
+        memory: "2Gi"
+        cpu: "1500m"
+      requests:
+        memory: "512Mi"
+        cpu: "250m"
+
+volumes:
+  textbook-data:
+    size: 20Gi
+    storageClass: "standard"
+    accessModes:
+      - ReadWriteOnce

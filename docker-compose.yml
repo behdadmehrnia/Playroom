@@ -1,13 +1,43 @@
 services:
-  yarkids:
-    build: .
+  # Textbook Service - runs independently, accessible on port 8080
+  textbook-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.textbook
     ports:
-      - "8000:8000"
       - "8080:8080"
     volumes:
       - ./textbook_service/data:/app/textbook_service/data
     environment:
+      - PYTHONPATH=/app
       - TEXTBOOK_DATA_DIR=/app/textbook_service/data
       - TEXTBOOK_HOST=0.0.0.0
       - TEXTBOOK_PORT=8080
+      - TEXTBOOK_API_KEY=${TEXTBOOK_API_KEY:-}
     restart: unless-stopped
+
+  # Main API - runs on port 8000, connects to textbook-service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - TEXTBOOK_API_URL=http://textbook-service:8080
+      - TEXTBOOK_API_KEY=${TEXTBOOK_API_KEY:-}
+      - YARKIDS_BACKEND_MODEL=${YARKIDS_BACKEND_MODEL:-gpt-4o-mini}
+      - YARKIDS_LLM_BASE_URL=${YARKIDS_LLM_BASE_URL:-https://api.openai.com/v1}
+      - YARKIDS_LLM_API_KEY=${YARKIDS_LLM_API_KEY:-}
+      - YARKIDS_TEMPERATURE=${YARKIDS_TEMPERATURE:-0.7}
+      - YARKIDS_ENABLE_REFLECTION=${YARKIDS_ENABLE_REFLECTION:-true}
+      - YARKIDS_ENABLE_WEB_SEARCH=${YARKIDS_ENABLE_WEB_SEARCH:-true}
+      - YARKIDS_WEB_SEARCH_PROVIDER=${YARKIDS_WEB_SEARCH_PROVIDER:-auto}
+    depends_on:
+      - textbook-service
+    restart: unless-stopped
+
+volumes:
+  textbook-data:
+    driver: local
