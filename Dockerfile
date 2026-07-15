@@ -30,10 +30,9 @@ RUN pip install --no-cache-dir --compile \
     -r textbook-service/requirements.txt \
     -r textbook-service/requirements-indexer.txt
 
-# Copy application code
+# Copy application code (pipe_embedded.py is for OpenWebUI only, not needed by API)
 COPY pipe.py ./
 COPY pipe_api.py ./
-COPY pipe_embedded.py ./
 COPY prompts ./prompts
 COPY api ./api
 COPY textbook-service/app ./textbook-service/app
