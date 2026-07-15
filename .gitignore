@@ -16,3 +16,5 @@ textbook-service/data/pdfs/*.pdf
 textbook-service/data/pages/*.png
 textbook-service/data/mineru/
 .DS_Store
+custom-config.yml
+custom-config.yaml
