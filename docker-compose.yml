@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yarkids-api
+    ports:
+      - "${YARKIDS_API_PORT:-8000}:8000"
+    environment:
+      YARKIDS_BACKEND_MODEL: ${YARKIDS_BACKEND_MODEL:-}
+      YARKIDS_LLM_BASE_URL: ${YARKIDS_LLM_BASE_URL:-https://api.openai.com/v1}
+      YARKIDS_LLM_API_KEY: ${YARKIDS_LLM_API_KEY:-}
+      YARKIDS_ENABLE_TEXTBOOK_CONTEXT: ${YARKIDS_ENABLE_TEXTBOOK_CONTEXT:-true}
+      YARKIDS_ENABLE_WEB_SEARCH: ${YARKIDS_ENABLE_WEB_SEARCH:-true}
+      YARKIDS_ENABLE_REFLECTION: ${YARKIDS_ENABLE_REFLECTION:-true}
+      TEXTBOOK_DATA_DIR: /app/api/textbook/data
+      TEXTBOOK_API_KEY: ${TEXTBOOK_API_KEY:-}
+    volumes:
+      # Survives image rebuilds and container recreation.
+      # Holds catalog.json, subject_topics.json, index.sqlite, pages/, pdfs/
+      - textbook-data:/app/api/textbook/data
+    restart: unless-stopped
+
+volumes:
+  textbook-data:
+    name: yarkids-textbook-data
