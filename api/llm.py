@@ -1,25 +1,10 @@
-"""OpenAI-compatible LLM client.
-
-Replaces ``OpenWebUILLMClient`` (which calls OpenWebUI's internal
-``generate_chat_completion``) with a plain HTTP client that talks to any
-OpenAI-compatible ``/chat/completions`` endpoint. It satisfies the
-``pipe.LLMClient`` protocol, so every helper in ``pipe.py`` that takes an
-``LLMClient`` (intent detection, generation, reflection) works unchanged.
-
-Completions are always requested with ``stream=False`` — exactly like
-``pipe.generate_response`` does — and the response text is extracted with
-``pipe.extract_text_from_completion`` so the parsing semantics stay identical.
-Streaming toward API clients is simulated downstream by chunking the final
-text (see ``api.service``), mirroring ``Pipe._stream_chat``.
-"""
-
 from __future__ import annotations
 
 from typing import Any
 
 import httpx
 
-from pipe import LLMClient, LLMCompletionRequest, extract_text_from_completion
+from api.core import LLMCompletionRequest, extract_text_from_completion
 
 
 class LLMError(RuntimeError):
@@ -27,7 +12,7 @@ class LLMError(RuntimeError):
 
 
 class OpenAICompatibleLLMClient:
-    """Async LLM client implementing ``pipe.LLMClient`` over httpx."""
+    """Async LLM client implementing ``api.core.LLMClient`` over httpx."""
 
     def __init__(
         self,
@@ -50,8 +35,7 @@ class OpenAICompatibleLLMClient:
         payload: dict[str, Any] = {
             "model": request.model,
             "messages": request.messages,
-            # The pipe always generates non-streaming completions and simulates
-            # streaming to the UI itself; we keep that contract here too.
+            # Completions are always non-streaming; the API simulates streaming itself.
             "stream": False,
         }
         if request.temperature is not None:

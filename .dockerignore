@@ -23,29 +23,22 @@ Thumbs.db
 .git/
 .gitignore
 
-# Data (large files)
-textbook_service/data/pdfs/*.pdf
-textbook_service/data/mineru/
-textbook_service/data/*.sqlite
-textbook_service/data/*.db
-
-# MinerU cache (huge)
+# Textbook binary data (mount at runtime — too large for the image)
+api/textbook/data/pdfs/
+api/textbook/data/pages/
+api/textbook/data/mineru/
+api/textbook/data/*.sqlite
+api/textbook/data/*.db
 **/mineru/
 **/.mineru/
 
 # Logs
 *.log
-/var/log/
 
 # Build artifacts
 dist/
 build/
 *.egg-info/
-
-# Docker
-Dockerfile*
-docker-compose*.yml
-.dockerignore
 
 # Models and cache
 *.bin

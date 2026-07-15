@@ -11,10 +11,10 @@ build/
 venv/
 .env
 pipe_embedded.py
-textbook-service/data/index.sqlite
-textbook-service/data/pdfs/*.pdf
-textbook-service/data/pages/*.png
-textbook-service/data/mineru/
+api/textbook/data/index.sqlite
+api/textbook/data/pdfs/*.pdf
+api/textbook/data/pages/*.png
+api/textbook/data/mineru/
 .DS_Store
 custom-config.yml
 custom-config.yaml

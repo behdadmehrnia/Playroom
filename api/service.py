@@ -1,16 +1,8 @@
-"""Core chat orchestration, separated from the OpenWebUI ``Pipe``.
+"""Core chat orchestration for the standalone Yar Kids API.
 
-This module reproduces the logic of ``Pipe._run_chat`` / ``Pipe._stream_chat``
-/ ``Pipe._finish_chat`` but parameterized by a ``Settings`` object (env vars)
-instead of ``self.valves``, and driven by any ``pipe.LLMClient`` instead of
-the OpenWebUI-internal ``OpenWebUILLMClient``.
-
-All reusable primitives — persona resolution, intent detection, textbook-query
-building, textbook-service retrieval, prompt building, generation and
-reflection — are imported from ``pipe`` so there is a single source of truth.
-Only the response loop is reimplemented here (mirroring
-``pipe.run_response_loop``) so we can surface ``attempts`` and the final
-``ReflectionResult`` to API callers.
+Parameterized by ``Settings`` (env vars) and driven by any ``api.core.LLMClient``.
+Reusable primitives (persona resolution, intent, textbook, prompts, generation,
+reflection) live in ``api.core``.
 """
 
 from __future__ import annotations
@@ -20,7 +12,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from pipe import (
+from api.core import (
     MAX_GENERATION_ATTEMPTS,
     SAFE_FALLBACK_RESPONSE,
     STATUS_DISPLAY_PAUSE_SEC,
@@ -85,10 +77,7 @@ async def _resolve_persona(
     body: dict[str, Any] | None,
     emit: Callable[[str], Awaitable[None]],
 ) -> tuple[PersonaId, str]:
-    """Resolve the active persona and emit the appropriate status messages.
-
-    Mirrors the persona-resolution block of ``Pipe._run_chat``.
-    """
+    """Resolve the active persona and emit the appropriate status messages."""
     manual_persona = resolve_manual_persona(
         user_persona=manual_persona_value, body=body
     )
@@ -125,7 +114,7 @@ async def _resolve_textbook_context(
     enable_textbook_context: bool | None,
     emit: Callable[[str], Awaitable[None]],
 ) -> TextbookContext | None:
-    """Fetch textbook context using the same gate and heuristics as the Pipe."""
+    """Fetch textbook context using the same gate and heuristics as chat."""
     ctx_enabled = (
         enable_textbook_context
         if enable_textbook_context is not None
@@ -137,7 +126,6 @@ async def _resolve_textbook_context(
     should_fetch = bool(
         ctx_enabled
         and textbook_query
-        and settings.textbook_api_url.strip()
         and persona in TEXTBOOK_PERSONAS
     )
 
@@ -155,7 +143,7 @@ async def _resolve_textbook_context(
             await emit(
                 _format_textbook_debug(
                     query=textbook_query,
-                    api_url=settings.textbook_api_url,
+                    api_url=settings.textbook_api_url or "embedded",
                     context=textbook_context,
                 )
             )
@@ -174,8 +162,6 @@ async def _resolve_textbook_context(
         and persona in TEXTBOOK_PERSONAS
         and looks_like_textbook_help_request(user_message)
     ):
-        # Child is asking about their schoolbook but lacks enough detail to
-        # run a lookup — ask for the missing info instead of guessing.
         return TextbookContext(need_info=True)
 
     return None
@@ -189,7 +175,7 @@ async def _resolve_web_search_context(
     enable_web_search: bool | None,
     emit: Callable[[str], Awaitable[None]],
 ) -> WebSearchContext | None:
-    """Delegate to ``pipe.resolve_web_search_context`` (same logic as Pipe)."""
+    """Delegate to ``api.core.resolve_web_search_context``."""
     search_enabled = (
         enable_web_search if enable_web_search is not None else settings.enable_web_search
     )
@@ -219,12 +205,7 @@ async def _run_response_loop(
     enable_reflection: bool,
     emit: Callable[[str], Awaitable[None]],
 ) -> tuple[str, int, ReflectionResult | None, bool, bool]:
-    """Generate (and optionally reflect on) the response.
-
-    Mirrors ``pipe.run_response_loop`` but returns metadata: the final text,
-    number of attempts, the last reflection result, whether the response was
-    revised before passing, and whether the safe fallback was used.
-    """
+    """Generate (and optionally reflect on) the response."""
     user_message = _get_latest_user_message(conversation_messages)
 
     if not enable_reflection:
@@ -299,13 +280,7 @@ async def run_chat(
     enable_web_search: bool | None = None,
     on_status: StatusEmitter = None,
 ) -> ChatResult:
-    """Run the full chat orchestration (mirrors ``Pipe._run_chat``).
-
-    ``on_status`` — when provided — receives live status descriptions (the same
-    Persian status strings the Pipe emits to OpenWebUI's status bar). All
-    emitted statuses are also collected into ``ChatResult.status_events`` so
-    non-streaming callers can see the progression.
-    """
+    """Run the full chat orchestration."""
     status_events: list[str] = []
 
     async def emit(description: str) -> None:
@@ -386,20 +361,11 @@ async def run_chat_stream(
     """Stream a chat run as a sequence of event dicts.
 
     Event types:
-      - ``{"type": "status", "description": str}`` — live status updates
-      - ``{"type": "status_clear"}`` — status bar should be hidden
-      - ``{"type": "chunk", "text": str}`` — a piece of the final response
-      - ``{"type": "error", "message": str}`` — a fatal error during the run
-      - ``{"type": "done", "result": ChatResult}`` — final metadata
-
-    Mirrors ``Pipe._stream_chat``: status events are emitted live while the
-    generation loop runs; only after it completes is the final response
-    chunked and streamed (the backing LLM is always called non-streaming).
-
-    Exceptions raised during the run are caught and surfaced as ``error``
-    events — they must NOT propagate, because by the time the run executes
-    the SSE response headers have already been sent and FastAPI's exception
-    handler can no longer replace them (``"response already started"``).
+      - ``{"type": "status", "description": str}``
+      - ``{"type": "status_clear"}``
+      - ``{"type": "chunk", "text": str}``
+      - ``{"type": "error", "message": str}``
+      - ``{"type": "done", "result": ChatResult}``
     """
     status_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -422,11 +388,10 @@ async def run_chat_stream(
                 on_status=on_status,
             )
         finally:
-            await status_queue.put(None)  # sentinel: statuses are done
+            await status_queue.put(None)
 
     task = asyncio.create_task(_run())
 
-    # Drain live status events until the run finishes (sentinel received).
     while True:
         description = await status_queue.get()
         if description is None:

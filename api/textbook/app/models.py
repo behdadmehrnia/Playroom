@@ -78,6 +78,7 @@ class ParseJobStatus(BaseModel):
     status: Literal["running", "done", "failed"]
     pages_indexed: int = 0
     total_page_count: int = 0
+    ocr_engine: str | None = None
     error: str | None = None
 
 

@@ -1,5 +1,16 @@
-# Compatibility entrypoint — prefer: docker build -f api/Dockerfile …
-# Kept so existing scripts that use Dockerfile.api keep working.
+# Yar Kids standalone API
+# Build from the repo root:
+#   docker build -f api/Dockerfile -t yarkids-api .
+#
+# Run (mount textbook index + page images):
+#   docker run --rm -p 8000:8000 \
+#     -e YARKIDS_BACKEND_MODEL=… \
+#     -e YARKIDS_LLM_API_KEY=… \
+#     -e YARKIDS_LLM_BASE_URL=… \
+#     -v /path/to/index.sqlite:/app/api/textbook/data/index.sqlite:ro \
+#     -v /path/to/pages:/app/api/textbook/data/pages:ro \
+#     yarkids-api
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -10,6 +21,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Minimal system libs (Pillow / multipart uploads)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libjpeg62-turbo \
@@ -20,8 +32,11 @@ COPY api/requirements-runtime.txt /tmp/requirements-runtime.txt
 RUN pip install --compile -r /tmp/requirements-runtime.txt \
     && rm /tmp/requirements-runtime.txt
 
+# Application package (prompts + textbook code + catalog metadata)
 COPY api/ /app/api/
 
+# Large artifacts (pages/, pdfs/, index.sqlite) are excluded via .dockerignore —
+# mount them at runtime. Ensure expected dirs exist.
 RUN mkdir -p \
         /app/api/textbook/data/pages \
         /app/api/textbook/data/pdfs \
@@ -32,6 +47,7 @@ USER appuser
 
 EXPOSE 8000
 
+# Embedded textbook is the default (empty YARKIDS_TEXTBOOK_API_URL).
 ENV YARKIDS_API_HOST=0.0.0.0 \
     YARKIDS_API_PORT=8000 \
     YARKIDS_ENABLE_TEXTBOOK_CONTEXT=true \

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from textbook_service.app.config import DATA_DIR
+from api.textbook.app.config import DATA_DIR
 
 SUBJECT_TITLES: dict[str, str] = {
     "math": "ریاضی",

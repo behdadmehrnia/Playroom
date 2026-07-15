@@ -1,9 +1,8 @@
 """Request/response schemas for the Yar Kids API.
 
-The core domain models (``ChatMessage``, ``IntentDetectionResult``,
-``ReflectionResult``, ``TextbookContext``) are reused directly from ``pipe``
-so the API can never drift from the Pipe's data shapes. The models here are
-either thin API-facing wrappers around those, or per-endpoint request bodies.
+Domain models (``ChatMessage``, ``IntentDetectionResult``, ``ReflectionResult``,
+``TextbookContext``, ``WebSearchContext``) live in ``api.core``. The models here
+are API-facing wrappers and per-endpoint request bodies.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from pipe import (
+from api.core import (
     IntentDetectionResult,
     ReflectionResult,
     TextbookContext,
@@ -24,7 +23,7 @@ PersonaSource = Literal["manual", "intent", "default"]
 
 
 class MessageIn(BaseModel):
-    """Inbound chat message (tolerant: validated/normalized via pipe.normalize_messages)."""
+    """Inbound chat message (normalized via ``api.core.normalize_messages``)."""
 
     role: Role
     content: str
@@ -38,6 +37,7 @@ class HealthResponse(BaseModel):
     llm_ready: bool
     textbook_api_url: str
     textbook_enabled: bool
+    textbook_mode: str
     web_search_enabled: bool
     web_search_provider: str
     reflection_enabled: bool
@@ -58,7 +58,7 @@ class PersonasResponse(BaseModel):
 class IntentRequest(BaseModel):
     model: str | None = None
     messages: list[MessageIn]
-    persona: str | None = None  # Current persona for context-aware intent detection
+    persona: str | None = None
 
 
 class IntentResponse(BaseModel):
@@ -91,13 +91,11 @@ class TextbookQueryResponse(BaseModel):
 
 
 class TextbookRetrieveRequest(BaseModel):
-    """Retrieve textbook context from the textbook-service.
+    """Retrieve textbook context from the embedded textbook package.
 
     Either ``query`` (raw) or ``messages`` (conversation to build the query
     from) may be supplied. When ``persona`` is provided and is not one of the
-    textbook personas, the same gate as the Pipe is applied and nothing is
-    fetched. When ``persona`` is omitted the endpoint behaves as a standalone
-    retrieval/diagnostic tool and fetches regardless of persona.
+    textbook personas, the same gate as the chat flow is applied.
     """
 
     query: str | None = None
@@ -133,12 +131,7 @@ class WebSearchQueryResponse(BaseModel):
 
 
 class WebSearchRetrieveRequest(BaseModel):
-    """Retrieve web search context (same gate as Pipe for creative/storyteller/gamer).
-
-    When ``persona`` is provided and is not a web-search persona, nothing is
-    fetched. When ``persona`` is omitted the endpoint behaves as a standalone
-    diagnostic tool and fetches regardless of persona.
-    """
+    """Retrieve web search context (creative / storyteller / gamer personas)."""
 
     query: str | None = None
     messages: list[MessageIn] | None = None
@@ -191,7 +184,7 @@ class ReflectResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """Full chat orchestration request (mirrors ``Pipe.pipe``)."""
+    """Full chat orchestration request."""
 
     model: str | None = None
     messages: list[MessageIn]

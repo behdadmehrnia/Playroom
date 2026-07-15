@@ -8,11 +8,8 @@ or::
 
     python -m api.main
 
-Environment variables (see ``api.config``) configure the LLM provider, the
-textbook-service connection, generation defaults and the server. The Pipe in
-``pipe.py`` is left untouched; this app simply reuses its module-level helpers
-and replaces the OpenWebUI-specific ``OpenWebUILLMClient`` with the
-OpenAI-compatible client in ``api.llm``.
+The API is self-contained under ``/api``: core chat logic lives in
+``api.core``, and textbook retrieval is embedded in ``api.textbook``.
 """
 
 from __future__ import annotations
@@ -45,7 +42,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         timeout_sec=settings.llm_timeout_sec,
     )
 
-    # Apply CORS origins from settings now that they are loaded.
     allowed = settings.cors_origins or ["*"]
     for mw in app.user_middleware:
         if mw.cls is CORSMiddleware:
@@ -64,14 +60,12 @@ def create_app() -> FastAPI:
         title="Yar Kids API",
         description=(
             "دستیار کودک‌دوست — API مستقل با معماری Persona، Intent Detection و Reflection. "
-            "این API منطق Pipe در pipe.py را به‌صورت یک سرویس FastAPI مستقل exposing می‌کند."
+            "منطق چت و بازیابی کتاب درسی به‌صورت کامل داخل همین سرویس قرار دارد."
         ),
         version=__version__,
         lifespan=lifespan,
     )
 
-    # CORS with permissive defaults; the actual allowed origins are patched
-    # from settings inside the lifespan once they are loaded.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

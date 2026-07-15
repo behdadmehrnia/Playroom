@@ -5,8 +5,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from textbook_service.app.config import CATALOG_PATH, INDEX_PATH, PAGES_DIR
-from textbook_service.app.text_quality import is_text_garbled
+from api.textbook.app.config import CATALOG_PATH, INDEX_PATH, PAGES_DIR
+from api.textbook.app.text_quality import is_text_garbled
 
 
 @dataclass

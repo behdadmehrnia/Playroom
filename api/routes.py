@@ -1,10 +1,7 @@
-"""HTTP routes exposing every piece of the Pipe's logic as an API.
+"""HTTP routes for the standalone Yar Kids API.
 
-The endpoints mirror the stages of ``Pipe._run_chat`` and also expose the
-individual primitives (intent detection, persona resolution, textbook-query
-building, textbook retrieval, generation, reflection) so a custom UI can drive
-the assistant step-by-step. All heavy lifting is delegated to ``pipe`` helpers
-and ``api.service``.
+Endpoints mirror the chat stages (intent, persona, textbook, web search,
+generation, reflection) and mount the embedded textbook package under ``/v1``.
 """
 
 from __future__ import annotations
@@ -15,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
-from pipe import (
+from api.core import (
     PERSONA_DROPDOWN_OPTIONS,
     SUPPORTED_PERSONAS,
     TEXTBOOK_PERSONAS,
@@ -39,7 +36,6 @@ from pipe import (
     reflect_on_response,
     resolve_manual_persona,
 )
-
 from api import __version__
 from api.config import Settings
 from api.llm import OpenAICompatibleLLMClient
@@ -68,8 +64,10 @@ from api.models import (
     WebSearchRetrieveResponse,
 )
 from api.service import detect_intent_for, run_chat, run_chat_stream
+from api.textbook.app.routes import router as textbook_router
 
 router = APIRouter()
+router.include_router(textbook_router, prefix="/v1")
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +89,7 @@ def get_llm_client(request: Request) -> LLMClient:
 
 
 def to_chat_messages(messages: list[MessageIn]) -> list[ChatMessage]:
-    """Convert inbound messages to ``pipe.ChatMessage`` via pipe.normalize_messages."""
+    """Convert inbound messages via ``api.core.normalize_messages``."""
     return normalize_messages([m.model_dump() for m in messages])
 
 
@@ -154,8 +152,8 @@ async def health(
         warnings.append("YARKIDS_BACKEND_MODEL not set")
     if not settings.llm_api_key:
         warnings.append("YARKIDS_LLM_API_KEY not set")
-    if not settings.textbook_api_url.strip():
-        warnings.append("YARKIDS_TEXTBOOK_API_URL not set")
+
+    textbook_mode = "embedded" if settings.uses_embedded_textbook() else "external"
 
     llm_ready = bool(
         settings.backend_model and settings.llm_api_key and settings.llm_base_url
@@ -166,8 +164,9 @@ async def health(
         backend_model=settings.backend_model,
         llm_base_url=settings.llm_base_url,
         llm_ready=llm_ready,
-        textbook_api_url=settings.textbook_api_url,
+        textbook_api_url=settings.textbook_api_url or "embedded",
         textbook_enabled=settings.enable_textbook_context,
+        textbook_mode=textbook_mode,
         web_search_enabled=settings.enable_web_search,
         web_search_provider=settings.normalized_web_search_provider(),
         reflection_enabled=settings.enable_reflection,
@@ -262,7 +261,6 @@ async def retrieve_textbook_endpoint(
     req: TextbookRetrieveRequest,
     settings: Settings = Depends(get_settings),
 ) -> TextbookRetrieveResponse:
-    # Resolve the query: explicit query wins, else build from messages.
     if req.query is not None:
         query = req.query.strip()
     elif req.messages:
@@ -270,7 +268,6 @@ async def retrieve_textbook_endpoint(
     else:
         query = ""
 
-    # Resolve the latest user message (for the help-request heuristic).
     if req.user_message is not None:
         user_message = req.user_message.strip()
     elif req.messages:
@@ -285,7 +282,6 @@ async def retrieve_textbook_endpoint(
         else settings.enable_textbook_context
     )
 
-    # Gate — mirror of Pipe._run_chat's should_fetch_textbook condition.
     gate_blocked = False
     gate_reason: str | None = None
     eligible = persona is None or persona in TEXTBOOK_PERSONAS
@@ -295,16 +291,8 @@ async def retrieve_textbook_endpoint(
     elif not ctx_enabled:
         gate_blocked = True
         gate_reason = "textbook_context_disabled"
-    elif not settings.textbook_api_url.strip():
-        gate_blocked = True
-        gate_reason = "no_textbook_api_url"
 
-    should_fetch = bool(
-        ctx_enabled
-        and query
-        and settings.textbook_api_url.strip()
-        and eligible
-    )
+    should_fetch = bool(ctx_enabled and query and eligible)
 
     context: TextbookContext | None = None
     fetched = False
@@ -342,7 +330,9 @@ async def retrieve_textbook_endpoint(
         debug_enabled = req.debug if req.debug is not None else settings.textbook_debug
         if debug_enabled and context:
             debug = _format_textbook_debug(
-                query=query, api_url=settings.textbook_api_url, context=context
+                query=query,
+                api_url=settings.textbook_api_url or "embedded",
+                context=context,
             )
     elif (
         ctx_enabled
@@ -351,8 +341,6 @@ async def retrieve_textbook_endpoint(
         and persona in TEXTBOOK_PERSONAS
         and looks_like_textbook_help_request(user_message)
     ):
-        # Mirrors the Pipe's elif branch: child references their schoolbook but
-        # hasn't given enough detail (grade + book + page) to run a lookup.
         context = TextbookContext(need_info=True)
 
     return TextbookRetrieveResponse(
@@ -392,7 +380,6 @@ async def retrieve_web_search_endpoint(
     req: WebSearchRetrieveRequest,
     settings: Settings = Depends(get_settings),
 ) -> WebSearchRetrieveResponse:
-    """Same query builder + fetch as Pipe (``build_web_search_query`` / ``fetch_web_search_context``)."""
     messages = to_chat_messages(req.messages) if req.messages else []
 
     if req.query is not None:
@@ -537,7 +524,7 @@ async def reflect_endpoint(
 
 
 # ---------------------------------------------------------------------------
-# Full chat orchestration (mirrors Pipe.pipe / _run_chat)
+# Full chat orchestration
 # ---------------------------------------------------------------------------
 
 
@@ -602,8 +589,6 @@ async def chat_endpoint(
     body = build_resolve_body(req.metadata)
 
     if req.stream:
-        # EventSourceResponse is a Response subclass, so FastAPI bypasses the
-        # response_model and streams Server-Sent Events directly.
         return EventSourceResponse(
             _chat_event_stream(
                 settings=settings,

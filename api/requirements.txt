@@ -4,3 +4,16 @@ pydantic>=2.0.0
 httpx>=0.27.0
 sse-starlette>=2.1.0
 python-dotenv>=1.0.0
+pymupdf>=1.24.0
+pillow>=10.0.0
+pytesseract>=0.3.10
+python-multipart>=0.0.9
+
+# Heavy deps for offline PDF indexing only (not needed by the FastAPI runtime).
+# If HuggingFace is unreachable: export MINERU_MODEL_SOURCE=modelscope
+# CPU-only: torch/torchvision already installed via CPU index URL in Dockerfile
+numpy<2
+mineru[pipeline]>=2.0.0
+
+# CPU optimization: avoid GUI deps
+opencv-python-headless>=4.9.0

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import threading
 import uuid
 import zipfile
@@ -9,8 +8,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
-from textbook_service.app.config import API_KEY, DATA_DIR, INDEX_PATH, PAGES_DIR, PDFS_DIR
-from textbook_service.app.models import (
+from api.textbook.app.config import API_KEY, DATA_DIR, INDEX_PATH, PAGES_DIR, PDFS_DIR
+from api.textbook.app.models import (
     HealthResponse,
     ParseJobStatus,
     ParsePdfRequest,
@@ -21,8 +20,8 @@ from textbook_service.app.models import (
     UploadPagesResponse,
     UploadPdfResponse,
 )
-from textbook_service.app.retrieve_service import retrieve_context
-from textbook_service.app.store import (
+from api.textbook.app.retrieve_service import retrieve_context
+from api.textbook.app.store import (
     CatalogBook,
     find_book_by_file,
     get_page,
@@ -59,7 +58,7 @@ def health() -> HealthResponse:
     )
 
 
-@router.post("/v1/retrieve", response_model=RetrieveResponse)
+@router.post("/retrieve", response_model=RetrieveResponse)
 def retrieve(
     request: RetrieveRequest,
     _: None = Depends(verify_api_key),
@@ -67,7 +66,7 @@ def retrieve(
     return retrieve_context(request)
 
 
-@router.get("/v1/page-image")
+@router.get("/page-image")
 def page_image(
     grade: int = Query(..., ge=3, le=6),
     subject: str = Query(..., min_length=1),
@@ -95,7 +94,7 @@ def _sanitize_pdf_filename(name: str | None, fallback: str = "upload.pdf") -> st
     return base
 
 
-@router.post("/v1/upload-pdf", response_model=UploadPdfResponse)
+@router.post("/upload-pdf", response_model=UploadPdfResponse)
 async def upload_pdf(
     file: UploadFile = File(..., description="فایل PDF کتاب درسی"),
     filename: str | None = Form(
@@ -150,12 +149,12 @@ async def upload_pdf(
     )
 
 
-@router.post("/v1/parse-pdfs", response_model=ParsePdfResponse)
+@router.post("/parse-pdfs", response_model=ParsePdfResponse)
 def parse_pdfs(
     request: ParsePdfRequest,
     _: None = Depends(verify_api_key),
 ) -> ParsePdfResponse:
-    from indexer.build_index import build_index, index_book
+    from api.textbook.indexer.build_index import build_index, index_book
 
     use_ocr = not request.no_ocr
 
@@ -226,7 +225,7 @@ def parse_pdfs(
     )
 
 
-@router.get("/v1/parse-status/{job_id}", response_model=ParseJobStatus)
+@router.get("/parse-status/{job_id}", response_model=ParseJobStatus)
 def parse_status(
     job_id: str,
     _: None = Depends(verify_api_key),
@@ -238,7 +237,7 @@ def parse_status(
     return job
 
 
-@router.post("/v1/upload-index", response_model=UploadIndexResponse)
+@router.post("/upload-index", response_model=UploadIndexResponse)
 async def upload_index(
     file: UploadFile = File(..., description="index.sqlite file"),
     _: None = Depends(verify_api_key),
@@ -258,7 +257,7 @@ async def upload_index(
     )
 
 
-@router.post("/v1/upload-pages", response_model=UploadPagesResponse)
+@router.post("/upload-pages", response_model=UploadPagesResponse)
 async def upload_pages(
     file: UploadFile = File(..., description="ZIP archive of page PNGs"),
     _: None = Depends(verify_api_key),

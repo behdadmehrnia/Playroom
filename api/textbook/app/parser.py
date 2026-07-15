@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from textbook_service.app.subjects import (
+from api.textbook.app.subjects import (
     BOOK_SUBJECT_SYNONYMS,
     SUBJECT_TITLES,
     TOPIC_ALIASES,

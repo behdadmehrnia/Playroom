@@ -2,9 +2,10 @@
 """
 Build SQLite index and page PNGs from PDF textbooks listed in data/catalog.json.
 
-Usage (from textbook-service/):
-    python indexer/build_index.py
-    python indexer/build_index.py --pdf-dir /path/to/pdfs
+Usage (from repo root)::
+
+    python -m api.textbook.indexer.build_index
+    python api/textbook/indexer/build_index.py --pdf-dir /path/to/pdfs
 """
 
 from __future__ import annotations
@@ -16,9 +17,8 @@ import sys
 from pathlib import Path
 
 SERVICE_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(SERVICE_ROOT))
 
-from app.config import (  # noqa: E402
+from api.textbook.app.config import (
     CATALOG_PATH,
     DATA_DIR,
     INDEX_PATH,
@@ -26,10 +26,10 @@ from app.config import (  # noqa: E402
     PAGES_DIR,
     PDFS_DIR,
 )
-from app.subjects import SUBJECT_TITLES  # noqa: E402
-from app.store import CatalogBook  # noqa: E402
-from app.text_quality import is_text_garbled  # noqa: E402
-from indexer.mineru_extract import (  # noqa: E402
+from api.textbook.app.subjects import SUBJECT_TITLES
+from api.textbook.app.store import CatalogBook
+from api.textbook.app.text_quality import is_text_garbled
+from api.textbook.indexer.mineru_extract import (
     mineru_available,
     run_mineru,
 )

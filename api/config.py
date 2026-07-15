@@ -1,10 +1,8 @@
 """Configuration for the Yar Kids API.
 
-All settings are read from environment variables, mirroring the ``Pipe``
-``Valves`` (admin configuration) plus the LLM provider credentials needed to
-replace OpenWebUI's internal ``generate_chat_completion`` and a couple of
-server knobs. Bool parsing reuses ``pipe.coerce_bool`` so the same tolerant
-semantics (``1``/``true``/``yes``/``بله`` ...) apply.
+All settings are read from environment variables. Bool parsing reuses
+``api.core.coerce_bool`` so the same tolerant semantics
+(``1``/``true``/``yes``/``بله`` ...) apply.
 """
 
 from __future__ import annotations
@@ -13,13 +11,13 @@ import os
 
 from pydantic import BaseModel, Field
 
-from pipe import DEFAULT_TEXTBOOK_TIMEOUT_SEC, DEFAULT_WEB_SEARCH_TIMEOUT_SEC, coerce_bool
+from api.core import DEFAULT_TEXTBOOK_TIMEOUT_SEC, DEFAULT_WEB_SEARCH_TIMEOUT_SEC, coerce_bool
 
 
 class Settings(BaseModel):
     """Runtime configuration loaded once at startup from the environment."""
 
-    # --- LLM provider (replaces OpenWebUI's internal completion API) ---
+    # --- LLM provider ---
     backend_model: str = Field(
         default="",
         description="مدل LLM پشتیبان (الزامی برای تولید پاسخ).",
@@ -38,14 +36,19 @@ class Settings(BaseModel):
         description="مهلت درخواست به سرویس LLM (ثانیه).",
     )
 
-    # --- Generation / agents (mirrors Pipe.Valves) ---
+    # --- Generation / agents ---
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     enable_reflection: bool = Field(default=True)
     enable_status_updates: bool = Field(default=True)
 
-    # --- Textbook service (mirrors Pipe.Valves) ---
+    # --- Textbook (embedded by default; optional external URL) ---
     enable_textbook_context: bool = Field(default=True)
-    textbook_api_url: str = Field(default="http://localhost:8080")
+    textbook_api_url: str = Field(
+        default="",
+        description=(
+            "آدرس سرویس کتاب درسی خارجی. خالی / local / self = بستهٔ داخلی api.textbook"
+        ),
+    )
     textbook_api_key: str = Field(default="")
     textbook_request_timeout_sec: float = Field(
         default=DEFAULT_TEXTBOOK_TIMEOUT_SEC, ge=1.0, le=1200.0
@@ -54,7 +57,7 @@ class Settings(BaseModel):
     textbook_include_image: str = Field(default="auto")
     textbook_debug: bool = Field(default=False)
 
-    # --- Web search (mirrors Pipe.Valves) — creative / storyteller / gamer ---
+    # --- Web search — creative / storyteller / gamer ---
     enable_web_search: bool = Field(default=True)
     web_search_provider: str = Field(default="auto")
     web_search_api_url: str = Field(default="")
@@ -96,9 +99,6 @@ class Settings(BaseModel):
         def env_bool(name: str, default: bool) -> bool:
             raw = env(name)
             if not raw.strip():
-                # Unset / empty env var must fall back to the default —
-                # pipe.coerce_bool treats "" as False, which would silently
-                # disable features that default to on.
                 return default
             return coerce_bool(raw, default=default)
 
@@ -117,7 +117,7 @@ class Settings(BaseModel):
             enable_reflection=env_bool("YARKIDS_ENABLE_REFLECTION", True),
             enable_status_updates=env_bool("YARKIDS_ENABLE_STATUS_UPDATES", True),
             enable_textbook_context=env_bool("YARKIDS_ENABLE_TEXTBOOK_CONTEXT", True),
-            textbook_api_url=env("YARKIDS_TEXTBOOK_API_URL", "http://localhost:8080").strip(),
+            textbook_api_url=env("YARKIDS_TEXTBOOK_API_URL", "").strip(),
             textbook_api_key=env("YARKIDS_TEXTBOOK_API_KEY").strip(),
             textbook_request_timeout_sec=env_float(
                 "YARKIDS_TEXTBOOK_REQUEST_TIMEOUT_SEC", DEFAULT_TEXTBOOK_TIMEOUT_SEC
@@ -150,3 +150,7 @@ class Settings(BaseModel):
         if value not in {"auto", "api", "duckduckgo"}:
             return "auto"
         return value
+
+    def uses_embedded_textbook(self) -> bool:
+        value = self.textbook_api_url.strip().lower()
+        return value in {"", "local", "inprocess", "self", "embedded"}
