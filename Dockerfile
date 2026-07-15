@@ -35,7 +35,11 @@ COPY pipe.py ./
 COPY pipe_api.py ./
 COPY prompts ./prompts
 COPY api ./api
-COPY textbook_service ./textbook_service
+COPY textbook_service/__init__.py ./textbook_service/__init__.py
+COPY textbook_service/app/__init__.py ./textbook_service/app/__init__.py
+COPY textbook_service/app ./textbook_service/app
+COPY textbook_service/indexer ./textbook_service/indexer
+COPY textbook_service/data ./textbook_service/data
 COPY scripts ./scripts
 
 VOLUME ["/app/textbook_service/data"]
