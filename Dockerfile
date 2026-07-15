@@ -1,35 +1,8 @@
-# Single-container multi-service Dockerfile for Yar Kids
-# Runs both textbook-service (port 8080) and yarkids-api (port 8000) via supervisor
+# Single-stage CPU-only optimized image running both services
+FROM python:3.12-slim
 
-FROM python:3.12-slim AS builder
-
-WORKDIR /app
-
-# Install build dependencies
+# Install system dependencies in one layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies for both services
-COPY requirements.txt .
-COPY api/requirements.txt api/requirements.txt
-COPY textbook-service/requirements.txt textbook-service/requirements.txt
-COPY textbook-service/requirements-indexer.txt textbook-service/requirements-indexer.txt
-
-RUN pip install --no-cache-dir --prefix=/install \
-    -r requirements.txt \
-    -r api/requirements.txt \
-    -r textbook-service/requirements.txt \
-    -r textbook-service/requirements-indexer.txt
-
-# Runtime stage
-FROM python:3.12-slim AS runtime
-
-WORKDIR /app
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
     tesseract-ocr \
     tesseract-ocr-fas \
     libgl1 \
@@ -37,29 +10,46 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxext6 \
     libxrender1 \
-    supervisor \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy installed packages from builder
-COPY --from=builder /install /usr/local
+WORKDIR /app
+
+# Copy requirements first for better layer caching
+COPY requirements.txt ./
+COPY api/requirements.txt ./api/requirements.txt
+COPY textbook-service/requirements.txt ./textbook-service/requirements.txt
+COPY textbook-service/requirements-indexer.txt ./textbook-service/requirements-indexer.txt
+
+# Install CPU-only PyTorch + all Python deps in one pip call
+RUN pip install --no-cache-dir --compile \
+    torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir --compile \
+    -r requirements.txt \
+    -r api/requirements.txt \
+    -r textbook-service/requirements.txt \
+    -r textbook-service/requirements-indexer.txt
 
 # Copy application code
-COPY pipe.py .
-COPY prompts/ ./prompts/
-COPY api/ ./api/
-COPY scripts/ ./scripts/
-COPY textbook-service/app/ ./textbook-service/app/
-COPY textbook-service/indexer/ ./textbook-service/indexer/
-COPY textbook-service/data/ ./textbook-service/data/
+COPY pipe.py ./
+COPY pipe_api.py ./
+COPY pipe_embedded.py ./
+COPY prompts ./prompts
+COPY api ./api
+COPY textbook-service/app ./textbook-service/app
+COPY textbook-service/indexer ./textbook-service/indexer
+COPY textbook-service/data ./textbook-service/data
+COPY scripts ./scripts
 
-# Supervisor config to run both services
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-# Create non-root user
-RUN useradd --no-create-home --shell /bin/bash appuser && \
-    chown -R appuser:appuser /app /var/log/supervisor /var/run/supervisor
-USER appuser
+ENV PYTHONPATH=/app
+ENV TEXTBOOK_DATA_DIR=/app/textbook-service/data
+ENV TEXTBOOK_HOST=0.0.0.0
+ENV TEXTBOOK_PORT=8080
 
 EXPOSE 8000 8080
 
-CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Entrypoint runs both services
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+ENTRYPOINT ["/docker-entrypoint.sh"]

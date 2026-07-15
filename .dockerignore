@@ -1,26 +1,56 @@
-# Root .dockerignore
-.git
-.venv
-venv
-__pycache__
+# Python
+__pycache__/
 *.py[cod]
-.pytest_cache
-.mypy_cache
-.ruff_cache
-.DS_Store
-.env
-*.md
-
-# Textbook service runtime data (bind-mounted)
-textbook-service/data/pdfs
-textbook-service/data/pages
-textbook-service/data/index.sqlite
-textbook-service/data/catalog.json
-textbook-service/data/mineru
+*$py.class
+.pytest_cache/
+.coverage
+.tox/
+.venv/
+venv/
+env/
 
 # IDE
-.vscode
-.idea
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # OS
+.DS_Store
 Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Data (large files)
+textbook-service/data/pdfs/*.pdf
+textbook-service/data/mineru/
+textbook-service/data/*.sqlite
+textbook-service/data/*.db
+
+# MinerU cache (huge)
+**/mineru/
+**/.mineru/
+
+# Logs
+*.log
+/var/log/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Models and cache
+*.bin
+*.safetensors
+*.pt
+*.pth
+.huggingface/
+.models/
