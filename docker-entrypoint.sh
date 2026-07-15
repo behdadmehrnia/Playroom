@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-# Start textbook-service in background
+# Start textbook-service in background (from /app with full module path)
 cd /app
-uvicorn textbook-service.app.main:app --host 0.0.0.0 --port 8080 &
+uvicorn textbook_service.app.main:app --host 0.0.0.0 --port 8080 &
 TEXTBOOK_PID=$!
 
 # Wait for textbook-service to be ready

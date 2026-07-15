@@ -24,10 +24,10 @@ Thumbs.db
 .gitignore
 
 # Data (large files)
-textbook-service/data/pdfs/*.pdf
-textbook-service/data/mineru/
-textbook-service/data/*.sqlite
-textbook-service/data/*.db
+textbook_service/data/pdfs/*.pdf
+textbook_service/data/mineru/
+textbook_service/data/*.sqlite
+textbook_service/data/*.db
 
 # MinerU cache (huge)
 **/mineru/

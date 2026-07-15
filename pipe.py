@@ -12,6 +12,7 @@ import asyncio
 import base64
 import inspect
 import json
+import math
 import re
 import urllib.error
 import urllib.parse
@@ -22,6 +23,126 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Protocol, Union
 
 from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------------
+# Math tool for safe evaluation of arithmetic expressions
+# Used by homework and teacher personas to verify calculations
+# ---------------------------------------------------------------------------
+
+# Safe names allowed in eval context
+_SAFE_MATH_NAMES = {
+    # Constants
+    "pi": math.pi,
+    "e": math.e,
+    "tau": math.tau,
+    # Functions
+    "abs": abs,
+    "round": round,
+    "min": min,
+    "max": max,
+    "sum": sum,
+    "pow": pow,
+    # Math module functions
+    "sqrt": math.sqrt,
+    "sin": math.sin,
+    "cos": math.cos,
+    "tan": math.tan,
+    "asin": math.asin,
+    "acos": math.acos,
+    "atan": math.atan,
+    "sinh": math.sinh,
+    "cosh": math.cosh,
+    "tanh": math.tanh,
+    "log": math.log,
+    "log10": math.log10,
+    "log2": math.log2,
+    "exp": math.exp,
+    "ceil": math.ceil,
+    "floor": math.floor,
+    "degrees": math.degrees,
+    "radians": math.radians,
+    "factorial": math.factorial,
+    "gcd": math.gcd,
+    "lcm": math.lcm,
+}
+
+
+class _MathError(Exception):
+    """Raised when math evaluation fails."""
+
+
+def _safe_math_eval(expr: str) -> float:
+    """Safely evaluate a mathematical expression."""
+    if not expr or not expr.strip():
+        raise _MathError("Empty expression")
+
+    expr = expr.strip()
+
+    # Validate: only allow digits, operators, parentheses, dots, commas, and safe names
+    allowed_pattern = re.compile(r"^[\d\s\+\-\*\/\%\*\*\(\)\.\,\_\w]+$")
+    if not allowed_pattern.match(expr):
+        raise _MathError("Expression contains invalid characters")
+
+    # Check for forbidden patterns (as whole words, not substrings)
+    # Use word boundaries to avoid false positives like "os" in "cos"
+    forbidden_patterns = [
+        r"\bimport\b", r"__", r"\beval\b", r"\bexec\b", r"\bcompile\b",
+        r"\bopen\b", r"\bread\b", r"\bwrite\b", r"\bos\b", r"\bsys\b",
+        r"\bsubprocess\b", r"\blambda\b", r"\bdef\s", r"\bclass\s", r"\byield\b",
+    ]
+    for pattern in forbidden_patterns:
+        if re.search(pattern, expr):
+            raise _MathError("Forbidden pattern detected")
+
+    # Limit expression length
+    if len(expr) > 200:
+        raise _MathError("Expression too long")
+
+    try:
+        code = compile(expr, "<math>", "eval")
+        for name in code.co_names:
+            if name not in _SAFE_MATH_NAMES:
+                raise _MathError(f"Unknown name: {name}")
+
+        result = eval(code, {"__builtins__": {}}, _SAFE_MATH_NAMES)
+
+        if not isinstance(result, (int, float)):
+            raise _MathError("Result is not a number")
+
+        if isinstance(result, float) and (math.isnan(result) or math.isinf(result)):
+            raise _MathError("Invalid result (NaN or infinity)")
+
+        return float(result)
+
+    except _MathError:
+        raise
+    except ZeroDivisionError:
+        raise _MathError("Division by zero")
+    except OverflowError:
+        raise _MathError("Number too large")
+    except SyntaxError:
+        raise _MathError("Invalid expression syntax")
+    except Exception as e:
+        raise _MathError(f"Evaluation error: {e}")
+
+
+def _format_math_result(value: float) -> str:
+    """Format a float result nicely for display."""
+    if isinstance(value, float) and value == int(value):
+        return str(int(value))
+    return f"{value:.10g}"
+
+
+def calculate_math(expr: str) -> str:
+    """
+    Main entry point for math tool.
+    Returns formatted result or error message in Persian.
+    """
+    try:
+        result = _safe_math_eval(expr)
+        return _format_math_result(result)
+    except _MathError as e:
+        return f"خطا: {e}"
 
 # ---------------------------------------------------------------------------
 # Configuration

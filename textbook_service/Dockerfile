@@ -1,5 +1,7 @@
+# CPU-only optimized single-stage build
 FROM python:3.12-slim
 
+# Install system deps in one layer (cached)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-fas \
@@ -12,10 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Copy requirements first for layer caching
 COPY requirements.txt requirements-indexer.txt ./
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir -r requirements-indexer.txt
 
+# Install CPU-only PyTorch + all deps in one pip call (faster, better dep resolution)
+# Use --no-deps for torch to avoid re-downloading, compile bytecode
+RUN pip install --no-cache-dir --compile \
+    torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir --compile -r requirements-indexer.txt
+
+# Copy application code
 COPY app ./app
 COPY indexer ./indexer
 COPY data ./data

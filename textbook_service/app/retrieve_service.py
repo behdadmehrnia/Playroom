@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import base64
 
-from app.models import IncludeImageMode, MatchType, RetrieveRequest, RetrieveResponse
-from app.parser import parse_persian_query
-from app.subjects import SUBJECT_TITLES, topic_label
-from app.store import (
+from textbook_service.app.models import IncludeImageMode, MatchType, RetrieveRequest, RetrieveResponse
+from textbook_service.app.parser import parse_persian_query
+from textbook_service.app.subjects import SUBJECT_TITLES, topic_label
+from textbook_service.app.store import (
     PageRecord,
     get_lesson_pages,
     get_neighbor_pages,
@@ -14,7 +14,7 @@ from app.store import (
     resolve_image_path,
     topic_search,
 )
-from app.text_quality import is_text_garbled
+from textbook_service.app.text_quality import is_text_garbled
 
 
 def _page_text_for_context(page: PageRecord) -> tuple[str, bool]:

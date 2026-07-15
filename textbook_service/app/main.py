@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app.config import HOST, PORT
-from app.routes import router
+from textbook_service.app.config import HOST, PORT
+from textbook_service.app.routes import router
 
 app = FastAPI(
     title="Yar Kids Textbook Service",
@@ -16,7 +16,7 @@ app.include_router(router)
 def main() -> None:
     import uvicorn
 
-    uvicorn.run("app.main:app", host=HOST, port=PORT, reload=False)
+    uvicorn.run("textbook_service.app.main:app", host=HOST, port=PORT, reload=False)
 
 
 if __name__ == "__main__":

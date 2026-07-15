@@ -18,8 +18,8 @@ WORKDIR /app
 # Copy requirements first for better layer caching
 COPY requirements.txt ./
 COPY api/requirements.txt ./api/requirements.txt
-COPY textbook-service/requirements.txt ./textbook-service/requirements.txt
-COPY textbook-service/requirements-indexer.txt ./textbook-service/requirements-indexer.txt
+COPY textbook_service/requirements.txt ./textbook_service/requirements.txt
+COPY textbook_service/requirements-indexer.txt ./textbook_service/requirements-indexer.txt
 
 # Install CPU-only PyTorch + all Python deps in one pip call
 RUN pip install --no-cache-dir --compile \
@@ -27,27 +27,26 @@ RUN pip install --no-cache-dir --compile \
     pip install --no-cache-dir --compile \
     -r requirements.txt \
     -r api/requirements.txt \
-    -r textbook-service/requirements.txt \
-    -r textbook-service/requirements-indexer.txt
+    -r textbook_service/requirements.txt \
+    -r textbook_service/requirements-indexer.txt
 
-# Copy application code (pipe_embedded.py is for OpenWebUI only, not needed by API)
+# Copy application code
 COPY pipe.py ./
 COPY pipe_api.py ./
 COPY prompts ./prompts
 COPY api ./api
-COPY textbook-service/app ./textbook-service/app
-COPY textbook-service/indexer ./textbook-service/indexer
-COPY textbook-service/data ./textbook-service/data
+COPY textbook_service/app ./textbook_service/app
+COPY textbook_service/indexer ./textbook_service/indexer
+COPY textbook_service/data ./textbook_service/data
 COPY scripts ./scripts
 
 ENV PYTHONPATH=/app
-ENV TEXTBOOK_DATA_DIR=/app/textbook-service/data
+ENV TEXTBOOK_DATA_DIR=/app/textbook_service/data
 ENV TEXTBOOK_HOST=0.0.0.0
 ENV TEXTBOOK_PORT=8080
 
 EXPOSE 8000 8080
 
-# Entrypoint runs both services
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 

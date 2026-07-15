@@ -9,8 +9,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
-from app.config import API_KEY, DATA_DIR, INDEX_PATH, PAGES_DIR, PDFS_DIR
-from app.models import (
+from textbook_service.app.config import API_KEY, DATA_DIR, INDEX_PATH, PAGES_DIR, PDFS_DIR
+from textbook_service.app.models import (
     HealthResponse,
     ParseJobStatus,
     ParsePdfRequest,
@@ -21,8 +21,8 @@ from app.models import (
     UploadPagesResponse,
     UploadPdfResponse,
 )
-from app.retrieve_service import retrieve_context
-from app.store import (
+from textbook_service.app.retrieve_service import retrieve_context
+from textbook_service.app.store import (
     CatalogBook,
     find_book_by_file,
     get_page,
