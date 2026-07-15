@@ -1,0 +1,45 @@
+FROM python:3.12-slim
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-fas \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements
+COPY requirements.txt ./
+COPY textbook_service/requirements.txt ./textbook_service/requirements.txt
+COPY textbook_service/requirements-indexer.txt ./textbook_service/requirements-indexer.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --compile \
+    torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir --compile \
+    -r requirements.txt \
+    -r textbook_service/requirements.txt \
+    -r textbook_service/requirements-indexer.txt
+
+# Copy application
+COPY textbook_service ./textbook_service
+COPY prompts ./prompts
+COPY scripts ./scripts
+
+ENV PYTHONPATH=/app
+ENV TEXTBOOK_DATA_DIR=/app/textbook_service/data
+ENV TEXTBOOK_HOST=0.0.0.0
+ENV TEXTBOOK_PORT=8080
+
+VOLUME ["/app/textbook_service/data"]
+
+EXPOSE 8080
+
+WORKDIR /app
+
+CMD ["uvicorn", "textbook_service.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
