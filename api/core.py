@@ -76,6 +76,18 @@ _MATH_EXPR_RE = re.compile(
 )
 _MATH_PERSONAS: frozenset[str] = frozenset({"teacher", "homework"})
 
+MATH_TOOL_CONTEXT_HEADER = "نتایج ابزار محاسبه ریاضی (مرجع دقیق — برای بررسی، نه جای آموزش):"
+MATH_TOOL_CONTEXT_INSTRUCTION = (
+    "مهم: سیستم چند عبارت ریاضی را با ابزار محاسبهٔ امن ارزیابی کرده و نتایج را "
+    "در ادامه گذاشته است. از نتایج درست برای بررسی جواب یا قدم‌های میانی استفاده کن. "
+    "در حالت کمک‌درسی جواب نهایی را یک‌جا لو نده مگر کودک فقط بررسی بخواهد. "
+    "اگر خطای دوستانه (مثل تقسیم بر صفر) آمده، همان را مهربان به کودک بگو و عدد دیگری پیشنهاد بده. "
+    "دربارهٔ سیستم یا ابزار محاسبه به‌صورت فنی حرف نزن."
+)
+MATH_FRIENDLY_ERROR_MESSAGES: dict[str, str] = {
+    "تقسیم بر صفر": "تقسیم بر صفر نمیشه! بیای عدد دیگه‌ای امتحان کنیم.",
+}
+
 
 class _MathError(Exception):
     """Raised when math evaluation fails."""
@@ -96,6 +108,21 @@ def normalize_math_expression(expr: str) -> str:
     text = text.replace(",", "")
     text = re.sub(r"\s+", "", text)
     return text
+
+
+def preprocess_math_natural_language(text: str) -> str:
+    """Convert common Persian math phrases into evaluable expressions."""
+    if not text:
+        return text
+    t = text.translate(_PERSIAN_DIGIT_MAP).translate(_MATH_OP_MAP)
+    t = re.sub(r"(\d+(?:\.\d+)?)\s*به\s*توان\s*(\d+(?:\.\d+)?)", r"\1**\2", t)
+    t = re.sub(r"جذر\s*(?:عدد\s*)?(\d+(?:\.\d+)?)", r"sqrt(\1)", t)
+    t = re.sub(r"ریشه\s*(?:دوم\s*)?(?:عدد\s*)?(\d+(?:\.\d+)?)", r"sqrt(\1)", t)
+    t = re.sub(r"(\d+(?:\.\d+)?)\s*تقسیم\s*بر\s*(\d+(?:\.\d+)?)", r"\1/\2", t)
+    t = re.sub(r"(\d+(?:\.\d+)?)\s*ضرب(?:\s*در)?\s*(\d+(?:\.\d+)?)", r"\1*\2", t)
+    t = re.sub(r"(\d+(?:\.\d+)?)\s*به\s*علاوه\s*(\d+(?:\.\d+)?)", r"\1+\2", t)
+    t = re.sub(r"(\d+(?:\.\d+)?)\s*منهای\s*(\d+(?:\.\d+)?)", r"\1-\2", t)
+    return t
 
 
 def _safe_math_eval(expr: str) -> float:
@@ -179,11 +206,19 @@ def calculate_math(expr: str) -> str:
         return f"خطا: {e}"
 
 
+def _friendly_math_error(message: str) -> str:
+    cleaned = message.removeprefix("خطا:").strip()
+    for key, friendly in MATH_FRIENDLY_ERROR_MESSAGES.items():
+        if key in cleaned:
+            return friendly
+    return f"این محاسبه درست انجام نشد ({cleaned}). بیای جور دیگه‌ای بنویسیم."
+
+
 def extract_math_expressions(text: str, *, limit: int = 5) -> list[str]:
     """Pull candidate arithmetic expressions out of free-form user text."""
     if not text or not text.strip():
         return []
-    normalized = text.translate(_PERSIAN_DIGIT_MAP).translate(_MATH_OP_MAP)
+    normalized = preprocess_math_natural_language(text)
     found: list[str] = []
     seen: set[str] = set()
     for match in _MATH_EXPR_RE.finditer(normalized):
@@ -222,23 +257,29 @@ def run_math_tool_for_message(
             )
         except _MathError as exc:
             usages.append(
-                MathToolUsage(expression=expr, result=f"خطا: {exc}", ok=False)
+                MathToolUsage(
+                    expression=expr,
+                    result=_friendly_math_error(str(exc)),
+                    ok=False,
+                )
             )
     return usages
 
 
 def format_math_tool_context(usages: list[MathToolUsage]) -> str | None:
-    """Build the system-prompt block for successful math tool results."""
-    ok_items = [u for u in usages if u.ok]
-    if not ok_items:
+    """Build the system-prompt block for math tool results (ok + friendly errors)."""
+    if not usages:
         return None
     lines = [
         MATH_TOOL_CONTEXT_INSTRUCTION,
         "",
         MATH_TOOL_CONTEXT_HEADER,
     ]
-    for item in ok_items:
-        lines.append(f"- `{item.expression}` = {item.result}")
+    for item in usages:
+        if item.ok:
+            lines.append(f"- `{item.expression}` = {item.result}")
+        else:
+            lines.append(f"- `{item.expression}` → {item.result}")
     return "\n".join(lines)
 
 # ---------------------------------------------------------------------------
@@ -250,6 +291,7 @@ MODEL_NAME = "یار کودک"
 MAX_GENERATION_ATTEMPTS = 3
 INTENT_CONFIDENCE_THRESHOLD = 0.7
 MANUAL_PERSONA_METADATA_KEY = "yarkids_persona"
+ACTIVE_PERSONA_METADATA_KEY = "yarkids_active_persona"
 PERSONA_AUTO_VALUE = "auto"
 SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework", "gamer")
 REVISION_INSTRUCTION_HEADER = "بازبینی لازم است. پاسخ قبلی مناسب نبود. دلایل:"
@@ -342,14 +384,6 @@ WEB_SEARCH_NO_RESULTS_INSTRUCTION = (
 DEFAULT_WEB_SEARCH_TIMEOUT_SEC = 8.0
 DEFAULT_WEB_SEARCH_MAX_RESULTS = 5
 
-MATH_TOOL_CONTEXT_HEADER = "نتایج ابزار محاسبه ریاضی (مرجع دقیق — برای بررسی، نه جای آموزش):"
-MATH_TOOL_CONTEXT_INSTRUCTION = (
-    "مهم: سیستم چند عبارت ریاضی را با ابزار محاسبهٔ امن ارزیابی کرده و نتایج درست را "
-    "در ادامه گذاشته است. از این اعداد برای بررسی جواب یا قدم‌های میانی استفاده کن. "
-    "در حالت کمک‌درسی جواب نهایی را یک‌جا لو نده مگر کودک فقط بررسی بخواهد. "
-    "اگر عبارتی خطا داشت، آن را نادیده بگیر و از کودک بخواه واضح‌تر بنویسد. "
-    "دربارهٔ سیستم یا ابزار محاسبه به‌صورت فنی حرف نزن."
-)
 
 # Lightweight heuristic (pipe-side) — mirrors textbook-service page queries
 _TEXTBOOK_PAGE_QUERY_RE = re.compile(
@@ -2548,14 +2582,27 @@ async def detect_intent(
     if not user_text:
         return IntentDetectionResult(persona="none")
 
-    # Context awareness: if user is in an ongoing activity, bias against switching
+    explicit = _detect_explicit_persona_request(user_text)
+    if explicit:
+        return IntentDetectionResult(persona=explicit, confidence=0.98)
+
     activity = _detect_ongoing_activity(messages, current_persona)
+    if (
+        activity
+        and current_persona
+        and current_persona != "none"
+        and _is_activity_continuation(user_text, current_persona)
+    ):
+        return IntentDetectionResult(persona=current_persona, confidence=0.95)
+
+    # Context awareness: if user is in an ongoing activity, bias against switching
     system_prompt = get_intent_detection_prompt()
     if activity and current_persona:
         system_prompt += (
             f"\n\n⚠️ نکته مهم: کاربر در حال «{activity}» با پرسونای «{current_persona}» است. "
             f"مگر درخواست صریح و قاطع برای تغییر موضوع، پرسونا باید «{current_persona}» بماند. "
-            f"کلمات مانند «داستان»، «بازی»، «ریاضی» در بافت فعالیت جاری، درخواست تغییر پرسونا نیستند."
+            f"کلمات مانند «داستان»، «بازی»، «ریاضی» در بافت فعالیت جاری، درخواست تغییر پرسونا نیستند. "
+            f"عبارت‌هایی مثل «ادامه بده»، «سوال بعد»، «مثال دیگر»، «ایده دیگر» یعنی ادامه همان فعالیت."
         )
 
     # Include recent conversation history (last 6 turns) for context
@@ -2580,51 +2627,111 @@ async def detect_intent(
 _ACTIVITY_PATTERNS: dict[PersonaId, tuple[str, ...]] = {
     "gamer": (
         "بازی کلمات", "زنجیره", "آخرین حرف", "کلمه بگو", "نوبت تو", "نوبت من",
-        "چیستان", "معما", "حدس بزن", "بازی کنیم", "بریم بازی",
+        "چیستان", "معما", "حدس بزن", "بازی کنیم", "بریم بازی", "شروع می‌کنم",
     ),
     "storyteller": (
         "ادامه بده", "بعدش چی شد", "سپس", "و بعد", "داستان را ادامه",
-        "شخصیت داستان", "ماجرا ادامه",
+        "شخصیت داستان", "ماجرا ادامه", "داستان بگو", "قصه بگو", "می‌خوام داستان",
     ),
     "teacher": (
-        "مثال دیگر", "مشکل مشابه", "بخش دیگر", "قدم بعد", "مرحله بعد",
-        "نمی‌فهمم", "معلوم نشد", "دوباره توضیح",
+        "مثال دیگر", "مثال دیگه", "مشکل مشابه", "بخش دیگر", "قدم بعد", "مرحله بعد",
+        "نمی‌فهمم", "معلوم نشد", "دوباره توضیح", "یعنی چی", "توضیح بده",
     ),
     "homework": (
         "سوال بعد", "تمرین بعد", "بخش ب", "قسمتی دیگر", "جوابش چیه",
-        "مرحله بعد", "چطور حل", "مراحل",
+        "مرحله بعد", "چطور حل", "مراحل", "این مسئله", "حل کن",
     ),
     "creative": (
-        "ایده دیگر", "پیشنهاد دیگر", "چیزی دیگر", "نوع دیگر", "راه دیگر",
+        "ایده دیگر", "ایده دیگه", "پیشنهاد دیگر", "چیزی دیگر", "نوع دیگر", "راه دیگر",
+        "ایده بده", "حوصله",
     ),
 }
 
+# Phrases that mean "continue the current activity" (current user turn).
+_ACTIVITY_CONTINUATION: dict[PersonaId, tuple[str, ...]] = {
+    "gamer": ("نوبت من", "ادامه", "یکی دیگه", "چیستان دیگه", "معما دیگه"),
+    "storyteller": (
+        "ادامه بده", "بعدش", "بعدش چی شد", "و بعد", "ادامه داستان", "بعدی",
+    ),
+    "teacher": ("مثال دیگر", "مثال دیگه", "دوباره توضیح", "قدم بعد", "مرحله بعد"),
+    "homework": ("سوال بعد", "تمرین بعد", "بعدی", "مرحله بعد", "یکی دیگه"),
+    "creative": ("ایده دیگر", "ایده دیگه", "پیشنهاد دیگر", "چیزی دیگر", "یکی دیگه"),
+}
 
-def _detect_ongoing_activity(messages: list[ChatMessage], current_persona: PersonaId | None) -> str | None:
+_ACTIVITY_DISPLAY_NAMES: dict[PersonaId, str] = {
+    "gamer": "بازی کلمات/چیستان",
+    "storyteller": "قصه‌گویی تعاملی",
+    "teacher": "آموزش مفهومی",
+    "homework": "حل تمرین قدم‌به‌قدم",
+    "creative": "ایده‌پردازی خلاقانه",
+}
+
+
+def _is_activity_continuation(text: str, persona: PersonaId) -> bool:
+    """True when the latest user message continues the current activity."""
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+    for phrase in _ACTIVITY_CONTINUATION.get(persona, ()):
+        if cleaned == phrase or cleaned.startswith(phrase):
+            return True
+    # Word-chain answers: short token without question/intent markers (e.g. «داستان»).
+    if (
+        persona == "gamer"
+        and len(cleaned) <= 30
+        and "?" not in cleaned
+        and "؟" not in cleaned
+        and not _detect_explicit_persona_request(cleaned)
+        and not any(
+            marker in cleaned
+            for marker in (
+                "یعنی",
+                "چنده",
+                "چطور",
+                "چرا",
+                "کمک درس",
+                "معلم",
+                "داستان بگو",
+                "قصه بگو",
+                "صفحه",
+            )
+        )
+    ):
+        return True
+    return False
+
+
+def _detect_ongoing_activity(
+    messages: list[ChatMessage], current_persona: PersonaId | None
+) -> str | None:
     """Check if user is in the middle of an activity with the current persona."""
     if not current_persona or current_persona == "none":
-        return None
-
-    # Get recent user messages (excluding the current one)
-    recent_user = [m.content for m in messages[-8:] if m.role == "user"]
-    if len(recent_user) < 2:
         return None
 
     patterns = _ACTIVITY_PATTERNS.get(current_persona, ())
     if not patterns:
         return None
 
-    # Check if 2-3 recent messages show ongoing activity
-    for text in recent_user[:-1]:  # Exclude current message
-        if any(p in text for p in patterns):
-            names = {
-                "gamer": "بازی کلمات/چیستان",
-                "storyteller": "قصه‌گویی تعاملی",
-                "teacher": "آموزش مفهومی",
-                "homework": "حل تمرین قدم‌به‌قدم",
-                "creative": "ایده‌پردازی خلاقانه",
-            }
-            return names.get(current_persona, current_persona)
+    window = messages[-10:]
+    if not window:
+        return None
+
+    # Scan prior turns (user + assistant) for activity start/continuation cues.
+    prior = window[:-1] if len(window) >= 2 else window
+    for message in prior:
+        if any(pattern in message.content for pattern in patterns):
+            return _ACTIVITY_DISPLAY_NAMES.get(current_persona, current_persona)
+
+    # Current turn alone can continue an established persona session.
+    latest = window[-1].content if window else ""
+    if _is_activity_continuation(latest, current_persona):
+        # Require some prior evidence of this persona in the conversation.
+        if _infer_persona_from_history(messages) == current_persona or any(
+            pattern in message.content
+            for message in prior
+            for pattern in patterns
+        ):
+            return _ACTIVITY_DISPLAY_NAMES.get(current_persona, current_persona)
     return None
 
 
@@ -2638,11 +2745,57 @@ def _format_recent_messages(messages: list[ChatMessage], max_turns: int = 6) -> 
 
 
 _EXPLICIT_PERSONA_TRIGGERS: dict[str, tuple[str, ...]] = {
-    "creative": ("خلاق باش", "خلاق شو", "حالت خلاق", "شخصیت خلاق", "mode creative"),
-    "storyteller": ("داستان بگو", "قصه بگو", "داستان‌گو باش", "قصه‌گو باش", "حالت داستان", "شخصیت داستان", "mode storyteller"),
-    "teacher": ("معلم باش", "حالت معلم", "شخصیت معلم", "mode teacher"),
-    "homework": ("کمک درس باش", "کمک‌درس باش", "حالت کمک درس", "شخصیت کمک درس", "mode homework"),
-    "gamer": ("بازی باش", "بازی کن", "بازی کنیم", "بریم بازی", "حالت بازی", "شخصیت بازی", "گیمر باش", "mode gamer"),
+    "creative": (
+        "خلاق باش",
+        "باش خلاق",
+        "خلاق شو",
+        "حالت خلاق",
+        "شخصیت خلاق",
+        "mode creative",
+    ),
+    "storyteller": (
+        "داستان بگو",
+        "قصه بگو",
+        "داستان‌گو باش",
+        "داستان گو باش",
+        "قصه‌گو باش",
+        "قصه گو باش",
+        "باش داستان‌گو",
+        "باش داستان گو",
+        "باش قصه‌گو",
+        "باش قصه گو",
+        "حالت داستان",
+        "شخصیت داستان",
+        "mode storyteller",
+    ),
+    "teacher": (
+        "معلم باش",
+        "باش معلم",
+        "حالت معلم",
+        "شخصیت معلم",
+        "mode teacher",
+    ),
+    "homework": (
+        "کمک درس باش",
+        "کمک‌درس باش",
+        "باش کمک درس",
+        "باش کمک‌درس",
+        "حالت کمک درس",
+        "شخصیت کمک درس",
+        "mode homework",
+    ),
+    "gamer": (
+        "بازی باش",
+        "بازی کن",
+        "بازی کنیم",
+        "بریم بازی",
+        "باش بازی",
+        "باش گیمر",
+        "گیمر باش",
+        "حالت بازی",
+        "شخصیت بازی",
+        "mode gamer",
+    ),
 }
 
 
@@ -2656,7 +2809,7 @@ def _infer_persona_from_history(messages: list[ChatMessage]) -> PersonaId | None
     if not assistant_msgs:
         return None
 
-# Persona-specific keywords in assistant responses
+    # Persona-specific keywords in assistant responses
     PERSONA_RESPONSE_PATTERNS: dict[PersonaId, tuple[str, ...]] = {
         "gamer": (
             "نوبت تو", "کلمه بگو", "زنجیره", "بازی کلمات", "چیستان", "معما",
@@ -2691,13 +2844,23 @@ def _infer_persona_from_history(messages: list[ChatMessage]) -> PersonaId | None
 
 
 def _detect_explicit_persona_request(text: str) -> PersonaId | None:
-    """Detect if user explicitly asks to switch persona in their message."""
+    """Detect explicit persona switch; last matching trigger in the message wins."""
     lowered = text.strip().lower()
+    matches: list[tuple[int, str]] = []
     for persona, triggers in _EXPLICIT_PERSONA_TRIGGERS.items():
         for trigger in triggers:
-            if trigger in lowered:
-                return persona  # type: ignore[return-value]
-    return None
+            start = 0
+            needle = trigger.lower()
+            while True:
+                idx = lowered.find(needle, start)
+                if idx < 0:
+                    break
+                matches.append((idx, persona))
+                start = idx + max(len(needle), 1)
+    if not matches:
+        return None
+    matches.sort(key=lambda item: item[0])
+    return matches[-1][1]  # type: ignore[return-value]
 
 
 def resolve_manual_persona(
@@ -2791,7 +2954,7 @@ async def resolve_active_persona(
     if body:
         metadata = body.get("metadata") or {}
         if isinstance(metadata, dict):
-            prev_persona = metadata.get("yarkids_active_persona")
+            prev_persona = metadata.get(ACTIVE_PERSONA_METADATA_KEY)
             if isinstance(prev_persona, str):
                 normalized = _normalize_persona(prev_persona)
                 if normalized:

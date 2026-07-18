@@ -335,20 +335,32 @@ async def resolve_persona_endpoint(
     messages = to_chat_messages(req.messages)
     body = build_resolve_body(req.metadata)
 
-    manual = resolve_manual_persona(user_persona=req.persona, body=body)
-    if manual:
-        return PersonaResolveResponse(persona=manual, source="manual")
+    from api.core import (
+        _detect_explicit_persona_request,
+        _get_latest_user_message,
+        resolve_active_persona,
+        resolve_manual_persona,
+    )
 
-    intent, _ = await detect_intent_for(
-        llm_client=llm_client, backend_model=model, messages=messages, current_persona=req.persona
+    latest = _get_latest_user_message(messages)
+    explicit = _detect_explicit_persona_request(latest) if latest else None
+    manual = resolve_manual_persona(user_persona=req.persona, body=body)
+
+    persona = await resolve_active_persona(
+        llm_client,
+        backend_model=model,
+        messages=messages,
+        user_persona=req.persona,
+        body=body,
     )
-    if intent.persona == "none":
-        return PersonaResolveResponse(
-            persona="none", source="default", confidence=intent.confidence
-        )
-    return PersonaResolveResponse(
-        persona=intent.persona, source="intent", confidence=intent.confidence
-    )
+
+    if explicit and persona == explicit:
+        return PersonaResolveResponse(persona=persona, source="intent", confidence=0.98)
+    if manual and persona == manual:
+        return PersonaResolveResponse(persona=manual, source="manual")
+    if persona == "none":
+        return PersonaResolveResponse(persona="none", source="default")
+    return PersonaResolveResponse(persona=persona, source="intent")
 
 
 # ---------------------------------------------------------------------------

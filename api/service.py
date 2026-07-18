@@ -106,7 +106,17 @@ async def _resolve_persona(
         on_detecting_status=emit_detecting if not manual_persona else None,
     )
 
-    if manual_persona:
+    # Persist for multi-turn continuity (clients should echo metadata back).
+    if body is not None and resolved and resolved != "none":
+        from api.core import ACTIVE_PERSONA_METADATA_KEY
+
+        metadata = body.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+            body["metadata"] = metadata
+        metadata[ACTIVE_PERSONA_METADATA_KEY] = resolved
+
+    if manual_persona and resolved == manual_persona:
         await emit(status_persona_selected(manual_persona))
         source = "manual"
     elif resolved != "none":
