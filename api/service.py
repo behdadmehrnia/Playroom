@@ -20,14 +20,20 @@ from api.core import (
     ChatMessage,
     IntentDetectionResult,
     LLMClient,
+    MathToolUsage,
     PersonaId,
     ReflectionResult,
     TextbookContext,
+    TextbookQueryDiag,
     TEXTBOOK_PERSONAS,
     WebSearchContext,
+    WebSearchQueryDiag,
     _format_textbook_debug,
     _get_latest_user_message,
+    build_textbook_diag,
     build_textbook_query,
+    build_web_search_diag,
+    build_web_search_query,
     detect_intent,
     fetch_textbook_context,
     generate_response,
@@ -38,6 +44,8 @@ from api.core import (
     resolve_active_persona,
     resolve_manual_persona,
     resolve_web_search_context,
+    run_math_tool_for_message,
+    status_calculating_math,
     status_detecting_persona,
     status_fetching_textbook,
     status_generating_response,
@@ -66,6 +74,10 @@ class ChatResult:
     revised: bool = False
     used_safe_fallback: bool = False
     status_events: list[str] = field(default_factory=list)
+    logs: list[str] = field(default_factory=list)
+    textbook: TextbookQueryDiag | None = None
+    web_search: WebSearchQueryDiag | None = None
+    math_tool: list[MathToolUsage] = field(default_factory=list)
 
 
 async def _resolve_persona(
@@ -113,7 +125,7 @@ async def _resolve_textbook_context(
     persona: PersonaId,
     enable_textbook_context: bool | None,
     emit: Callable[[str], Awaitable[None]],
-) -> TextbookContext | None:
+) -> tuple[TextbookContext | None, str | None]:
     """Fetch textbook context using the same gate and heuristics as chat."""
     ctx_enabled = (
         enable_textbook_context
@@ -155,16 +167,16 @@ async def _resolve_textbook_context(
                 textbook_context.need_info = True
             if not settings.textbook_debug:
                 await emit(status_textbook_unavailable())
-        return textbook_context
+        return textbook_context, textbook_query
 
     if (
         ctx_enabled
         and persona in TEXTBOOK_PERSONAS
         and looks_like_textbook_help_request(user_message)
     ):
-        return TextbookContext(need_info=True)
+        return TextbookContext(need_info=True), textbook_query or None
 
-    return None
+    return None, textbook_query or None
 
 
 async def _resolve_web_search_context(
@@ -174,23 +186,28 @@ async def _resolve_web_search_context(
     persona: PersonaId,
     enable_web_search: bool | None,
     emit: Callable[[str], Awaitable[None]],
-) -> WebSearchContext | None:
+) -> tuple[WebSearchContext | None, str | None]:
     """Delegate to ``api.core.resolve_web_search_context``."""
     search_enabled = (
         enable_web_search if enable_web_search is not None else settings.enable_web_search
     )
-    return await resolve_web_search_context(
+    query = build_web_search_query(messages)
+    context = await resolve_web_search_context(
         messages=messages,
         persona=persona,
         enable_web_search=search_enabled,
         provider=settings.normalized_web_search_provider(),
         api_url=settings.web_search_api_url,
         api_key=settings.web_search_api_key or None,
+        perplexity_url=settings.web_search_perplexity_url,
         max_results=settings.web_search_max_results,
         timeout_sec=settings.web_search_request_timeout_sec,
         debug=settings.web_search_debug,
         on_status=emit,
     )
+    if context is None and not query:
+        return None, None
+    return context, query or (context.query if context else None)
 
 
 async def _run_response_loop(
@@ -202,6 +219,7 @@ async def _run_response_loop(
     temperature: float | None,
     textbook_context: TextbookContext | None,
     web_search_context: WebSearchContext | None,
+    math_tool_usages: list[MathToolUsage] | None,
     enable_reflection: bool,
     emit: Callable[[str], Awaitable[None]],
 ) -> tuple[str, int, ReflectionResult | None, bool, bool]:
@@ -220,6 +238,7 @@ async def _run_response_loop(
             temperature=temperature,
             textbook_context=textbook_context,
             web_search_context=web_search_context,
+            math_tool_usages=math_tool_usages,
         )
         return response, 1, None, False, False
 
@@ -242,6 +261,7 @@ async def _run_response_loop(
             temperature=temperature,
             textbook_context=textbook_context,
             web_search_context=web_search_context,
+            math_tool_usages=math_tool_usages,
         )
 
         await emit(status_reviewing_response())
@@ -297,7 +317,7 @@ async def run_chat(
         emit=emit,
     )
 
-    textbook_context = await _resolve_textbook_context(
+    textbook_context, textbook_query = await _resolve_textbook_context(
         settings=settings,
         messages=messages,
         persona=resolved_persona,
@@ -305,13 +325,20 @@ async def run_chat(
         emit=emit,
     )
 
-    web_search_context = await _resolve_web_search_context(
+    web_search_context, web_search_query = await _resolve_web_search_context(
         settings=settings,
         messages=messages,
         persona=resolved_persona,
         enable_web_search=enable_web_search,
         emit=emit,
     )
+
+    user_message = _get_latest_user_message(messages)
+    math_tool_usages = run_math_tool_for_message(
+        user_message, persona=resolved_persona
+    )
+    if math_tool_usages:
+        await emit(status_calculating_math())
 
     refl_enabled = (
         enable_reflection if enable_reflection is not None else settings.enable_reflection
@@ -326,8 +353,16 @@ async def run_chat(
         temperature=temp,
         textbook_context=textbook_context,
         web_search_context=web_search_context,
+        math_tool_usages=math_tool_usages,
         enable_reflection=refl_enabled,
         emit=emit,
+    )
+
+    textbook_diag = build_textbook_diag(
+        query_sent=textbook_query, context=textbook_context
+    )
+    web_search_diag = build_web_search_diag(
+        query_sent=web_search_query, context=web_search_context
     )
 
     return ChatResult(
@@ -341,6 +376,10 @@ async def run_chat(
         revised=revised,
         used_safe_fallback=used_fallback,
         status_events=status_events,
+        logs=list(status_events),
+        textbook=textbook_diag,
+        web_search=web_search_diag,
+        math_tool=math_tool_usages,
     )
 
 

@@ -29,20 +29,16 @@ from pydantic import BaseModel, Field
 # Used by homework and teacher personas to verify calculations
 # ---------------------------------------------------------------------------
 
-# Safe names allowed in eval context
 _SAFE_MATH_NAMES = {
-    # Constants
     "pi": math.pi,
     "e": math.e,
     "tau": math.tau,
-    # Functions
     "abs": abs,
     "round": round,
     "min": min,
     "max": max,
     "sum": sum,
     "pow": pow,
-    # Math module functions
     "sqrt": math.sqrt,
     "sin": math.sin,
     "cos": math.cos,
@@ -50,6 +46,7 @@ _SAFE_MATH_NAMES = {
     "asin": math.asin,
     "acos": math.acos,
     "atan": math.atan,
+    "atan2": math.atan2,
     "sinh": math.sinh,
     "cosh": math.cosh,
     "tanh": math.tanh,
@@ -64,85 +61,186 @@ _SAFE_MATH_NAMES = {
     "factorial": math.factorial,
     "gcd": math.gcd,
     "lcm": math.lcm,
+    "hypot": math.hypot,
 }
+
+_PERSIAN_DIGIT_MAP = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+_MATH_OP_MAP = str.maketrans({"×": "*", "÷": "/", "−": "-", "–": "-", "—": "-"})
+_MATH_EXPR_RE = re.compile(
+    r"(?:"
+    r"(?:(?:sqrt|sin|cos|tan|log|log10|log2|exp|abs|ceil|floor|factorial|gcd|lcm|pow|hypot)\s*)?\("
+    r"[^()]{0,80}\)"
+    r"|"
+    r"\d+(?:\.\d+)?(?:\s*(?:\*\*|[\+\-\*/%^])\s*\d+(?:\.\d+)?)+"
+    r")",
+    re.IGNORECASE,
+)
+_MATH_PERSONAS: frozenset[str] = frozenset({"teacher", "homework"})
 
 
 class _MathError(Exception):
     """Raised when math evaluation fails."""
 
 
+class MathToolUsage(BaseModel):
+    """One evaluated expression from the math tool."""
+
+    expression: str
+    result: str
+    ok: bool = True
+
+
+def normalize_math_expression(expr: str) -> str:
+    """Normalize Persian/Arabic digits and common math symbols for eval."""
+    text = expr.strip().translate(_PERSIAN_DIGIT_MAP).translate(_MATH_OP_MAP)
+    text = text.replace("^", "**")
+    text = text.replace(",", "")
+    text = re.sub(r"\s+", "", text)
+    return text
+
+
 def _safe_math_eval(expr: str) -> float:
     """Safely evaluate a mathematical expression."""
     if not expr or not expr.strip():
-        raise _MathError("Empty expression")
+        raise _MathError("عبارت خالی است")
 
-    expr = expr.strip()
+    expr = normalize_math_expression(expr)
+    if not expr:
+        raise _MathError("عبارت خالی است")
 
-    # Validate: only allow digits, operators, parentheses, dots, commas, and safe names
-    allowed_pattern = re.compile(r"^[\d\s\+\-\*\/\%\*\*\(\)\.\,\_\w]+$")
+    allowed_pattern = re.compile(r"^[\d\s\+\-\*\/\%\(\)\.\,\_\w]+$")
     if not allowed_pattern.match(expr):
-        raise _MathError("Expression contains invalid characters")
+        raise _MathError("عبارت شامل نویسهٔ غیرمجاز است")
 
-    # Check for forbidden patterns (as whole words, not substrings)
-    # Use word boundaries to avoid false positives like "os" in "cos"
     forbidden_patterns = [
-        r"\bimport\b", r"__", r"\beval\b", r"\bexec\b", r"\bcompile\b",
-        r"\bopen\b", r"\bread\b", r"\bwrite\b", r"\bos\b", r"\bsys\b",
-        r"\bsubprocess\b", r"\blambda\b", r"\bdef\s", r"\bclass\s", r"\byield\b",
+        r"\bimport\b",
+        r"__",
+        r"\beval\b",
+        r"\bexec\b",
+        r"\bcompile\b",
+        r"\bopen\b",
+        r"\bread\b",
+        r"\bwrite\b",
+        r"\bos\b",
+        r"\bsys\b",
+        r"\bsubprocess\b",
+        r"\blambda\b",
+        r"\bdef\s",
+        r"\bclass\s",
+        r"\byield\b",
     ]
     for pattern in forbidden_patterns:
         if re.search(pattern, expr):
-            raise _MathError("Forbidden pattern detected")
+            raise _MathError("الگوی غیرمجاز در عبارت")
 
-    # Limit expression length
     if len(expr) > 200:
-        raise _MathError("Expression too long")
+        raise _MathError("عبارت خیلی بلند است")
 
     try:
         code = compile(expr, "<math>", "eval")
         for name in code.co_names:
             if name not in _SAFE_MATH_NAMES:
-                raise _MathError(f"Unknown name: {name}")
+                raise _MathError(f"نام ناشناخته: {name}")
 
         result = eval(code, {"__builtins__": {}}, _SAFE_MATH_NAMES)
 
         if not isinstance(result, (int, float)):
-            raise _MathError("Result is not a number")
+            raise _MathError("نتیجه عدد نیست")
 
         if isinstance(result, float) and (math.isnan(result) or math.isinf(result)):
-            raise _MathError("Invalid result (NaN or infinity)")
+            raise _MathError("نتیجه نامعتبر است")
 
         return float(result)
 
     except _MathError:
         raise
     except ZeroDivisionError:
-        raise _MathError("Division by zero")
+        raise _MathError("تقسیم بر صفر")
     except OverflowError:
-        raise _MathError("Number too large")
+        raise _MathError("عدد خیلی بزرگ است")
     except SyntaxError:
-        raise _MathError("Invalid expression syntax")
+        raise _MathError("نحو عبارت نامعتبر است")
     except Exception as e:
-        raise _MathError(f"Evaluation error: {e}")
+        raise _MathError(f"خطای محاسبه: {e}")
 
 
 def _format_math_result(value: float) -> str:
     """Format a float result nicely for display."""
-    if isinstance(value, float) and value == int(value):
+    if isinstance(value, float) and value == int(value) and abs(value) < 1e15:
         return str(int(value))
     return f"{value:.10g}"
 
 
 def calculate_math(expr: str) -> str:
-    """
-    Main entry point for math tool.
-    Returns formatted result or error message in Persian.
-    """
+    """Evaluate an expression; return formatted result or a Persian error string."""
     try:
         result = _safe_math_eval(expr)
         return _format_math_result(result)
     except _MathError as e:
         return f"خطا: {e}"
+
+
+def extract_math_expressions(text: str, *, limit: int = 5) -> list[str]:
+    """Pull candidate arithmetic expressions out of free-form user text."""
+    if not text or not text.strip():
+        return []
+    normalized = text.translate(_PERSIAN_DIGIT_MAP).translate(_MATH_OP_MAP)
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in _MATH_EXPR_RE.finditer(normalized):
+        raw = match.group(0).strip()
+        cleaned = normalize_math_expression(raw)
+        if not cleaned or cleaned in seen:
+            continue
+        # Skip bare numbers without an operator / function call
+        if re.fullmatch(r"\d+(?:\.\d+)?", cleaned):
+            continue
+        if not any(op in cleaned for op in ("+", "-", "*", "/", "%", "(")):
+            continue
+        seen.add(cleaned)
+        found.append(cleaned)
+        if len(found) >= limit:
+            break
+    return found
+
+
+def run_math_tool_for_message(
+    text: str, *, persona: str | None = None, limit: int = 5
+) -> list[MathToolUsage]:
+    """Extract and evaluate math expressions when persona is teacher/homework."""
+    if persona is not None and persona not in _MATH_PERSONAS:
+        return []
+    usages: list[MathToolUsage] = []
+    for expr in extract_math_expressions(text, limit=limit):
+        try:
+            value = _safe_math_eval(expr)
+            usages.append(
+                MathToolUsage(
+                    expression=expr,
+                    result=_format_math_result(value),
+                    ok=True,
+                )
+            )
+        except _MathError as exc:
+            usages.append(
+                MathToolUsage(expression=expr, result=f"خطا: {exc}", ok=False)
+            )
+    return usages
+
+
+def format_math_tool_context(usages: list[MathToolUsage]) -> str | None:
+    """Build the system-prompt block for successful math tool results."""
+    ok_items = [u for u in usages if u.ok]
+    if not ok_items:
+        return None
+    lines = [
+        MATH_TOOL_CONTEXT_INSTRUCTION,
+        "",
+        MATH_TOOL_CONTEXT_HEADER,
+    ]
+    for item in ok_items:
+        lines.append(f"- `{item.expression}` = {item.result}")
+    return "\n".join(lines)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -426,6 +524,32 @@ class WebSearchContext(BaseModel):
     error: str | None = None
 
 
+
+class TextbookQueryDiag(BaseModel):
+    """Diagnostics for textbook context lookup."""
+
+    query_sent: str | None = None
+    matched: bool = False
+    context_preview: str | None = None
+    grade: int | None = None
+    subject: str | None = None
+    subject_title: str | None = None
+    page: int | None = None
+    error: str | None = None
+    need_info: bool = False
+    page_query_failed: bool = False
+
+
+class WebSearchQueryDiag(BaseModel):
+    """Diagnostics for web search lookup."""
+
+    query_sent: str | None = None
+    provider_used: str | None = None
+    matched: bool = False
+    results_count: int = 0
+    error: str | None = None
+
+
 class LLMClient(Protocol):
     async def complete(self, request: LLMCompletionRequest) -> str: ...
 
@@ -433,6 +557,9 @@ class LLMClient(Protocol):
 IntentDetectionResult.model_rebuild()
 ReflectionResult.model_rebuild()
 ChatMessage.model_rebuild()
+MathToolUsage.model_rebuild()
+TextbookQueryDiag.model_rebuild()
+WebSearchQueryDiag.model_rebuild()
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +653,10 @@ def status_fetching_web_search() -> str:
 
 def status_web_search_unavailable() -> str:
     return "⚠️ جستجوی اینترنت الان در دسترس نبود..."
+
+
+def status_calculating_math() -> str:
+    return "🔢 دارم حساب می‌کنم..."
 
 
 def coerce_bool(value: Any, *, default: bool = True) -> bool:
@@ -1441,30 +1572,205 @@ def _parse_external_web_search_payload(
     data: dict[str, Any], *, query: str, provider: str
 ) -> WebSearchContext:
     results: list[WebSearchResult] = []
-    raw_results = data.get("results")
+
+    def _append_item(
+        *,
+        title: str = "",
+        snippet: str = "",
+        url: str | None = None,
+    ) -> None:
+        title = (title or "").strip()
+        snippet = (snippet or "").strip()
+        url = (url or "").strip() or None
+        if title or snippet:
+            results.append(WebSearchResult(title=title, url=url, snippet=snippet))
+
+    raw_results = data.get("results") or data.get("organic") or data.get("items")
     if isinstance(raw_results, list):
         for item in raw_results:
+            if isinstance(item, str):
+                text = item.strip()
+                if text:
+                    _append_item(title="نتیجه", snippet=text)
+                continue
             if not isinstance(item, dict):
                 continue
-            title = str(item.get("title") or "").strip()
-            snippet = str(item.get("snippet") or item.get("content") or "").strip()
-            url_raw = item.get("url") or item.get("link")
+            title = str(
+                item.get("title") or item.get("name") or item.get("source") or ""
+            ).strip()
+            snippet = str(
+                item.get("snippet")
+                or item.get("content")
+                or item.get("text")
+                or item.get("summary")
+                or item.get("description")
+                or ""
+            ).strip()
+            url_raw = item.get("url") or item.get("link") or item.get("href")
             url = str(url_raw).strip() if url_raw else None
-            if title or snippet:
-                results.append(WebSearchResult(title=title, url=url, snippet=snippet))
+            _append_item(title=title, snippet=snippet, url=url)
+
+    # Perplexity-style answer + citations
+    answer = str(
+        data.get("answer")
+        or data.get("text")
+        or data.get("summary")
+        or data.get("content")
+        or ""
+    ).strip()
+    if answer:
+        _append_item(title="پاسخ", snippet=answer[:2000])
+
+    citations = data.get("citations") or data.get("sources") or data.get("references")
+    if isinstance(citations, list):
+        for item in citations:
+            if isinstance(item, str):
+                _append_item(title="منبع", url=item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or item.get("name") or "منبع").strip()
+            snippet = str(
+                item.get("snippet") or item.get("text") or item.get("excerpt") or ""
+            ).strip()
+            url_raw = item.get("url") or item.get("link") or item.get("href")
+            url = str(url_raw).strip() if url_raw else None
+            _append_item(title=title, snippet=snippet, url=url)
+
+    # Nested data wrappers
+    nested = data.get("data")
+    if isinstance(nested, dict) and not results:
+        return _parse_external_web_search_payload(
+            nested, query=query, provider=provider
+        )
 
     context_text = str(data.get("context_text") or "").strip()
     if not context_text and results:
         context_text = _format_web_search_results(results)
 
+    error = data.get("error")
+    error_text = str(error).strip() if error else None
+    # Upstream sometimes wraps an HTML error page in {"error": "<html...>"}
+    if error_text and error_text.lstrip().startswith("<"):
+        error_text = "سرویس جستجو خطا برگرداند"
+
     matched = bool(data.get("matched", bool(context_text or results)))
+    if error_text and not matched:
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider=provider,
+            error=error_text,
+        )
+
     return WebSearchContext(
         matched=matched,
         query=query,
         results=results,
         context_text=context_text or None,
         provider=provider,
+        error=error_text,
     )
+
+
+def _normalize_perplexity_search_url(perplexity_url: str) -> str:
+    """Accept a base host or a full ``/api/v1/search`` URL."""
+    raw = (perplexity_url or "").strip()
+    if not raw:
+        return ""
+    base = raw.rstrip("/")
+    if base.endswith("/api/v1/search"):
+        return base
+    if base.endswith("/api/v1"):
+        return f"{base}/search"
+    if base.endswith("/api"):
+        return f"{base}/v1/search"
+    return f"{base}/api/v1/search"
+
+
+def _http_get_json(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout_sec: float,
+) -> dict[str, Any] | None:
+    request = urllib.request.Request(
+        url,
+        headers=headers
+        or {
+            "User-Agent": "YarKids/1.0 (child-assistant; web-search)",
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+        raw = response.read().decode("utf-8")
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+
+
+def _search_via_perplexity(
+    query: str,
+    *,
+    perplexity_url: str,
+    max_results: int,
+    timeout_sec: float,
+) -> WebSearchContext:
+    endpoint = _normalize_perplexity_search_url(perplexity_url)
+    if not endpoint:
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="perplexity",
+            error="no_perplexity_url",
+        )
+
+    url = f"{endpoint}?{urllib.parse.urlencode({'query': query})}"
+    try:
+        data = _http_get_json(url, timeout_sec=timeout_sec)
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+            payload = json.loads(body)
+            if isinstance(payload, dict):
+                parsed = _parse_external_web_search_payload(
+                    payload, query=query, provider="perplexity"
+                )
+                if parsed.matched:
+                    return parsed
+                if parsed.error:
+                    return parsed
+        except Exception:
+            pass
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="perplexity",
+            error=f"HTTP {exc.code} از سرویس Perplexity",
+        )
+    except urllib.error.URLError as exc:
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="perplexity",
+            error=f"اتصال ناموفق به Perplexity: {exc.reason}",
+        )
+    except (json.JSONDecodeError, TimeoutError, ValueError) as exc:
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="perplexity",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+    if not data:
+        return WebSearchContext(matched=False, query=query, provider="perplexity")
+    ctx = _parse_external_web_search_payload(data, query=query, provider="perplexity")
+    if ctx.results and len(ctx.results) > max_results:
+        ctx.results = ctx.results[:max_results]
+        ctx.context_text = _format_web_search_results(ctx.results)
+    return ctx
 
 
 def _duckduckgo_instant_answer(
@@ -1847,6 +2153,7 @@ async def fetch_web_search_context(
     provider: str = "auto",
     api_url: str = "",
     api_key: str | None = None,
+    perplexity_url: str = "",
     max_results: int = DEFAULT_WEB_SEARCH_MAX_RESULTS,
     timeout_sec: float = DEFAULT_WEB_SEARCH_TIMEOUT_SEC,
 ) -> WebSearchContext | None:
@@ -1855,11 +2162,9 @@ async def fetch_web_search_context(
 
     Providers:
       - ``api``: POST ``{WEB_SEARCH_API_URL}/v1/search``
+      - ``perplexity``: GET ``{PERPLEXITY_URL}?query=...``
       - ``duckduckgo``: web search (Wikipedia as backup)
-      - ``auto``: API when URL is set, else DuckDuckGo then Wikipedia
-
-    Searches the query as written (no name dictionaries). Returns matched=False
-    on total failure (graceful degrade).
+      - ``auto``: first available among api → perplexity → duckduckgo → wikipedia
     """
     cleaned = query.strip()
     if not cleaned:
@@ -1867,44 +2172,59 @@ async def fetch_web_search_context(
 
     max_results = max(1, min(int(max_results), 10))
     normalized = (provider or "auto").strip().lower()
-    if normalized not in {"auto", "api", "duckduckgo"}:
+    if normalized not in {"auto", "api", "duckduckgo", "perplexity"}:
         normalized = "auto"
 
     variants = _web_search_query_variants(cleaned)
+    has_api = bool(_normalize_api_base_url(api_url))
+    has_perplexity = bool(_normalize_perplexity_search_url(perplexity_url))
 
-    def _run() -> WebSearchContext:
-        use_api = normalized == "api" or (
-            normalized == "auto" and bool(_normalize_api_base_url(api_url))
-        )
-        if use_api:
-            for variant in variants:
-                ctx = _search_via_api(
-                    variant,
-                    api_url=api_url,
-                    api_key=api_key,
-                    max_results=max_results,
-                    timeout_sec=timeout_sec,
-                )
-                if ctx.matched:
-                    ctx.query = cleaned
-                    return ctx
-            if normalized == "api":
-                return WebSearchContext(
-                    matched=False, query=cleaned, provider="api"
-                )
+    def _try_api() -> WebSearchContext | None:
+        if not has_api:
+            return None
+        last: WebSearchContext | None = None
+        for variant in variants:
+            ctx = _search_via_api(
+                variant,
+                api_url=api_url,
+                api_key=api_key,
+                max_results=max_results,
+                timeout_sec=timeout_sec,
+            )
+            last = ctx
+            if ctx.matched:
+                ctx.query = cleaned
+                return ctx
+        return last
 
-        # Real web search first — same idea as typing the words into a search box.
+    def _try_perplexity() -> WebSearchContext | None:
+        if not has_perplexity:
+            return None
+        last: WebSearchContext | None = None
+        for variant in variants:
+            ctx = _search_via_perplexity(
+                variant,
+                perplexity_url=perplexity_url,
+                max_results=max_results,
+                timeout_sec=timeout_sec,
+            )
+            last = ctx
+            if ctx.matched:
+                ctx.query = cleaned
+                return ctx
+        return last
+
+    def _try_duckduckgo_wiki() -> WebSearchContext:
         ddg_hits: list[WebSearchContext] = []
-        if normalized in {"auto", "duckduckgo"}:
-            for variant in variants[:2]:
-                ddg = _search_duckduckgo(
-                    variant,
-                    max_results=max_results,
-                    timeout_sec=min(timeout_sec, 6.0),
-                )
-                if ddg.matched:
-                    ddg_hits.append(ddg)
-                    break
+        for variant in variants[:2]:
+            ddg = _search_duckduckgo(
+                variant,
+                max_results=max_results,
+                timeout_sec=min(timeout_sec, 6.0),
+            )
+            if ddg.matched:
+                ddg_hits.append(ddg)
+                break
 
         wiki_hits: list[WebSearchContext] = []
         if not ddg_hits:
@@ -1922,6 +2242,33 @@ async def fetch_web_search_context(
             *ddg_hits, *wiki_hits, query=cleaned, max_results=max_results
         )
 
+    def _run() -> WebSearchContext:
+        if normalized == "api":
+            ctx = _try_api()
+            return ctx or WebSearchContext(
+                matched=False, query=cleaned, provider="api", error="no_api_url"
+            )
+
+        if normalized == "perplexity":
+            ctx = _try_perplexity()
+            return ctx or WebSearchContext(
+                matched=False,
+                query=cleaned,
+                provider="perplexity",
+                error="no_perplexity_url",
+            )
+
+        if normalized == "duckduckgo":
+            return _try_duckduckgo_wiki()
+
+        # auto: try whatever is configured, then local fallbacks
+        for attempt in (_try_api, _try_perplexity):
+            ctx = attempt()
+            if ctx and ctx.matched:
+                return ctx
+
+        return _try_duckduckgo_wiki()
+
     return await asyncio.to_thread(_run)
 
 
@@ -1933,18 +2280,13 @@ async def resolve_web_search_context(
     provider: str = "auto",
     api_url: str = "",
     api_key: str | None = None,
+    perplexity_url: str = "",
     max_results: int = DEFAULT_WEB_SEARCH_MAX_RESULTS,
     timeout_sec: float = DEFAULT_WEB_SEARCH_TIMEOUT_SEC,
     debug: bool = False,
     on_status: Callable[[str], Awaitable[None]] | None = None,
 ) -> WebSearchContext | None:
-    """Gate + fetch web search — shared by Pipe and API (single source of truth).
-
-    Same rules everywhere:
-      - only ``WEB_SEARCH_PERSONAS``
-      - natural query from ``build_web_search_query`` (no aliases)
-      - heuristic via ``looks_like_web_search_request``
-    """
+    """Gate + fetch web search for eligible personas."""
     user_message = _get_latest_user_message(messages)
     query = build_web_search_query(messages)
     should_fetch = bool(
@@ -1964,6 +2306,7 @@ async def resolve_web_search_context(
         provider=provider,
         api_url=api_url,
         api_key=api_key,
+        perplexity_url=perplexity_url,
         max_results=max_results,
         timeout_sec=timeout_sec,
     )
@@ -1989,6 +2332,7 @@ def build_system_prompt(
     revision_reasons: list[str] | None = None,
     textbook_context: TextbookContext | None = None,
     web_search_context: WebSearchContext | None = None,
+    math_tool_usages: list[MathToolUsage] | None = None,
 ) -> str:
     sections: list[str] = [get_core_prompt()]
 
@@ -2034,6 +2378,10 @@ def build_system_prompt(
         # We attempted a search (game/fact talk) but got nothing — block
         # hallucinated «doesn't exist / not released» claims.
         sections.append(WEB_SEARCH_NO_RESULTS_INSTRUCTION)
+
+    math_block = format_math_tool_context(math_tool_usages or [])
+    if math_block:
+        sections.append(math_block)
 
     if revision_reasons:
         reasons_text = "\n".join(f"- {reason}" for reason in revision_reasons)
@@ -2082,6 +2430,7 @@ def build_prompt_messages(
     revision_reasons: list[str] | None = None,
     textbook_context: TextbookContext | None = None,
     web_search_context: WebSearchContext | None = None,
+    math_tool_usages: list[MathToolUsage] | None = None,
 ) -> list[dict[str, Any]]:
     llm_messages: list[dict[str, Any]] = [
         {
@@ -2091,6 +2440,7 @@ def build_prompt_messages(
                 revision_reasons,
                 textbook_context=textbook_context,
                 web_search_context=web_search_context,
+                math_tool_usages=math_tool_usages,
             ),
         },
     ]
@@ -2451,6 +2801,7 @@ async def generate_response(
     temperature: float | None = None,
     textbook_context: TextbookContext | None = None,
     web_search_context: WebSearchContext | None = None,
+    math_tool_usages: list[MathToolUsage] | None = None,
 ) -> str:
     request = LLMCompletionRequest(
         model=backend_model,
@@ -2460,6 +2811,7 @@ async def generate_response(
             revision_reasons=revision_reasons,
             textbook_context=textbook_context,
             web_search_context=web_search_context,
+            math_tool_usages=math_tool_usages,
         ),
         stream=False,
         temperature=temperature,
@@ -2568,6 +2920,7 @@ async def run_response_loop(
     on_status: Callable[[str], Awaitable[None]] | None = None,
     textbook_context: TextbookContext | None = None,
     web_search_context: WebSearchContext | None = None,
+    math_tool_usages: list[MathToolUsage] | None = None,
     enable_reflection: bool = True,
 ) -> str:
     revision_reasons: list[str] = []
@@ -2586,6 +2939,7 @@ async def run_response_loop(
             temperature=temperature,
             textbook_context=textbook_context,
             web_search_context=web_search_context,
+            math_tool_usages=math_tool_usages,
         )
 
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
@@ -2601,6 +2955,7 @@ async def run_response_loop(
             temperature=temperature,
             textbook_context=textbook_context,
             web_search_context=web_search_context,
+            math_tool_usages=math_tool_usages,
         )
 
         if on_status:
@@ -2623,9 +2978,44 @@ async def run_response_loop(
     return SAFE_FALLBACK_RESPONSE
 
 
-# ---------------------------------------------------------------------------
-# OpenWebUI Pipe entry point
-# ---------------------------------------------------------------------------
+def build_textbook_diag(
+    *,
+    query_sent: str | None,
+    context: TextbookContext | None,
+) -> TextbookQueryDiag | None:
+    if not query_sent and context is None:
+        return None
+    preview = None
+    if context and context.context_text:
+        preview = context.context_text[:400]
+    return TextbookQueryDiag(
+        query_sent=query_sent or None,
+        matched=bool(context and context.matched),
+        context_preview=preview,
+        grade=context.grade if context else None,
+        subject=context.subject if context else None,
+        subject_title=context.subject_title if context else None,
+        page=context.page if context else None,
+        error=context.error if context else None,
+        need_info=bool(context and context.need_info),
+        page_query_failed=bool(context and context.page_query_failed),
+    )
+
+
+def build_web_search_diag(
+    *,
+    query_sent: str | None,
+    context: WebSearchContext | None,
+) -> WebSearchQueryDiag | None:
+    if not query_sent and context is None:
+        return None
+    return WebSearchQueryDiag(
+        query_sent=(context.query if context and context.query else query_sent) or None,
+        provider_used=context.provider if context else None,
+        matched=bool(context and context.matched),
+        results_count=len(context.results) if context else 0,
+        error=context.error if context else None,
+    )
 
 
 class Pipe:
@@ -2700,20 +3090,27 @@ class Pipe:
         WEB_SEARCH_PROVIDER: str = Field(
             default="auto",
             description=(
-                "ارائه‌دهنده جستجو: auto | duckduckgo | api "
-                "(auto = اگر WEB_SEARCH_API_URL تنظیم باشد از api، وگرنه DuckDuckGo)."
+                "ارائه‌دهنده جستجو: auto | duckduckgo | api | perplexity "
+                "(auto = هر منبعی که در دسترس باشد: api → perplexity → DuckDuckGo)."
             ),
         )
         WEB_SEARCH_API_URL: str = Field(
             default="",
             description=(
                 "آدرس پایهٔ سرویس جستجوی سفارشی (POST /v1/search). "
-                "خالی = استفاده از DuckDuckGo داخلی."
+                "خالی = غیرفعال برای provider=api."
             ),
         )
         WEB_SEARCH_API_KEY: str = Field(
             default="",
             description="کلید API اختیاری برای سرویس جستجو (Bearer token).",
+        )
+        WEB_SEARCH_PERPLEXITY_URL: str = Field(
+            default="",
+            description=(
+                "آدرس پایه یا کامل سرویس جستجوی Perplexity "
+                "(GET .../api/v1/search?query=...). خالی = غیرفعال."
+            ),
         )
         WEB_SEARCH_REQUEST_TIMEOUT_SEC: float = Field(
             default=DEFAULT_WEB_SEARCH_TIMEOUT_SEC,
@@ -2952,11 +3349,18 @@ class Pipe:
             provider=self.valves.WEB_SEARCH_PROVIDER,
             api_url=self.valves.WEB_SEARCH_API_URL,
             api_key=self.valves.WEB_SEARCH_API_KEY or None,
+            perplexity_url=self.valves.WEB_SEARCH_PERPLEXITY_URL,
             max_results=self.valves.WEB_SEARCH_MAX_RESULTS,
             timeout_sec=self.valves.WEB_SEARCH_REQUEST_TIMEOUT_SEC,
             debug=self.valves.WEB_SEARCH_DEBUG,
             on_status=on_status,
         )
+
+        math_tool_usages = run_math_tool_for_message(
+            user_message, persona=persona
+        )
+        if math_tool_usages and on_status:
+            await on_status(status_calculating_math())
 
         # Persona is already teacher/homework here (gate above); no switch needed.
         enable_reflection = read_valve_bool(
@@ -2971,5 +3375,6 @@ class Pipe:
             on_status=on_status,
             textbook_context=textbook_context,
             web_search_context=web_search_context,
+            math_tool_usages=math_tool_usages,
             enable_reflection=enable_reflection,
         )

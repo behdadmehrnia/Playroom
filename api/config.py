@@ -62,6 +62,13 @@ class Settings(BaseModel):
     web_search_provider: str = Field(default="auto")
     web_search_api_url: str = Field(default="")
     web_search_api_key: str = Field(default="")
+    web_search_perplexity_url: str = Field(
+        default="",
+        description=(
+            "آدرس پایه یا کامل سرویس جستجوی Perplexity "
+            "(GET .../api/v1/search?query=...). خالی = غیرفعال."
+        ),
+    )
     web_search_request_timeout_sec: float = Field(
         default=DEFAULT_WEB_SEARCH_TIMEOUT_SEC, ge=1.0, le=30.0
     )
@@ -129,6 +136,9 @@ class Settings(BaseModel):
             web_search_provider=env("YARKIDS_WEB_SEARCH_PROVIDER", "auto").strip().lower(),
             web_search_api_url=env("YARKIDS_WEB_SEARCH_API_URL").strip(),
             web_search_api_key=env("YARKIDS_WEB_SEARCH_API_KEY").strip(),
+            web_search_perplexity_url=env(
+                "YARKIDS_WEB_SEARCH_PERPLEXITY_URL"
+            ).strip(),
             web_search_request_timeout_sec=env_float(
                 "YARKIDS_WEB_SEARCH_REQUEST_TIMEOUT_SEC", DEFAULT_WEB_SEARCH_TIMEOUT_SEC
             ),
@@ -147,7 +157,7 @@ class Settings(BaseModel):
 
     def normalized_web_search_provider(self) -> str:
         value = self.web_search_provider.strip().lower()
-        if value not in {"auto", "api", "duckduckgo"}:
+        if value not in {"auto", "api", "duckduckgo", "perplexity"}:
             return "auto"
         return value
 

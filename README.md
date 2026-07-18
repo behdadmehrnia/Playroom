@@ -86,9 +86,10 @@ Chat Controls → Valves → **شخصیت یار کودک**
 | `TEXTBOOK_NEIGHBOR_PAGES` | صفحات همسایه (۰–۳) |
 | `TEXTBOOK_INCLUDE_IMAGE` | `never` / `auto` / `always` |
 | `ENABLE_WEB_SEARCH` | جستجوی وب (خلاق / داستان‌گو / بازی و سرگرمی) |
-| `WEB_SEARCH_PROVIDER` | `auto` / `duckduckgo` / `api` |
+| `WEB_SEARCH_PROVIDER` | `auto` / `duckduckgo` / `api` / `perplexity` |
 | `WEB_SEARCH_API_URL` | آدرس سرویس جستجوی سفارشی (اختیاری) |
 | `WEB_SEARCH_API_KEY` | کلید API اختیاری |
+| `WEB_SEARCH_PERPLEXITY_URL` | آدرس سرویس جستجوی Perplexity (GET `?query=`) |
 | `WEB_SEARCH_MAX_RESULTS` | حداکثر تعداد نتایج (۱–۱۰) |
 
 ## کتاب درسی (textbook-service)
@@ -109,10 +110,30 @@ Chat Controls → Valves → **شخصیت یار کودک**
 
 برای پرسوناهای **خلاق**، **داستان‌گو** و **بازی و سرگرمی**، وقتی سؤال کودک واقعی/به‌روز به نظر برسد (مثلاً نکات بازی، «چطور …؟»، نام بازی)، سیستم قبل از تولید پاسخ در اینترنت جستجو می‌کند و خلاصهٔ نتایج را به پرامپت تزریق می‌کند.
 
-- پیش‌فرض: DuckDuckGo داخلی (بدون کلید، با safe search)
-- اختیاری: سرویس سفارشی با `WEB_SEARCH_API_URL` که `POST /v1/search` را با `{ "query", "max_results" }` بپذیرد و `{ "matched", "results": [{ "title", "url", "snippet" }], "context_text" }` برگرداند
+- `WEB_SEARCH_PROVIDER`:
+  - `duckduckgo` — DuckDuckGo داخلی (+ Wikipedia)
+  - `api` — `POST {WEB_SEARCH_API_URL}/v1/search`
+  - `perplexity` — `GET {WEB_SEARCH_PERPLEXITY_URL}/api/v1/search?query=...`
+  - `auto` — هر منبعی که در دسترس باشد، به ترتیب: api → perplexity → duckduckgo
 - در API: `POST /v1/web-search/query` و `POST /v1/web-search/retrieve`
 - اگر جستجو شکست بخورد، چت بدون نتایج ادامه می‌یابد (حدس نمی‌زند)
+
+## API سازگار با OpenAI
+
+سرویس `api/` علاوه بر `/v1/chat` این اندپوینت‌ها را هم ارائه می‌دهد (مدل کلاینت نادیده گرفته می‌شود؛ از `YARKIDS_BACKEND_MODEL` استفاده می‌شود):
+
+| مسیر | توضیح |
+|------|--------|
+| `POST /v1/chat/completions` | Chat Completions استاندارد (+ alias: `/v1/chat/completion`) |
+| `POST /v1/responses` | Responses API |
+
+در پاسخ (و در آخرین chunk استریم) فیلد `yarkids` شامل پرسونای فعال، لاگ‌ها، کوئری/نتیجهٔ کتاب درسی، جستجوی وب، و استفاده از ابزار ریاضی است.
+
+```bash
+curl -s http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"سلام"}]}'
+```
 
 ## ویرایش پرامپت‌ها
 

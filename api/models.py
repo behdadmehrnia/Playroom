@@ -13,9 +13,12 @@ from pydantic import BaseModel, Field
 
 from api.core import (
     IntentDetectionResult,
+    MathToolUsage,
     ReflectionResult,
     TextbookContext,
+    TextbookQueryDiag,
     WebSearchContext,
+    WebSearchQueryDiag,
 )
 
 Role = Literal["system", "user", "assistant"]
@@ -197,6 +200,21 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
+class YarKidsMeta(BaseModel):
+    """Diagnostics embedded in OpenAI-compatible and custom chat responses."""
+
+    persona: str
+    persona_source: PersonaSource
+    logs: list[str] = Field(default_factory=list)
+    textbook: TextbookQueryDiag | None = None
+    web_search: WebSearchQueryDiag | None = None
+    math_tool: list[MathToolUsage] = Field(default_factory=list)
+    attempts: int = 0
+    reflection: ReflectionResult | None = None
+    revised: bool = False
+    used_safe_fallback: bool = False
+
+
 class ChatResultOut(BaseModel):
     response: str
     persona: str
@@ -207,4 +225,53 @@ class ChatResultOut(BaseModel):
     reflection: ReflectionResult | None = None
     revised: bool
     status_events: list[str] = Field(default_factory=list)
+    logs: list[str] = Field(default_factory=list)
+    textbook: TextbookQueryDiag | None = None
+    web_search: WebSearchQueryDiag | None = None
+    math_tool: list[MathToolUsage] = Field(default_factory=list)
     used_safe_fallback: bool
+
+
+# ---------------------------------------------------------------------------
+# OpenAI-compatible request/response models
+# ---------------------------------------------------------------------------
+
+
+class OpenAIChatMessageIn(BaseModel):
+    role: str
+    content: Any = None
+    name: str | None = None
+
+
+class OpenAIChatCompletionsRequest(BaseModel):
+    """OpenAI Chat Completions body. ``model`` is optional and ignored."""
+
+    model: str | None = None
+    messages: list[OpenAIChatMessageIn]
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    stream: bool = False
+    persona: str | None = None
+    metadata: dict[str, Any] | None = None
+    enable_reflection: bool | None = None
+    enable_textbook_context: bool | None = None
+    enable_web_search: bool | None = None
+
+
+class OpenAIResponsesInputMessage(BaseModel):
+    role: str
+    content: Any = None
+
+
+class OpenAIResponsesRequest(BaseModel):
+    """OpenAI Responses API body. ``model`` is optional and ignored."""
+
+    model: str | None = None
+    input: Any = None
+    messages: list[OpenAIChatMessageIn] | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    stream: bool = False
+    persona: str | None = None
+    metadata: dict[str, Any] | None = None
+    enable_reflection: bool | None = None
+    enable_textbook_context: bool | None = None
+    enable_web_search: bool | None = None
