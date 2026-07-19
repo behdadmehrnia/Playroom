@@ -28,7 +28,7 @@ from api.textbook.app.config import (
 )
 from api.textbook.app.subjects import SUBJECT_TITLES
 from api.textbook.app.store import CatalogBook
-from api.textbook.app.text_quality import is_text_garbled
+from api.textbook.app.text_quality import fix_rtl_char_reversal, is_text_garbled
 from api.textbook.indexer.mineru_extract import (
     mineru_available,
     run_mineru,
@@ -256,6 +256,7 @@ def _resolve_page_text(
     """
     if ocr_engine == "mineru" and use_ocr and mineru_text:
         stats["ocr_pages"] += 1
+        mineru_text = fix_rtl_char_reversal(mineru_text)
         if _text_is_usable(mineru_text):
             stats["ocr_fixed"] += 1
             return mineru_text, True
@@ -363,7 +364,7 @@ def _process_book(
                 printed_page=printed_page,
                 pdf_page_index=pdf_page_index,
                 text=text,
-                image_path=str(image_path.relative_to(DATA_DIR)),
+                image_path=str(image_path.relative_to(DATA_DIR).as_posix()),
                 is_scanned=is_scanned,
                 text_usable=text_usable,
             )
@@ -442,6 +443,11 @@ def build_index(
                 ocr_dpi=ocr_dpi,
                 stats=stats,
             )
+            # Commit after each book so a long MinerU run can be resumed
+            # (re-run skips books already present if you switch to index_book,
+            # and crashes don't wipe prior progress from an open transaction).
+            conn.commit()
+            print(f"  committed {pdf_name} (running total: {total_pages} pages)")
 
         conn.execute(
             """

@@ -8,6 +8,7 @@ build/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.venv-indexer/
 venv/
 .env
 pipe_embedded.py

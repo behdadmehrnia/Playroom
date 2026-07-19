@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from api.textbook.app.config import CATALOG_PATH, INDEX_PATH, PAGES_DIR
+from api.textbook.app.config import CATALOG_PATH, DATA_DIR, INDEX_PATH, PAGES_DIR
 from api.textbook.app.text_quality import is_text_garbled
 
 
@@ -548,13 +548,17 @@ def topic_search(
 def resolve_image_path(image_path: str | None) -> Path | None:
     if not image_path:
         return None
-    path = Path(image_path)
+    # Indexes built on Windows may store ``pages\foo.png``; normalize separators
+    # so Linux deployments resolve the same relative paths.
+    normalized = image_path.replace("\\", "/").strip()
+    path = Path(normalized)
     if path.is_file():
         return path
     candidate = PAGES_DIR / path.name
     if candidate.is_file():
         return candidate
-    candidate = Path(image_path)
+    # Also try relative to the textbook data root (e.g. pages/foo.png).
+    candidate = Path(DATA_DIR) / normalized
     if candidate.is_file():
         return candidate
     return None

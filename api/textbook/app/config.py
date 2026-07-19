@@ -15,4 +15,4 @@ HOST = os.environ.get("TEXTBOOK_HOST", "0.0.0.0")
 PORT = int(os.environ.get("TEXTBOOK_PORT", "8080"))
 
 MIN_TEXT_CHARS_FOR_DIGITAL = int(os.environ.get("TEXTBOOK_MIN_TEXT_CHARS", "40"))
-DEFAULT_NEIGHBORS = 1
+DEFAULT_NEIGHBORS = 2

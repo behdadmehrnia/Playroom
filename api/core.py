@@ -1537,7 +1537,7 @@ def _use_embedded_textbook(api_url: str) -> bool:
 async def _fetch_textbook_context_local(
     query: str,
     *,
-    include_neighbors: int = 1,
+    include_neighbors: int = 2,
     include_image: str = "auto",
 ) -> TextbookContext | None:
     from api.textbook.app.models import RetrieveRequest
@@ -1571,7 +1571,7 @@ async def fetch_textbook_context(
     *,
     api_url: str = "",
     api_key: str | None = None,
-    include_neighbors: int = 1,
+    include_neighbors: int = 2,
     include_image: str = "auto",
     timeout_sec: float = DEFAULT_TEXTBOOK_TIMEOUT_SEC,
 ) -> TextbookContext | None:

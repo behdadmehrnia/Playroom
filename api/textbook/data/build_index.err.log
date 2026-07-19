@@ -1,0 +1,26 @@
+  warning: mineru failed on C405.pdf pages 152-159 (exit 1): 2026-07-19 19:18:45.748 | INFO     | mineru.cli.client:run_orchestrated_cli:953 - Started local mineru-api at http://127.0.0.1:62616
+[32m2026-07-19 19:18:48.980[0m | [1mINFO    [0m | [36m__main__[0m:[36mcreate_app[0m:[36m236[0m - [1mRequest concurrency limited to 3[0m
+INFO:     Started server process [33664]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:62616 (Press CTRL+C to quit)
+2026-07-19 19:18:49.784 | INFO     | mineru.cli.client:run_planned_task:832 - Submitting batch 1/1 | 1 document, 8 pages in this batch | 8 pages total | task#1 [C405]
+[32m2026-07-19 19:18:53.621[0m | [1mINFO    [0m | [36mmineru.backend.pipeline.pipeline_analyze[0m:[36mdoc_analyze_streaming[0m:[36m209[0m - [1mPipeline processing-window multi-file run. doc_count=1, total_pages=8, window_size=64, total_batches=1[0m
+[32m2026-07-19 19:18:57.225[0m | [1mINFO    [0m | [36mmineru.backend.pipeline.pipeline_analyze[0m:[36mdoc_analyze_streaming[0m:[36m264[0m - [1mPipeline processing window batch 1/1: 8/8 pages, batch_pages=8, doc_slices=doc0:1-8[0m
+[32m2026-07-19 19:18:57.227[0m | [1mINFO    [0m | [36mmineru.backend.pipeline.pipeline_analyze[0m:[36mbatch_image_analyze[0m:[36m364[0m - [1mGPU Memory: 1 GB, Batch Ratio: 1. [0m
+[32m2026-07-19 19:18:57.227[0m | [1mINFO    [0m | [36mmineru.backend.pipeline.model_init[0m:[36m__init__[0m:[36m239[0m - [1mDocAnalysis init, this may take some times......[0m
+[32m2026-07-19 19:18:57.884[0m | [1mINFO    [0m | [36mmineru.backend.pipeline.model_init[0m:[36m__init__[0m:[36m291[0m - [1mDocAnalysis init done![0m
+[32m2026-07-19 19:18:57.884[0m | [1mINFO    [0m | [36mmineru.backend.pipeline.pipeline_analyze[0m:[36mcustom_model_init[0m:[36m83[0m - [1mmodel init cost: 0.6569535732269287[0m
+
+Layout Predict:   0%|          | 0/8 [00:00<?, ?it/s]
+Layout Predict:  12%|█▎        | 1/8 [00:00<00:04,  1.71it/s]
+Lay
+  warning: mineru failed on C617.pdf pages 16-23 (exit 1): 2026-07-19 22:11:24.887 | INFO     | mineru.cli.client:run_orchestrated_cli:953 - Started local mineru-api at http://127.0.0.1:62979
+[32m2026-07-19 22:11:28.502[0m | [1mINFO    [0m | [36m__main__[0m:[36mcreate_app[0m:[36m236[0m - [1mRequest concurrency limited to 3[0m
+INFO:     Started server process [21496]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    [Errno 13] error while attempting to bind on address ('127.0.0.1', 62979): [winerror 10013] an attempt was made to access a socket in a way forbidden by its access permissions
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+Error: Local mineru-api exited before becoming healthy.
