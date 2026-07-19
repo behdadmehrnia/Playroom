@@ -215,7 +215,9 @@ def _is_topic_search_query(
     if parsed_topic:
         return True
     # Only treat free-text as topical when it looks like a real name/phrase.
-    if search_text and (len(search_text.split()) >= 2 or len(search_text) >= 6):
+    # Single tokens like «ستایش» (5 chars) should search; bare subjects are
+    # usually stripped out of search_text by the parser.
+    if search_text and (len(search_text.split()) >= 2 or len(search_text) >= 5):
         return True
     normalized = query.strip()
     if not normalized:
