@@ -75,7 +75,7 @@ from api.service import detect_intent_for, run_chat, run_chat_stream
 from api.textbook.app.routes import router as textbook_router
 
 router = APIRouter()
-router.include_router(textbook_router, prefix="/v1")
+router.include_router(textbook_router, prefix="/v1", tags=["Textbook"])
 
 
 # ---------------------------------------------------------------------------
@@ -240,24 +240,11 @@ def resolve_backend_model_optional(
 
 
 # ---------------------------------------------------------------------------
-# Root / health / meta
+# Health
 # ---------------------------------------------------------------------------
 
 
-@router.get("/")
-async def root() -> dict[str, str]:
-    return {
-        "name": "Yar Kids API",
-        "version": __version__,
-        "docs": "/docs",
-        "description": (
-            "دستیار کودک‌دوست — API مستقل با معماری Persona، Intent Detection و Reflection. "
-            "اندپوینت‌های OpenAI-compatible: /v1/chat/completions و /v1/responses"
-        ),
-    }
-
-
-@router.get("/health", response_model=HealthResponse)
+@router.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health(
     settings: Settings = Depends(get_settings),
     llm_client: OpenAICompatibleLLMClient = Depends(get_llm_client),
@@ -289,7 +276,7 @@ async def health(
     )
 
 
-@router.get("/v1/personas", response_model=PersonasResponse)
+@router.get("/v1/personas", response_model=PersonasResponse, tags=["Personas"])
 async def personas() -> PersonasResponse:
     return PersonasResponse(
         personas=[
@@ -306,7 +293,7 @@ async def personas() -> PersonasResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/v1/intent", response_model=IntentResponse)
+@router.post("/v1/intent", response_model=IntentResponse, tags=["Intent"])
 async def detect_intent_endpoint(
     req: IntentRequest,
     settings: Settings = Depends(get_settings),
@@ -325,7 +312,7 @@ async def detect_intent_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/v1/persona/resolve", response_model=PersonaResolveResponse)
+@router.post("/v1/persona/resolve", response_model=PersonaResolveResponse, tags=["Personas"])
 async def resolve_persona_endpoint(
     req: PersonaResolveRequest,
     settings: Settings = Depends(get_settings),
@@ -368,7 +355,7 @@ async def resolve_persona_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/v1/textbook/query", response_model=TextbookQueryResponse)
+@router.post("/v1/textbook/query", response_model=TextbookQueryResponse, tags=["Textbook"])
 async def textbook_query_endpoint(
     req: TextbookQueryRequest,
 ) -> TextbookQueryResponse:
@@ -383,7 +370,7 @@ async def textbook_query_endpoint(
     )
 
 
-@router.post("/v1/textbook/retrieve", response_model=TextbookRetrieveResponse)
+@router.post("/v1/textbook/retrieve", response_model=TextbookRetrieveResponse, tags=["Textbook"])
 async def retrieve_textbook_endpoint(
     req: TextbookRetrieveRequest,
     settings: Settings = Depends(get_settings),
@@ -485,7 +472,7 @@ async def retrieve_textbook_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/v1/web-search/query", response_model=WebSearchQueryResponse)
+@router.post("/v1/web-search/query", response_model=WebSearchQueryResponse, tags=["Web Search"])
 async def web_search_query_endpoint(
     req: WebSearchQueryRequest,
 ) -> WebSearchQueryResponse:
@@ -502,7 +489,7 @@ async def web_search_query_endpoint(
     )
 
 
-@router.post("/v1/web-search/retrieve", response_model=WebSearchRetrieveResponse)
+@router.post("/v1/web-search/retrieve", response_model=WebSearchRetrieveResponse, tags=["Web Search"])
 async def retrieve_web_search_endpoint(
     req: WebSearchRetrieveRequest,
     settings: Settings = Depends(get_settings),
@@ -604,7 +591,7 @@ async def retrieve_web_search_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/v1/generate", response_model=GenerateResponse)
+@router.post("/v1/generate", response_model=GenerateResponse, tags=["Generation"])
 async def generate_endpoint(
     req: GenerateRequest,
     settings: Settings = Depends(get_settings),
@@ -633,7 +620,7 @@ async def generate_endpoint(
     return GenerateResponse(response=response)
 
 
-@router.post("/v1/reflect", response_model=ReflectResponse)
+@router.post("/v1/reflect", response_model=ReflectResponse, tags=["Reflection"])
 async def reflect_endpoint(
     req: ReflectRequest,
     settings: Settings = Depends(get_settings),
@@ -706,7 +693,7 @@ async def _chat_event_stream(
             yield {"event": "done", "data": out.model_dump_json()}
 
 
-@router.post("/v1/chat", response_model=ChatResultOut)
+@router.post("/v1/chat", response_model=ChatResultOut, tags=["Chat"])
 async def chat_endpoint(
     req: ChatRequest,
     settings: Settings = Depends(get_settings),
@@ -1109,7 +1096,7 @@ async def _handle_chat_completions(
     )
 
 
-@router.post("/v1/chat/completions")
+@router.post("/v1/chat/completions", tags=["OpenAI Compatible"])
 async def openai_chat_completions(
     req: OpenAIChatCompletionsRequest,
     settings: Settings = Depends(get_settings),
@@ -1118,7 +1105,7 @@ async def openai_chat_completions(
     return await _handle_chat_completions(req, settings, llm_client)
 
 
-@router.post("/v1/chat/completion")
+@router.post("/v1/chat/completion", tags=["OpenAI Compatible"])
 async def openai_chat_completion_alias(
     req: OpenAIChatCompletionsRequest,
     settings: Settings = Depends(get_settings),
@@ -1128,7 +1115,7 @@ async def openai_chat_completion_alias(
     return await _handle_chat_completions(req, settings, llm_client)
 
 
-@router.post("/v1/responses")
+@router.post("/v1/responses", tags=["OpenAI Compatible"])
 async def openai_responses(
     req: OpenAIResponsesRequest,
     settings: Settings = Depends(get_settings),

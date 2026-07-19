@@ -64,7 +64,6 @@ If HuggingFace is unreachable, keep `MINERU_MODEL_SOURCE=modelscope` (already th
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/v1/health` | Index / catalog status |
 | POST | `/v1/retrieve` | Persian query → page context |
 | GET | `/v1/page-image` | PNG for a page |
 | POST | `/v1/upload-pdf` | Upload + optional catalog register |
