@@ -1,46 +1,89 @@
 # یار کودک (Yar Kids)
 
-Pipe Function برای OpenWebUI — دستیار کودک‌دوست.
+دستیار کودک‌دوست — سرویس FastAPI مستقل به‌همراه Pipe کلاینت برای OpenWebUI.
 
 ## ساختار پروژه
 
 ```
 yarkids/
-├── pipe.py                 # کل منطق + کلاس Pipe (+ کلاینت textbook-service)
-├── scripts/
-│   └── build_embedded_pipe.py
-├── prompts/                # پرامپت‌های یار کودک
-└── textbook-service/       # API جدا — بازیابی کتاب درسی
-    ├── app/                # FastAPI
-    ├── indexer/            # build_index.py
-    └── data/               # catalog.json, pdfs/, index.sqlite
+├── api/                        # سرویس FastAPI (منبع حقیقت منطق)
+│   ├── main.py                 # entrypoint: uvicorn api.main:app
+│   ├── config.py / llm.py      # env settings + LLM client
+│   ├── service.py              # chat orchestration (calls api.core)
+│   ├── models.py               # HTTP request/response schemas
+│   ├── core/                   # domain logic (import via api.core)
+│   │   ├── persona.py / intent.py
+│   │   ├── textbook.py / web_search.py
+│   │   ├── generation.py / math_tool.py
+│   │   └── prompts.py          # loads api/prompts/*.md
+│   ├── routes/                 # HTTP endpoints (composed router)
+│   │   ├── chat.py / health.py
+│   │   ├── openai_compat.py    # /v1/chat/completions, /v1/responses
+│   │   └── …                   # intent, personas, textbook, web-search, …
+│   ├── prompts/                # پرامپت‌های .md
+│   ├── textbook/               # بازیابی کتاب درسی (embedded)
+│   ├── requirements-runtime.txt  # deps for Docker / API runtime
+│   ├── requirements.txt        # + MinerU indexer (local PDF indexing)
+│   └── pipe/
+│       ├── pipe.py             # ★ Pipe کلاینت OpenWebUI (توصیه‌شده)
+│       ├── pipe_logic.py       # [DEPRECATED] منطق محلی
+│       └── generate-logic-pipe.py
 ```
 
-## نصب در OpenWebUI
-
-1. **کل پوشه** `yarkids` (شامل `pipe.py` و `prompts/`) را در محیط OpenWebUI قرار دهید.
-2. در **Admin → Functions** فایل `pipe.py` را import کنید.
-3. Function را فعال کنید.
-4. در Valves مقدار `BACKEND_MODEL` را تنظیم کنید.
-5. مدل **یار کودک** در لیست مدل‌ها ظاهر می‌شود.
-
-> پرامپت‌ها از فایل‌های `.md` کنار `pipe.py` خوانده می‌شوند. حتماً پوشه `prompts/` را هم کپی کنید.
-
-## نسخه تک‌فایلی برای OpenWebUI
-
-اگر فقط یک فایل می‌خواهید import کنید (بدون پوشه `prompts/`):
+### وابستگی‌ها
 
 ```bash
-python scripts/build_embedded_pipe.py
+# اجرای API (همان چیزی که Docker نصب می‌کند)
+pip install -r api/requirements-runtime.txt
+
+# + ایندکس PDF محلی (MinerU — سنگین)
+pip install -r api/requirements.txt
 ```
 
-خروجی: `pipe_embedded.py` — همان منطق `pipe.py` با پرامپت‌های embed شده.
+## اجرای API
 
-این فایل را مستقیم در **Admin → Functions** import کنید.
+```bash
+docker compose up -d --build
+# یا
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+تنظیمات از env (مثلاً `YARKIDS_BACKEND_MODEL`, `YARKIDS_LLM_API_KEY`, …) — نمونه: `.env.example`.
+
+## تست
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+تست‌ها بر اساس ماژول‌های `api/core/` و `api/routes/` سازمان‌دهی شده‌اند (`tests/test_core_*.py`, `tests/test_routes.py`, …).  
+چک‌لیست ۸۵ مورد TC و **پرامپت Agent** برای پیاده‌سازی/اجرای تست‌ها: [`tests/persona_system_tests.md`](tests/persona_system_tests.md).
+
+## نصب در OpenWebUI (مسیر توصیه‌شده)
+
+1. سرویس `api/` را بالا بیاورید.
+2. در **Admin → Functions** فایل `api/pipe/pipe.py` را import کنید.
+3. Function را فعال کنید و در Valves مقدار `API_BASE_URL` را به آدرس سرویس بزنید
+   (مثلاً `http://host.docker.internal:8000`).
+4. مدل **یار کودک مستقل** در لیست مدل‌ها ظاهر می‌شود.
+
+> منطق دیگر داخل Pipe اجرا نمی‌شود؛ همهٔ مراحل در API انجام می‌شود.
+
+## نسخهٔ منسوخ (منطق محلی)
+
+`api/pipe/pipe_logic.py` منسوخ است. فقط اگر به یک فایل تک‌فایلی بدون API نیاز دارید:
+
+```bash
+python api/pipe/generate-logic-pipe.py
+```
+
+خروجی: `api/pipe/pipe_logic_embedded.py` — برای import مستقیم در OpenWebUI.
+برای استقرار جدید از `api/pipe/pipe.py` + API استفاده کنید.
 
 ## انتخاب شخصیت (یک مدل — چند شخصیت)
 
-فقط **یک مدل** «یار کودک» در لیست مدل‌ها نمایش داده می‌شود.
+فقط **یک مدل** در لیست مدل‌ها نمایش داده می‌شود.
 
 انتخاب شخصیت از یکی از این مسیرها:
 
@@ -56,7 +99,7 @@ python scripts/build_embedded_pipe.py
 
 ```json
 {
-  "model": "yarkids",
+  "model": "yarkids_api",
   "messages": [...],
   "metadata": {
     "yarkids_persona": "creative"
@@ -72,45 +115,35 @@ python scripts/build_embedded_pipe.py
 
 Chat Controls → Valves → **شخصیت یار کودک**
 
-### Valves (تنظیمات ادمین)
+### Valves کلاینت API (`api/pipe/pipe.py`)
 
 | پارامتر | توضیح |
 |---------|--------|
-| `BACKEND_MODEL` | مدل LLM پشتیبان (الزامی) |
+| `API_BASE_URL` | آدرس پایهٔ سرویس `api/` (الزامی) |
+| `API_KEY` | Bearer اختیاری |
+| `MODEL` | مدل سمت API (خالی = پیش‌فرض API) |
 | `TEMPERATURE` | دمای تولید |
 | `ENABLE_STATUS_UPDATES` | نمایش وضعیت در UI |
-| `ENABLE_TEXTBOOK_CONTEXT` | بازیابی کتاب درسی (معلم/کمک‌درسی) |
-| `TEXTBOOK_API_URL` | آدرس textbook-service |
-| `TEXTBOOK_API_KEY` | کلید API اختیاری |
-| `TEXTBOOK_REQUEST_TIMEOUT_SEC` | مهلت درخواست (ثانیه) |
-| `TEXTBOOK_NEIGHBOR_PAGES` | صفحات همسایه (۰–۳) |
-| `TEXTBOOK_INCLUDE_IMAGE` | `never` / `auto` / `always` |
-| `ENABLE_WEB_SEARCH` | جستجوی وب (خلاق / داستان‌گو / بازی و سرگرمی) |
-| `WEB_SEARCH_PROVIDER` | `auto` / `duckduckgo` / `api` / `perplexity` |
-| `WEB_SEARCH_API_URL` | آدرس سرویس جستجوی سفارشی (اختیاری) |
-| `WEB_SEARCH_API_KEY` | کلید API اختیاری |
-| `WEB_SEARCH_PERPLEXITY_URL` | آدرس سرویس جستجوی Perplexity (GET `?query=`) |
-| `WEB_SEARCH_MAX_RESULTS` | حداکثر تعداد نتایج (۱–۱۰) |
+| `ENABLE_REFLECTION` | بازبینی پاسخ |
+| `ENABLE_TEXTBOOK_CONTEXT` | بازیابی کتاب درسی |
+| `ENABLE_WEB_SEARCH` | جستجوی وب |
+| `REQUEST_TIMEOUT_SEC` | مهلت درخواست |
 
-## کتاب درسی (textbook-service)
+تنظیمات LLM / textbook / web search روی خود سرویس API (env) پیکربندی می‌شوند.
 
-برای پرسوناهای **معلم** و **کمک‌درسی**، Pipe از API جداگانهٔ `textbook-service` کانتکست صفحهٔ کتاب را می‌گیرد.
+## کتاب درسی
 
-1. PDFها را در `textbook-service/data/pdfs/` بگذارید و `catalog.json` را تنظیم کنید.
-2. وابستگی ایندکس را نصب کنید: `pip install -r textbook-service/requirements-indexer.txt` (شامل MinerU).
-3. ایندکس بسازید: `python textbook-service/indexer/build_index.py` (پیش‌فرض: MinerU؛ کش در `data/mineru/`).
-4. API را اجرا کنید: `cd textbook-service && docker compose up` یا `uvicorn app.main:app --port 8080`
-5. در Valves پایپ: `TEXTBOOK_API_URL=http://localhost:8080`
+برای پرسوناهای **معلم** و **کمک‌درسی**، API از ماژول embedded `api/textbook/` کانتکست صفحهٔ کتاب را می‌گیرد (پیش‌فرض؛ بدون سرویس جدا).
 
-جزئیات: [textbook-service/README.md](textbook-service/README.md)
+جزئیات داده و ایندکس: زیر `api/textbook/`.
 
-اگر API در دسترس نباشد، یار کودک بدون کانتکست کتاب ادامه می‌دهد.
+اگر بازیابی در دسترس نباشد، یار کودک بدون کانتکست کتاب ادامه می‌دهد.
 
-## جستجوی وب (creative / storyteller / gamer)
+## جستجوی وب
 
-برای پرسوناهای **خلاق**، **داستان‌گو** و **بازی و سرگرمی**، وقتی سؤال کودک واقعی/به‌روز به نظر برسد (مثلاً نکات بازی، «چطور …؟»، نام بازی)، سیستم قبل از تولید پاسخ در اینترنت جستجو می‌کند و خلاصهٔ نتایج را به پرامپت تزریق می‌کند.
+برای پرسوناهای **خلاق**، **داستان‌گو** و **بازی و سرگرمی**، وقتی سؤال کودک واقعی/به‌روز به نظر برسد، سیستم قبل از تولید پاسخ در اینترنت جستجو می‌کند و خلاصهٔ نتایج را به پرامپت تزریق می‌کند.
 
-- `WEB_SEARCH_PROVIDER`:
+- `WEB_SEARCH_PROVIDER` (env API):
   - `duckduckgo` — DuckDuckGo داخلی (+ Wikipedia)
   - `api` — `POST {WEB_SEARCH_API_URL}/v1/search`
   - `perplexity` — `GET {WEB_SEARCH_PERPLEXITY_URL}/api/v1/search?query=...`
@@ -137,18 +170,18 @@ curl -s http://localhost:8000/v1/chat/completions \
 
 ## ویرایش پرامپت‌ها
 
-هر پرامپت در فایل `.md` جداگانه است. برای تغییر رفتار مدل، فایل مربوطه را ویرایش کنید:
+هر پرامپت در فایل `.md` جداگانه است. برای تغییر رفتار مدل، فایل‌های زیر `api/prompts/` را ویرایش کنید:
 
 | فایل | کاربرد |
 |------|--------|
-| `prompts/core.md` | هویت و قوانین ایمنی |
-| `prompts/personas/*.md` | رفتار هر پرسونا |
-| `prompts/intent_detection.md` | تشخیص نیت |
-| `prompts/reflection.md` | بازبینی کیفیت (`{{CORE_PROMPT}}` جایگزین می‌شود) |
+| `api/prompts/core.md` | هویت و قوانین ایمنی |
+| `api/prompts/personas/*.md` | رفتار هر پرسونا |
+| `api/prompts/intent_detection.md` | تشخیص نیت |
+| `api/prompts/reflection.md` | بازبینی کیفیت (`{{CORE_PROMPT}}` جایگزین می‌شود) |
 
 ## افزودن پرسونای جدید
 
-1. فایل `prompts/personas/<id>.md` بسازید.
-2. شناسه را به `SUPPORTED_PERSONAS` در `pipe.py` اضافه کنید.
-3. گزینه را به `UserValves.PERSONA` (dropdown) اضافه کنید.
-4. پرسونا را در `prompts/intent_detection.md` معرفی کنید.
+1. فایل `api/prompts/personas/<id>.md` بسازید.
+2. شناسه را به `SUPPORTED_PERSONAS` در `api/core/constants.py` (و در صورت نیاز `api/pipe/pipe.py`) اضافه کنید.
+3. گزینه را به `UserValves.PERSONA` (dropdown) در کلاینت Pipe اضافه کنید.
+4. پرسونا را در `api/prompts/intent_detection.md` معرفی کنید.

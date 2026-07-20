@@ -8,8 +8,8 @@ or::
 
     python -m api.main
 
-The API is self-contained under ``/api``: core chat logic lives in
-``api.core``, and textbook retrieval is embedded in ``api.textbook``.
+The API is self-contained under ``/api``: domain logic lives in ``api.core``,
+HTTP routes in ``api.routes``, and textbook retrieval is embedded in ``api.textbook``.
 """
 
 from __future__ import annotations

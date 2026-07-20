@@ -22,7 +22,7 @@ from api.core import (
 )
 
 Role = Literal["system", "user", "assistant"]
-PersonaSource = Literal["manual", "intent", "default"]
+PersonaSource = Literal["manual", "intent", "default", "confirm"]
 
 
 class MessageIn(BaseModel):
@@ -80,6 +80,7 @@ class PersonaResolveResponse(BaseModel):
     persona: str
     source: PersonaSource
     confidence: float | None = None
+    pending_persona: str | None = None
 
 
 class TextbookQueryRequest(BaseModel):

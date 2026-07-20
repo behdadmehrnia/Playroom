@@ -1,9 +1,14 @@
 """
-title: یار کودک
+title: یار کودک (DEPRECATED)
 author: Yar Kids
-version: 0.6.1
-description: دستیار کودک‌دوست با معماری Persona، Intent Detection، Reflection و Web Search
+version: 0.6.5
+description: [DEPRECATED] منطق محلی Pipe — از api/pipe/pipe.py (کلاینت API) و سرویس api/ استفاده کنید
 required_open_webui_version: 0.5.0
+
+DEPRECATED: This monolithic OpenWebUI Pipe runs all Yar Kids logic in-process.
+Prefer the standalone FastAPI service under ``api/`` plus the thin OpenWebUI
+client at ``api/pipe/pipe.py``. Kept only for generating a single-file embedded
+artifact via ``api/pipe/generate-logic-pipe.py`` and for historical reference.
 """
 
 from __future__ import annotations
@@ -17,12 +22,20 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from collections.abc import AsyncIterator
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Protocol, Union
 
 from pydantic import BaseModel, Field
+
+warnings.warn(
+    "api.pipe.pipe_logic is deprecated. Use the Yar Kids API (api/) with "
+    "api/pipe/pipe.py as the OpenWebUI client instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 # ---------------------------------------------------------------------------
 # Math tool for safe evaluation of arithmetic expressions
@@ -293,6 +306,25 @@ MAX_GENERATION_ATTEMPTS = 3
 INTENT_CONFIDENCE_THRESHOLD = 0.7
 MANUAL_PERSONA_METADATA_KEY = "yarkids_persona"
 ACTIVE_PERSONA_METADATA_KEY = "yarkids_active_persona"
+PENDING_PERSONA_METADATA_KEY = "yarkids_pending_persona"
+# Legacy HTML marker (may still appear in older chat history).
+_PERSONA_MARKER_RE = re.compile(r"<!--\s*yarkids:([a-z_]+)\s*-->", re.IGNORECASE)
+# Invisible sticky marker: Word Joiner + 2 zero-width chars + Word Joiner.
+# Zero-width space/non-joiner/joiner encode the persona without showing in the UI.
+_ZW_MARK = "\u2060"
+_ZW_DIGIT = {"0": "\u200b", "1": "\u200c", "2": "\u200d"}
+_ZW_DIGIT_INV = {v: k for k, v in _ZW_DIGIT.items()}
+_PERSONA_ZW_CODE: dict[str, str] = {
+    "creative": "00",
+    "storyteller": "01",
+    "teacher": "02",
+    "homework": "10",
+    "gamer": "11",
+}
+_ZW_CODE_PERSONA: dict[str, str] = {v: k for k, v in _PERSONA_ZW_CODE.items()}
+_ZW_PERSONA_MARKER_RE = re.compile(
+    f"{_ZW_MARK}([{_ZW_DIGIT['0']}{_ZW_DIGIT['1']}{_ZW_DIGIT['2']}]{{2}}){_ZW_MARK}"
+)
 PERSONA_AUTO_VALUE = "auto"
 SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework", "gamer")
 REVISION_INSTRUCTION_HEADER = "بازبینی لازم است. پاسخ قبلی مناسب نبود. دلایل:"
@@ -490,7 +522,8 @@ STREAM_CHUNK_SIZE = 16
 # Brief pause so the UI can paint status before it is cleared for streaming.
 STATUS_DISPLAY_PAUSE_SEC = 0.12
 
-PROMPTS_DIR = Path(__file__).parent / "prompts"
+# Prompts live under api/prompts/ (sibling of this package directory).
+PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 PersonaId = Literal["creative", "storyteller", "teacher", "homework", "gamer", "none"]
 ReflectionStatus = Literal["PASS", "REVISE"]
@@ -515,6 +548,14 @@ WEB_SEARCH_PERSONAS: frozenset[PersonaId] = frozenset(
 class IntentDetectionResult(BaseModel):
     persona: PersonaId
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class PersonaResolution(BaseModel):
+    """Result of sticky persona resolution (may ask before switching)."""
+
+    persona: PersonaId
+    pending_switch_to: PersonaId | None = None
+    ask_confirmation: bool = False
 
 
 class ReflectionResult(BaseModel):
@@ -605,7 +646,7 @@ WebSearchQueryDiag.model_rebuild()
 
 
 # ---------------------------------------------------------------------------
-# Prompt loading (from .md files next to pipe.py)
+# Prompt loading (from .md files under api/prompts/)
 # ---------------------------------------------------------------------------
 
 _prompt_cache: dict[str, str] = {}
@@ -1114,17 +1155,160 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
+def extract_message_content(content: Any) -> str:
+    """Flatten Open WebUI / OpenAI message content (str or multimodal parts)."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                item_type = item.get("type")
+                if item_type in {"text", "input_text", "output_text"}:
+                    parts.append(str(item.get("text") or ""))
+                elif "text" in item:
+                    parts.append(str(item.get("text") or ""))
+                elif "content" in item:
+                    parts.append(extract_message_content(item.get("content")))
+        return "\n".join(p for p in parts if p)
+    if isinstance(content, dict):
+        return extract_message_content(content.get("text") or content.get("content"))
+    return str(content)
+
+
 def normalize_messages(raw_messages: list[dict[str, Any]]) -> list[ChatMessage]:
     normalized: list[ChatMessage] = []
     for item in raw_messages:
         role = item.get("role")
-        content = item.get("content")
         if role not in {"system", "user", "assistant"}:
             continue
-        if not isinstance(content, str) or not content.strip():
+        content = extract_message_content(item.get("content")).strip()
+        if not content:
             continue
         normalized.append(ChatMessage(role=role, content=content))
     return normalized
+
+
+def strip_persona_markers(text: str) -> str:
+    """Remove sticky persona markers (invisible + legacy HTML) from text."""
+    if not text:
+        return text
+    cleaned = _PERSONA_MARKER_RE.sub("", text)
+    cleaned = _ZW_PERSONA_MARKER_RE.sub("", cleaned)
+    # Also drop leftover Word Joiners that some clients render as tofu.
+    cleaned = cleaned.replace("\u2060", "").replace("\ufeff", "")
+    return cleaned.rstrip()
+
+
+def append_persona_marker(text: str, persona: PersonaId) -> str:
+    """Compatibility shim: never append visible/invisible junk to replies.
+
+    Sticky persona is recovered from activity signals + metadata, not markers.
+    """
+    del persona  # markers disabled — they render as garbage in Open WebUI
+    return strip_persona_markers(text) if text else text
+
+
+def extract_persona_marker(text: str) -> PersonaId | None:
+    """Decode legacy markers from older chats (current replies have none)."""
+    if not text:
+        return None
+    zw_matches = _ZW_PERSONA_MARKER_RE.findall(text)
+    if zw_matches:
+        code = "".join(_ZW_DIGIT_INV.get(ch, "") for ch in zw_matches[-1])
+        persona = _ZW_CODE_PERSONA.get(code)
+        if persona:
+            return persona  # type: ignore[return-value]
+    html_matches = _PERSONA_MARKER_RE.findall(text)
+    if html_matches:
+        return _normalize_persona(html_matches[-1])
+    return None
+
+
+_GREETING_ONLY_RE = re.compile(
+    r"^(?:"
+    r"سلام(?:\s*علیکم)?|درود|هی+|hello|hi|hey|"
+    r"صبح\s*بخیر|ظهر\s*بخیر|عصر\s*بخیر|شب\s*بخیر|"
+    r"خوبی\??|چطوری\??|چه\s*خبر\??"
+    r")[\s!.！؟?٫،,~]*$",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_greeting_only(text: str) -> bool:
+    """True for bare greetings that must stay on persona none."""
+    cleaned = text.strip()
+    if not cleaned or len(cleaned) > 40:
+        return False
+    return bool(_GREETING_ONLY_RE.match(cleaned))
+
+
+def _looks_like_welcome_or_menu(content: str) -> bool:
+    """True for the first-turn persona picker / welcome message."""
+    if "کدومش رو بیشتر دوست داری" in content:
+        return True
+    if "با هم آشنا شدیم" in content or "من «یار کودک» هستم" in content:
+        # Welcome often lists all personas — do not treat as active session.
+        hits = sum(
+            1
+            for signal in (
+                "داستان‌گو",
+                "داستان گو",
+                "کمک‌درسی",
+                "کمک درسی",
+                "بازی و سرگرمی",
+                "خلاق",
+                "معلم",
+            )
+            if signal in content
+        )
+        return hits >= 3
+    return False
+
+
+_MENU_PERSONA_PICKS: dict[str, PersonaId] = {
+    "بازی": "gamer",
+    "سرگرمی": "gamer",
+    "گیمر": "gamer",
+    "بازی و سرگرمی": "gamer",
+    "داستان": "storyteller",
+    "قصه": "storyteller",
+    "داستان‌گو": "storyteller",
+    "داستان گو": "storyteller",
+    "معلم": "teacher",
+    "خلاق": "creative",
+    "کمک‌درسی": "homework",
+    "کمک درسی": "homework",
+    "کمک‌درس": "homework",
+    "کمک درس": "homework",
+}
+
+
+def _detect_menu_persona_pick(text: str) -> PersonaId | None:
+    """Map short welcome-menu replies like «بازی» to a persona."""
+    cleaned = text.strip()
+    cleaned = re.sub(r"^[\s🎮🎨📖📚✏️]+", "", cleaned)
+    cleaned = re.sub(r"[!.！؟?٫،,~]+$", "", cleaned).strip()
+    if not cleaned or len(cleaned) > 30:
+        return None
+    if cleaned in _MENU_PERSONA_PICKS:
+        return _MENU_PERSONA_PICKS[cleaned]
+    lowered = cleaned.lower()
+    for key, persona in sorted(_MENU_PERSONA_PICKS.items(), key=lambda item: -len(item[0])):
+        if lowered == key.lower():
+            return persona
+    return None
+
+
+def _last_assistant_is_welcome(messages: list[ChatMessage]) -> bool:
+    for message in reversed(messages):
+        if message.role == "assistant":
+            return _looks_like_welcome_or_menu(message.content)
+    return False
 
 
 def _get_latest_user_message(messages: list[ChatMessage]) -> str:
@@ -2488,7 +2672,12 @@ def build_prompt_messages(
     ]
     for message in conversation_messages:
         if message.role != "system":
-            llm_messages.append({"role": message.role, "content": message.content})
+            content = (
+                strip_persona_markers(message.content)
+                if message.role == "assistant"
+                else message.content
+            )
+            llm_messages.append({"role": message.role, "content": content})
     return _attach_textbook_image_to_messages(llm_messages, textbook_context)
 
 
@@ -2536,32 +2725,36 @@ async def detect_intent(
     if not user_text:
         return IntentDetectionResult(persona="none")
 
+    # Bare greetings must not lock a persona (TC: «سلام» → none).
+    if _looks_like_greeting_only(user_text):
+        return IntentDetectionResult(persona="none")
+
     explicit = _detect_explicit_persona_request(user_text)
     if explicit:
         return IntentDetectionResult(persona=explicit, confidence=0.98)
 
-    activity = _detect_ongoing_activity(messages, current_persona)
+    # Hard stick: during an active persona session, short/continuation turns
+    # must NOT go to the LLM (e.g. word-chain answer «داستان»).
     if (
-        activity
-        and current_persona
+        current_persona
         and current_persona != "none"
-        and _is_activity_continuation(user_text, current_persona)
+        and _should_keep_current_persona(user_text, current_persona, messages)
     ):
-        return IntentDetectionResult(persona=current_persona, confidence=0.95)
+        return IntentDetectionResult(persona=current_persona, confidence=0.97)
 
-    # Context awareness: if user is in an ongoing activity, bias against switching
+    activity = _detect_ongoing_activity(messages, current_persona)
     system_prompt = get_intent_detection_prompt()
-    if activity and current_persona:
+    if current_persona and current_persona != "none":
         system_prompt += (
-            f"\n\n⚠️ نکته مهم: کاربر در حال «{activity}» با پرسونای «{current_persona}» است. "
-            f"مگر درخواست صریح و قاطع برای تغییر موضوع، پرسونا باید «{current_persona}» بماند. "
-            f"کلمات مانند «داستان»، «بازی»، «ریاضی» در بافت فعالیت جاری، درخواست تغییر پرسونا نیستند. "
-            f"عبارت‌هایی مثل «ادامه بده»، «سوال بعد»، «مثال دیگر»، «ایده دیگر» یعنی ادامه همان فعالیت."
+            f"\n\n⚠️ چسبندگی پرسونا: کاربر الان در حالت «{current_persona}» است"
+            + (f" و فعالیت «{activity}»" if activity else "")
+            + ". "
+            "فقط اگر درخواست صریح و قاطع برای عوض کردن حالت بود پرسونا را عوض کن. "
+            "کلمهٔ تکی مثل «داستان» / «بازی» / «معلم» در وسط فعالیت، درخواست تعویض نیست. "
+            "«ادامه بده»، «سوال بعد»، «مثال دیگر»، «ایده دیگر» یعنی ماندن در همان پرسونا."
         )
 
-    # Include recent conversation history (last 6 turns) for context
     history = _format_recent_messages(messages, max_turns=6)
-    
     request = LLMCompletionRequest(
         model=backend_model,
         temperature=0.0,
@@ -2580,32 +2773,84 @@ async def detect_intent(
 
 _ACTIVITY_PATTERNS: dict[PersonaId, tuple[str, ...]] = {
     "gamer": (
-        "بازی کلمات", "زنجیره", "آخرین حرف", "کلمه بگو", "نوبت تو", "نوبت من",
-        "چیستان", "معما", "حدس بزن", "بازی کنیم", "بریم بازی", "شروع می‌کنم",
+        "بازی کلمات",
+        "کلمه‌های زنجیره‌ای",
+        "کلمه های زنجیره",
+        "زنجیره",
+        "آخرین حرف",
+        "حرف آخر",
+        "کلمه بگو",
+        "کلمه اول",
+        "نوبت تو",
+        "نوبت توئه",
+        "نوبت من",
+        "چیستان",
+        "معما",
+        "حدس بزن",
+        "بازی کنیم",
+        "بریم بازی",
+        "شروع می‌کنم",
+        "با «",
+        "با \"",
     ),
     "storyteller": (
-        "ادامه بده", "بعدش چی شد", "سپس", "و بعد", "داستان را ادامه",
-        "شخصیت داستان", "ماجرا ادامه", "داستان بگو", "قصه بگو", "می‌خوام داستان",
+        "ادامه بده",
+        "بعدش چی شد",
+        "سپس",
+        "و بعد",
+        "داستان را ادامه",
+        "شخصیت داستان",
+        "ماجرا ادامه",
+        "داستان بگو",
+        "قصه بگو",
+        "می‌خوام داستان",
     ),
     "teacher": (
-        "مثال دیگر", "مثال دیگه", "مشکل مشابه", "بخش دیگر", "قدم بعد", "مرحله بعد",
-        "نمی‌فهمم", "معلوم نشد", "دوباره توضیح", "یعنی چی", "توضیح بده",
+        "مثال دیگر",
+        "مثال دیگه",
+        "مشکل مشابه",
+        "بخش دیگر",
+        "قدم بعد",
+        "مرحله بعد",
+        "نمی‌فهمم",
+        "معلوم نشد",
+        "دوباره توضیح",
+        "یعنی چی",
+        "توضیح بده",
     ),
     "homework": (
-        "سوال بعد", "تمرین بعد", "بخش ب", "قسمتی دیگر", "جوابش چیه",
-        "مرحله بعد", "چطور حل", "مراحل", "این مسئله", "حل کن",
+        "سوال بعد",
+        "تمرین بعد",
+        "بخش ب",
+        "قسمتی دیگر",
+        "جوابش چیه",
+        "مرحله بعد",
+        "چطور حل",
+        "مراحل",
+        "این مسئله",
+        "حل کن",
     ),
     "creative": (
-        "ایده دیگر", "ایده دیگه", "پیشنهاد دیگر", "چیزی دیگر", "نوع دیگر", "راه دیگر",
-        "ایده بده", "حوصله",
+        "ایده دیگر",
+        "ایده دیگه",
+        "پیشنهاد دیگر",
+        "چیزی دیگر",
+        "نوع دیگر",
+        "راه دیگر",
+        "ایده بده",
+        "حوصله",
     ),
 }
 
-# Phrases that mean "continue the current activity" (current user turn).
 _ACTIVITY_CONTINUATION: dict[PersonaId, tuple[str, ...]] = {
     "gamer": ("نوبت من", "ادامه", "یکی دیگه", "چیستان دیگه", "معما دیگه"),
     "storyteller": (
-        "ادامه بده", "بعدش", "بعدش چی شد", "و بعد", "ادامه داستان", "بعدی",
+        "ادامه بده",
+        "بعدش",
+        "بعدش چی شد",
+        "و بعد",
+        "ادامه داستان",
+        "بعدی",
     ),
     "teacher": ("مثال دیگر", "مثال دیگه", "دوباره توضیح", "قدم بعد", "مرحله بعد"),
     "homework": ("سوال بعد", "تمرین بعد", "بعدی", "مرحله بعد", "یکی دیگه"),
@@ -2620,6 +2865,26 @@ _ACTIVITY_DISPLAY_NAMES: dict[PersonaId, str] = {
     "creative": "ایده‌پردازی خلاقانه",
 }
 
+PERSONA_FA_LABELS: dict[PersonaId, str] = {
+    "creative": "خلاق",
+    "storyteller": "داستان‌گو",
+    "teacher": "معلم",
+    "homework": "کمک‌درس",
+    "gamer": "بازی و سرگرمی",
+    "none": "یار کودک",
+}
+
+_CONFIRM_YES_RE = re.compile(
+    r"^(?:بله|آره|باشه|موافقم|باشه برو|بله برو|آره برو|باشه عوض کن|بله عوض کن)"
+    r"(?:\s|$|[!.،,])",
+    re.IGNORECASE,
+)
+_CONFIRM_NO_RE = re.compile(
+    r"^(?:نه|نخیر|نه همین|نه همون|نمی‌خوام|نمیخوام|ادامه بده|همین‌جا|همینجا)"
+    r"(?:\s|$|[!.،,])",
+    re.IGNORECASE,
+)
+
 
 def _is_activity_continuation(text: str, persona: PersonaId) -> bool:
     """True when the latest user message continues the current activity."""
@@ -2629,29 +2894,93 @@ def _is_activity_continuation(text: str, persona: PersonaId) -> bool:
     for phrase in _ACTIVITY_CONTINUATION.get(persona, ()):
         if cleaned == phrase or cleaned.startswith(phrase):
             return True
-    # Word-chain answers: short token without question/intent markers (e.g. «داستان»).
+    return False
+
+
+_WORD_CHAIN_SIGNALS = (
+    "زنجیره",
+    "نوبت تو",
+    "نوبت توئه",
+    "کلمه بگو",
+    "با حرف",
+    "حرف «",
+    'حرف "',
+    "آخرین حرف",
+    "حرف آخر",
+    "کلمه اول",
+    "کلمه‌های زنجیر",
+    "کلمه های زنجیر",
+    "بازی کلمات",
+    "بازی کلمه‌",
+)
+
+
+def _looks_like_word_chain_awaiting_answer(messages: list[ChatMessage]) -> bool:
+    """True when the latest assistant turn is waiting for a word-chain reply."""
+    for message in reversed(messages):
+        if message.role != "assistant":
+            continue
+        content = message.content
+        if "مطمئنی؟" in content or "بریم سراغ «" in content:
+            continue
+        return any(signal in content for signal in _WORD_CHAIN_SIGNALS)
+    return False
+
+
+def _looks_like_hard_switch_request(text: str) -> bool:
+    """True only for clear persona-switch intent (not a single keyword)."""
+    if _detect_explicit_persona_request(text):
+        return True
+    lowered = text.strip().lower()
+    switch_phrases = (
+        "بریم سراغ",
+        "حالم عوض",
+        "حالت عوض",
+        "دیگه بازی نه",
+        "دیگه قصه نه",
+        "می‌خوام داستان بشنوم",
+        "میخوام داستان بشنوم",
+        "می‌خوام قصه",
+        "میخوام قصه",
+        "بریم درس",
+        "بریم بازی",
+        "دیگه درس",
+    )
+    return any(phrase in lowered for phrase in switch_phrases)
+
+
+def _should_keep_current_persona(
+    text: str,
+    persona: PersonaId,
+    messages: list[ChatMessage],
+) -> bool:
+    """Sticky rule: keep persona unless a hard switch is clearly requested."""
+    if not text.strip():
+        return True
+    if _looks_like_hard_switch_request(text):
+        return False
+    if _is_activity_continuation(text, persona):
+        return True
+    # Word-chain answers like «داستان» must stay on gamer.
+    cleaned = text.strip()
     if (
         persona == "gamer"
-        and len(cleaned) <= 30
+        and len(cleaned) <= 40
         and "?" not in cleaned
         and "؟" not in cleaned
-        and not _detect_explicit_persona_request(cleaned)
-        and not any(
-            marker in cleaned
-            for marker in (
-                "یعنی",
-                "چنده",
-                "چطور",
-                "چرا",
-                "کمک درس",
-                "معلم",
-                "داستان بگو",
-                "قصه بگو",
-                "صفحه",
-            )
-        )
+        and _looks_like_word_chain_awaiting_answer(messages)
     ):
         return True
+    if _detect_ongoing_activity(messages, persona):
+        # Mid-session message without hard switch → stay.
+        return True
+    # Even without explicit activity markers, short replies stay sticky
+    # when history already confirms the same persona (not the welcome menu).
+    if len(cleaned) <= 40 and "?" not in cleaned and "؟" not in cleaned:
+        if extract_persona_marker(
+            next((m.content for m in reversed(messages) if m.role == "assistant"), "")
+        ) == persona:
+            return True
     return False
 
 
@@ -2666,20 +2995,17 @@ def _detect_ongoing_activity(
     if not patterns:
         return None
 
-    window = messages[-10:]
+    window = messages[-12:]
     if not window:
         return None
 
-    # Scan prior turns (user + assistant) for activity start/continuation cues.
     prior = window[:-1] if len(window) >= 2 else window
     for message in prior:
         if any(pattern in message.content for pattern in patterns):
             return _ACTIVITY_DISPLAY_NAMES.get(current_persona, current_persona)
 
-    # Current turn alone can continue an established persona session.
     latest = window[-1].content if window else ""
     if _is_activity_continuation(latest, current_persona):
-        # Require some prior evidence of this persona in the conversation.
         if _infer_persona_from_history(messages) == current_persona or any(
             pattern in message.content
             for message in prior
@@ -2694,7 +3020,12 @@ def _format_recent_messages(messages: list[ChatMessage], max_turns: int = 6) -> 
     formatted = []
     for m in messages[-max_turns:]:
         if m.role != "system":
-            formatted.append({"role": m.role, "content": m.content})
+            content = (
+                strip_persona_markers(m.content)
+                if m.role == "assistant"
+                else m.content
+            )
+            formatted.append({"role": m.role, "content": content})
     return formatted
 
 
@@ -2754,46 +3085,78 @@ _EXPLICIT_PERSONA_TRIGGERS: dict[str, tuple[str, ...]] = {
 
 
 def _infer_persona_from_history(messages: list[ChatMessage]) -> PersonaId | None:
-    """
-    Infer the current persona from recent conversation history.
-    Looks at assistant's recent responses for persona-specific patterns.
-    """
-    # Get last few assistant messages
-    assistant_msgs = [m.content for m in messages[-6:] if m.role == "assistant"]
+    """Infer the current persona from recent assistant responses."""
+    assistant_msgs = [m.content for m in messages[-8:] if m.role == "assistant"]
     if not assistant_msgs:
         return None
 
-    # Persona-specific keywords in assistant responses
+    # Prefer explicit sticky markers written into prior replies (legacy only).
+    for content in reversed(assistant_msgs):
+        if _looks_like_welcome_or_menu(content):
+            continue
+        marked = extract_persona_marker(content)
+        if marked:
+            return marked
+
+    # Strong mid-activity signals only — never match the welcome menu.
     PERSONA_RESPONSE_PATTERNS: dict[PersonaId, tuple[str, ...]] = {
         "gamer": (
-            "نوبت تو", "کلمه بگو", "زنجیره", "بازی کلمات", "چیستان", "معما",
-            "بریم بازی", "حدس بزن", "نوبت من", "آماده‌", "شروع می‌کنم",
+            "نوبت تو",
+            "نوبت توئه",
+            "کلمه بگو",
+            "کلمه اول",
+            "زنجیره",
+            "بازی کلمات",
+            "کلمه‌های زنجیره‌ای",
+            "با حرف",
+            "حدس بزن",
+            "نوبت من",
+            "حرف آخر",
+            "شروع می‌کنم",
         ),
         "storyteller": (
-            "داستان", "قصه", "ماجراجویی", "شخصیت", "دنیای خیال", "ادامه بده",
-            "پسرک", "دخترک", "جنگل", "قلعه", "جادو", "پری",
+            "داستان کامل",
+            "داستان مشترک",
+            "با هم داستان",
+            "اول ماجرا",
+            "دنیای خیال",
+            "ادامه داستان",
+            "شخصیت داستان",
+            "حالت داستان‌گو",
+            "حالت داستان گو",
         ),
         "teacher": (
-            "مثال", "مثلاً", "به زبان ساده", "قدم اول", "قدم بعد", "درک کردی",
-            "یاد بگیریم", "توضیح دهم", "چرا", "چگونه", "یعنی چی",
+            "به زبان ساده",
+            "قدم اول",
+            "قدم بعد",
+            "درک کردی",
+            "توضیح دهم",
+            "حالت معلم",
         ),
         "homework": (
-            "تمرین", "سوال", "مرحله", "حل کنیم", "مراحل", "مرحله بعد",
-            "کتاب", "صفحه", "ریاضی", "فارسی", "علوم",
+            "حل کنیم",
+            "مرحله بعد",
+            "سوال بعد",
+            "حالت کمک‌درس",
+            "حالت کمک درس",
         ),
         "creative": (
-            "ایده", "پیشنهاد", "بساز", "ترسم", "خلاق", "نقاشی", "ساختن",
-            "چی بسازم", "ایده بده", "ایده دیگر",
+            "ایده دیگر",
+            "ایده دیگه",
+            "حالت خلاق",
+            "بیا بسازیم",
         ),
     }
 
-    # Check most recent assistant message first
     for content in reversed(assistant_msgs):
+        if "مطمئنی؟" in content or "بریم سراغ «" in content:
+            continue
+        if _looks_like_welcome_or_menu(content):
+            continue
         lowered = content.lower()
         for persona, patterns in PERSONA_RESPONSE_PATTERNS.items():
             if any(p in lowered for p in patterns):
                 return persona
-
     return None
 
 
@@ -2815,6 +3178,44 @@ def _detect_explicit_persona_request(text: str) -> PersonaId | None:
         return None
     matches.sort(key=lambda item: item[0])
     return matches[-1][1]  # type: ignore[return-value]
+
+
+def _extract_pending_switch_from_history(
+    messages: list[ChatMessage],
+) -> PersonaId | None:
+    """Read pending switch target from the last confirmation question."""
+    for message in reversed(messages):
+        if message.role != "assistant":
+            continue
+        content = message.content
+        if "مطمئنی؟" not in content and "بریم سراغ «" not in content:
+            continue
+        match = re.search(r"بریم سراغ «([^»]+)»", content)
+        if not match:
+            match = re.search(r"به «([^»]+)» عوض", content)
+        if not match:
+            return None
+        label = match.group(1).strip()
+        for persona_id, fa_label in PERSONA_FA_LABELS.items():
+            if fa_label == label and persona_id != "none":
+                return persona_id
+        return None
+    return None
+
+
+def format_persona_switch_confirmation(
+    current: PersonaId, pending: PersonaId
+) -> str:
+    """Ask the child before leaving the current persona."""
+    current_label = PERSONA_FA_LABELS.get(current, current)
+    pending_label = PERSONA_FA_LABELS.get(pending, pending)
+    return (
+        f"الان داریم با هم در حالت «{current_label}» ادامه می‌دیم. "
+        f"به نظر می‌رسه می‌خوای بریم سراغ «{pending_label}». "
+        f"مطمئنی؟\n\n"
+        f"اگر آره، بگو «بله برو».\n"
+        f"اگر نه، بگو «نه همین‌جا» تا همون کار قبلی رو ادامه بدیم."
+    )
 
 
 def resolve_manual_persona(
@@ -2888,23 +3289,33 @@ async def resolve_active_persona(
     user_persona: str | None = None,
     body: dict[str, Any] | None = None,
     on_detecting_status: Callable[[], Awaitable[None]] | None = None,
-) -> PersonaId:
-    manual_persona = resolve_manual_persona(user_persona=user_persona, body=body)
-    
-    # Check if latest user message explicitly requests a different persona
-    latest_user_msg = _get_latest_user_message(messages)
-    if latest_user_msg:
-        explicit = _detect_explicit_persona_request(latest_user_msg)
-        if explicit and explicit != manual_persona:
-            # User explicitly asked to switch persona — honor it
-            return explicit
-    
-    # If manual persona is set, use it as the current persona for context awareness
-    current_persona = manual_persona
-    if manual_persona:
-        return manual_persona
+) -> PersonaResolution:
+    """
+    Resolve persona with sticky behaviour.
 
-    # Auto mode: read previous persona from metadata for context awareness
+    - Manual UserValves persona wins immediately (no confirmation).
+    - Auto-detected persona sticks across turns (via metadata/history).
+    - Switching away from a sticky persona requires confirmation
+      («بله برو» / «نه همین‌جا»), except the very first selection.
+    - Mid-activity short answers (e.g. word-chain «داستان») never switch.
+    """
+    manual_persona = resolve_manual_persona(user_persona=user_persona, body=body)
+    latest_user_msg = _get_latest_user_message(messages)
+
+    # Manual selection from Chat Controls: honor immediately.
+    if manual_persona:
+        return PersonaResolution(persona=manual_persona)
+
+    # Hard stay during word-chain even if sticky metadata/history was lost.
+    if (
+        latest_user_msg
+        and _looks_like_word_chain_awaiting_answer(messages)
+        and not _looks_like_hard_switch_request(latest_user_msg)
+    ):
+        return PersonaResolution(persona="gamer")
+
+    # Recover sticky persona (metadata → history).
+    current_persona: PersonaId | None = None
     if body:
         metadata = body.get("metadata") or {}
         if isinstance(metadata, dict):
@@ -2913,21 +3324,70 @@ async def resolve_active_persona(
                 normalized = _normalize_persona(prev_persona)
                 if normalized:
                     current_persona = normalized
-
-    # If still no current persona, infer from conversation history
     if current_persona is None:
         current_persona = _infer_persona_from_history(messages)
+
+    # «سلام» alone: stay on none until the child actually picks an activity.
+    if (
+        latest_user_msg
+        and _looks_like_greeting_only(latest_user_msg)
+        and (not current_persona or current_persona == "none")
+    ):
+        return PersonaResolution(persona="none")
+
+    # Welcome-menu short picks («بازی»، «داستان»، …) are first selections, not switches.
+    menu_pick = (
+        _detect_menu_persona_pick(latest_user_msg) if latest_user_msg else None
+    )
+    if menu_pick and (
+        not current_persona
+        or current_persona == "none"
+        or _last_assistant_is_welcome(messages)
+    ):
+        return PersonaResolution(persona=menu_pick)
+
+    # Answer a pending switch confirmation from the previous assistant turn.
+    pending = _extract_pending_switch_from_history(messages)
+    if pending and latest_user_msg and current_persona and current_persona != "none":
+        if _CONFIRM_YES_RE.search(latest_user_msg.strip()):
+            return PersonaResolution(persona=pending)
+        if _CONFIRM_NO_RE.search(latest_user_msg.strip()):
+            return PersonaResolution(persona=current_persona)
+
+    # Sticky keep without calling the LLM when appropriate.
+    if (
+        current_persona
+        and current_persona != "none"
+        and latest_user_msg
+        and _should_keep_current_persona(latest_user_msg, current_persona, messages)
+    ):
+        return PersonaResolution(persona=current_persona)
 
     if on_detecting_status:
         await on_detecting_status()
 
     intent = await detect_intent(
-        llm_client, 
-        backend_model=backend_model, 
+        llm_client,
+        backend_model=backend_model,
         messages=messages,
-        current_persona=current_persona,  # Pass for context awareness
+        current_persona=current_persona,
     )
-    return intent.persona
+    desired = intent.persona
+
+    # First selection (no sticky yet): accept immediately.
+    if not current_persona or current_persona == "none":
+        return PersonaResolution(persona=desired if desired != "none" else "none")
+
+    # Same persona or none → stay.
+    if desired in (None, "none", current_persona):
+        return PersonaResolution(persona=current_persona)
+
+    # Different persona requested while sticky → ask confirmation first.
+    return PersonaResolution(
+        persona=current_persona,
+        pending_switch_to=desired,
+        ask_confirmation=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3190,7 +3650,12 @@ def build_web_search_diag(
 
 
 class Pipe:
-    """OpenWebUI Pipe Function for the Yar Kids child-friendly assistant."""
+    """DEPRECATED local OpenWebUI Pipe — prefer ``api/pipe/pipe.py`` + the API.
+
+    This class still embeds the full Yar Kids pipeline for legacy / embedded
+    single-file builds. New deployments should run ``api.main`` and import
+    ``api/pipe/pipe.py`` in OpenWebUI instead.
+    """
 
     class Valves(BaseModel):
         BACKEND_MODEL: str = Field(
@@ -3322,6 +3787,12 @@ class Pipe:
         )
 
     def __init__(self) -> None:
+        warnings.warn(
+            "Pipe from pipe_logic is deprecated; use api/pipe/pipe.py with the "
+            "standalone API instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.valves = self.Valves()
 
     def pipes(self) -> list[dict[str, str]]:
@@ -3329,7 +3800,7 @@ class Pipe:
             {
                 "id": MODEL_ID,
                 "name": MODEL_NAME,
-                "description": "همراه هوشمند و کودک‌دوست",
+                "description": "همراه هوشمند و کودک‌دوست [DEPRECATED — use API client]",
             }
         ]
 
@@ -3447,7 +3918,7 @@ class Pipe:
             if on_status:
                 await on_status(status_detecting_persona())
 
-        persona = await resolve_active_persona(
+        resolution = await resolve_active_persona(
             llm_client,
             backend_model=backend_model,
             messages=conversation_messages,
@@ -3458,6 +3929,25 @@ class Pipe:
             else None,
         )
 
+        if resolution.ask_confirmation and resolution.pending_switch_to:
+            # Persist sticky + pending via metadata when the host supports it.
+            metadata = body.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+                body["metadata"] = metadata
+            metadata[ACTIVE_PERSONA_METADATA_KEY] = resolution.persona
+            metadata[PENDING_PERSONA_METADATA_KEY] = resolution.pending_switch_to
+            if on_status:
+                await on_status(status_persona_selected(resolution.persona))
+            return append_persona_marker(
+                format_persona_switch_confirmation(
+                    resolution.persona, resolution.pending_switch_to
+                ),
+                resolution.persona,
+            )
+
+        persona = resolution.persona
+
         # Persist active persona for multi-turn context (TC-79).
         if persona and persona != "none":
             metadata = body.get("metadata")
@@ -3465,6 +3955,7 @@ class Pipe:
                 metadata = {}
                 body["metadata"] = metadata
             metadata[ACTIVE_PERSONA_METADATA_KEY] = persona
+            metadata.pop(PENDING_PERSONA_METADATA_KEY, None)
 
         if on_status and manual_persona:
             await on_status(status_persona_selected(manual_persona))
@@ -3545,7 +4036,7 @@ class Pipe:
         enable_reflection = read_valve_bool(
             self.valves, "ENABLE_REFLECTION", default=True
         )
-        return await run_response_loop(
+        final_response = await run_response_loop(
             llm_client,
             backend_model=backend_model,
             persona=persona,
@@ -3557,3 +4048,8 @@ class Pipe:
             math_tool_usages=math_tool_usages,
             enable_reflection=enable_reflection,
         )
+        if persona and persona != "none":
+            final_response = append_persona_marker(final_response, persona)
+        else:
+            final_response = strip_persona_markers(final_response)
+        return final_response

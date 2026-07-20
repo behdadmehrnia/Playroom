@@ -1,15 +1,9 @@
 """
 title: یار کودک (API Client)
 author: Yar Kids
-version: 0.5.0
-description: نسخهٔ Pipe که منطق یار کودک را از طریق API مستقل (api/) اجرا می‌کند
+version: 0.6.6
+description: Pipe کلاینت OpenWebUI — منطق یار کودک را از طریق API مستقل (api/) اجرا می‌کند
 required_open_webui_version: 0.5.0
-
-این Pipe به‌جای اجرای منطق به‌صورت محلی، تمام پردازش‌ها را به سرویس FastAPI
-مستقل (api/) واگذار می‌کند. ساختار Valves / UserValves / انتخاب پرسونا دقیقاً
-مثل pipe.py است تا بتواند جایگزین آن شود؛ تنها تفاوت این است که Intent
-Detection، بازیابی کتاب درسی، تولید پاسخ و بازبینی همگی در سمت API انجام
-می‌شوند و این Pipe فقط نتیجه را از طریق SSE دریافت و به OpenWebUI می‌رساند.
 """
 
 from __future__ import annotations
@@ -53,7 +47,7 @@ NO_API_URL_MESSAGE = (
 )
 
 # ---------------------------------------------------------------------------
-# Persona resolution (mirrors pipe.py's UserValves / metadata reading)
+# Persona resolution (UserValves / metadata — same contract as the API)
 # ---------------------------------------------------------------------------
 
 
@@ -85,8 +79,8 @@ def resolve_persona_to_forward(
     __user__: dict[str, Any] | None,
     body: dict[str, Any],
 ) -> str | None:
-    """Resolve the manual persona exactly like pipe.py so the API receives the
-    intended override (or None for auto / intent detection)."""
+    """Resolve the manual persona so the API receives the intended override
+    (or None for auto / intent detection)."""
     manual = _normalize_persona(_get_user_persona_selection(__user__))
     if manual:
         return manual
@@ -116,7 +110,7 @@ def resolve_persona_to_forward(
 
 
 # ---------------------------------------------------------------------------
-# SSE streaming client (stdlib only — matches pipe.py's zero-dependency style)
+# SSE streaming client (stdlib only — zero third-party deps for OpenWebUI)
 # ---------------------------------------------------------------------------
 
 
@@ -242,12 +236,11 @@ async def clear_status_message(
 class Pipe:
     """OpenWebUI Pipe that delegates the full Yar Kids logic to the API.
 
-    The structure mirrors ``pipe.py`` (same Valves knobs, same UserValves
-    persona dropdown, same streaming/non-streaming entry points) so it is a
-    drop-in replacement. The difference is that every stage — persona
-    resolution, intent detection, textbook retrieval, generation, reflection —
-    runs inside ``api/`` and this Pipe merely forwards the request and relays
-    the SSE response (status events + text chunks) back to OpenWebUI.
+    Same Valves / UserValves / streaming shape as the deprecated local Pipe
+    (``pipe_logic.py``), so it is the drop-in replacement. Every stage —
+    persona resolution, intent detection, textbook retrieval, generation,
+    reflection — runs inside ``api/``; this client only forwards the request
+    and relays SSE (status + text chunks) back to OpenWebUI.
     """
 
     class Valves(BaseModel):

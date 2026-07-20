@@ -97,7 +97,7 @@ async def _resolve_persona(
     async def emit_detecting() -> None:
         await emit(status_detecting_persona())
 
-    resolved = await resolve_active_persona(
+    resolution = await resolve_active_persona(
         llm_client,
         backend_model=backend_model,
         messages=messages,
@@ -106,15 +106,43 @@ async def _resolve_persona(
         on_detecting_status=emit_detecting if not manual_persona else None,
     )
 
+    resolved = resolution.persona
+
     # Persist for multi-turn continuity (clients should echo metadata back).
-    if body is not None and resolved and resolved != "none":
-        from api.core import ACTIVE_PERSONA_METADATA_KEY
+    if body is not None:
+        from api.core import (
+            ACTIVE_PERSONA_METADATA_KEY,
+            PENDING_PERSONA_METADATA_KEY,
+        )
 
         metadata = body.get("metadata")
         if not isinstance(metadata, dict):
             metadata = {}
             body["metadata"] = metadata
-        metadata[ACTIVE_PERSONA_METADATA_KEY] = resolved
+        if resolved and resolved != "none":
+            metadata[ACTIVE_PERSONA_METADATA_KEY] = resolved
+        if resolution.ask_confirmation and resolution.pending_switch_to:
+            metadata[PENDING_PERSONA_METADATA_KEY] = resolution.pending_switch_to
+        else:
+            metadata.pop(PENDING_PERSONA_METADATA_KEY, None)
+
+    if resolution.ask_confirmation and resolution.pending_switch_to:
+        from api.core import (
+            append_persona_marker,
+            format_persona_switch_confirmation,
+        )
+
+        await emit(status_persona_selected(resolved))
+        # Encode confirmation ask into a special status; chat layer should short-circuit.
+        body_flag = body if isinstance(body, dict) else None
+        if body_flag is not None:
+            body_flag["_yarkids_confirmation_message"] = append_persona_marker(
+                format_persona_switch_confirmation(
+                    resolved, resolution.pending_switch_to
+                ),
+                resolved,
+            )
+        return resolved, "confirm"
 
     if manual_persona and resolved == manual_persona:
         await emit(status_persona_selected(manual_persona))
@@ -327,6 +355,18 @@ async def run_chat(
         emit=emit,
     )
 
+    # Sticky switch confirmation: return the ask message without running tools/LLM.
+    if isinstance(body, dict) and body.get("_yarkids_confirmation_message"):
+        confirm_msg = str(body.pop("_yarkids_confirmation_message"))
+        return ChatResult(
+            response=confirm_msg,
+            persona=resolved_persona,
+            persona_source=persona_source,
+            attempts=0,
+            status_events=status_events,
+            logs=list(status_events),
+        )
+
     textbook_context, textbook_query = await _resolve_textbook_context(
         settings=settings,
         messages=messages,
@@ -367,6 +407,15 @@ async def run_chat(
         enable_reflection=refl_enabled,
         emit=emit,
     )
+
+    if resolved_persona and resolved_persona != "none":
+        from api.core import append_persona_marker
+
+        response = append_persona_marker(response, resolved_persona)
+    else:
+        from api.core import strip_persona_markers
+
+        response = strip_persona_markers(response)
 
     textbook_diag = build_textbook_diag(
         query_sent=textbook_query, context=textbook_context
