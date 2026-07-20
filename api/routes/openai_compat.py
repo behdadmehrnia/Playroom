@@ -386,7 +386,7 @@ async def _handle_chat_completions(
     )
 
 
-@router.post("/v1/chat/completions")
+@router.post("/v1/chat/completions", tags=["OpenAI Compatible"])
 async def openai_chat_completions(
     req: OpenAIChatCompletionsRequest,
     settings: Settings = Depends(get_settings),
@@ -395,7 +395,7 @@ async def openai_chat_completions(
     return await _handle_chat_completions(req, settings, llm_client)
 
 
-@router.post("/v1/chat/completion")
+@router.post("/v1/chat/completion", tags=["OpenAI Compatible"])
 async def openai_chat_completion_alias(
     req: OpenAIChatCompletionsRequest,
     settings: Settings = Depends(get_settings),
@@ -405,7 +405,7 @@ async def openai_chat_completion_alias(
     return await _handle_chat_completions(req, settings, llm_client)
 
 
-@router.post("/v1/responses")
+@router.post("/v1/responses", tags=["OpenAI Compatible"])
 async def openai_responses(
     req: OpenAIResponsesRequest,
     settings: Settings = Depends(get_settings),

@@ -1692,18 +1692,82 @@ def _http_get_bytes(
         return response.read()
 
 
+def _textbook_context_from_payload(data: dict[str, Any]) -> TextbookContext:
+    raw_image = str(data["image_base64"]) if data.get("image_base64") else None
+    images: list[str] = []
+    if raw_image:
+        images = [part.strip() for part in raw_image.split("\n---YK_IMAGE---\n") if part.strip()]
+
+    return TextbookContext(
+        matched=True,
+        match_type=str(data.get("match_type")) if data.get("match_type") else None,
+        grade=int(data["grade"]) if data.get("grade") is not None else None,
+        subject=str(data["subject"]) if data.get("subject") else None,
+        subject_title=str(data["subject_title"]) if data.get("subject_title") else None,
+        page=int(data["page"]) if data.get("page") is not None else None,
+        context_text=str(data["context_text"]) if data.get("context_text") else None,
+        needs_image=bool(data.get("needs_image")),
+        image_base64=images[0] if images else None,
+        images_base64=images,
+        text_usable=bool(data.get("text_usable", True)),
+    )
+
+
+def _use_embedded_textbook(api_url: str) -> bool:
+    """Empty / local / self → use in-process textbook package (no HTTP)."""
+    value = api_url.strip().lower()
+    return value in {"", "local", "inprocess", "self", "embedded"}
+
+
+async def _fetch_textbook_context_local(
+    query: str,
+    *,
+    include_neighbors: int = 2,
+    include_image: str = "auto",
+) -> TextbookContext | None:
+    from api.textbook.app.models import RetrieveRequest
+    from api.textbook.app.retrieve_service import retrieve_context
+
+    mode = include_image.strip().lower()
+    if mode not in {"never", "auto", "always"}:
+        mode = "auto"
+
+    def _retrieve() -> TextbookContext:
+        try:
+            response = retrieve_context(
+                RetrieveRequest(
+                    query=query,
+                    include_neighbors=include_neighbors,
+                    include_image=mode,  # type: ignore[arg-type]
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — graceful degrade
+            return TextbookContext(matched=False, error=f"{type(exc).__name__}: {exc}")
+
+        if not response.matched:
+            return TextbookContext(matched=False)
+        return _textbook_context_from_payload(response.model_dump())
+
+    return await asyncio.to_thread(_retrieve)
+
+
 async def fetch_textbook_context(
     query: str,
     *,
-    api_url: str,
+    api_url: str = "",
     api_key: str | None = None,
-    include_neighbors: int = 1,
+    include_neighbors: int = 2,
     include_image: str = "auto",
     timeout_sec: float = DEFAULT_TEXTBOOK_TIMEOUT_SEC,
 ) -> TextbookContext | None:
-    """
-    Call textbook-service POST /v1/retrieve. Returns None on failure (graceful degrade).
-    """
+    """Retrieve textbook context via embedded package or external HTTP URL."""
+    if _use_embedded_textbook(api_url):
+        return await _fetch_textbook_context_local(
+            query,
+            include_neighbors=include_neighbors,
+            include_image=include_image,
+        )
+
     base = _normalize_api_base_url(api_url)
     if not base:
         return None
@@ -1740,24 +1804,7 @@ async def fetch_textbook_context(
     if not data or not data.get("matched"):
         return TextbookContext(matched=False)
 
-    raw_image = str(data["image_base64"]) if data.get("image_base64") else None
-    images: list[str] = []
-    if raw_image:
-        images = [part.strip() for part in raw_image.split("\n---YK_IMAGE---\n") if part.strip()]
-
-    context = TextbookContext(
-        matched=True,
-        match_type=str(data.get("match_type")) if data.get("match_type") else None,
-        grade=int(data["grade"]) if data.get("grade") is not None else None,
-        subject=str(data["subject"]) if data.get("subject") else None,
-        subject_title=str(data["subject_title"]) if data.get("subject_title") else None,
-        page=int(data["page"]) if data.get("page") is not None else None,
-        context_text=str(data["context_text"]) if data.get("context_text") else None,
-        needs_image=bool(data.get("needs_image")),
-        image_base64=images[0] if images else None,
-        images_base64=images,
-        text_usable=bool(data.get("text_usable", True)),
-    )
+    context = _textbook_context_from_payload(data)
 
     if context.needs_image and not context.images_base64:
         image_url = data.get("image_url")

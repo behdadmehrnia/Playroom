@@ -19,7 +19,7 @@ from .helpers import resolve_backend_model, to_chat_messages
 
 router = APIRouter()
 
-@router.post("/v1/generate", response_model=GenerateResponse)
+@router.post("/v1/generate", response_model=GenerateResponse, tags=["Generation"])
 async def generate_endpoint(
     req: GenerateRequest,
     settings: Settings = Depends(get_settings),
@@ -48,7 +48,7 @@ async def generate_endpoint(
     return GenerateResponse(response=response)
 
 
-@router.post("/v1/reflect", response_model=ReflectResponse)
+@router.post("/v1/reflect", response_model=ReflectResponse, tags=["Reflection"])
 async def reflect_endpoint(
     req: ReflectRequest,
     settings: Settings = Depends(get_settings),

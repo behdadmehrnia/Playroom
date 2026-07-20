@@ -12,19 +12,7 @@ from api.models import HealthResponse, PersonaInfo, PersonasResponse
 
 from .deps import get_llm_client, get_settings
 
-router = APIRouter()
-
-@router.get("/")
-async def root() -> dict[str, str]:
-    return {
-        "name": "Yar Kids API",
-        "version": __version__,
-        "docs": "/docs",
-        "description": (
-            "دستیار کودک‌دوست — API مستقل با معماری Persona، Intent Detection و Reflection. "
-            "اندپوینت‌های OpenAI-compatible: /v1/chat/completions و /v1/responses"
-        ),
-    }
+router = APIRouter(tags=["Health"])
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -59,7 +47,7 @@ async def health(
     )
 
 
-@router.get("/v1/personas", response_model=PersonasResponse)
+@router.get("/v1/personas", response_model=PersonasResponse, tags=["Personas"])
 async def personas() -> PersonasResponse:
     return PersonasResponse(
         personas=[

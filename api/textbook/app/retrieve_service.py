@@ -215,7 +215,9 @@ def _is_topic_search_query(
     if parsed_topic:
         return True
     # Only treat free-text as topical when it looks like a real name/phrase.
-    if search_text and (len(search_text.split()) >= 2 or len(search_text) >= 6):
+    # Single tokens like «ستایش» (5 chars) should search; bare subjects are
+    # usually stripped out of search_text by the parser.
+    if search_text and (len(search_text.split()) >= 2 or len(search_text) >= 5):
         return True
     normalized = query.strip()
     if not normalized:
@@ -237,32 +239,33 @@ def _is_topic_search_query(
     return any(marker in normalized for marker in content_markers)
 
 
+def _topic_hit_score(page: PageRecord, needle: str) -> int:
+    text = (page.text or "").replace("\u200c", "")
+    compact = text.replace(" ", "")
+    tokens = [t.replace("\u200c", "") for t in needle.split() if len(t) >= 2]
+    score = 0
+    for token in tokens:
+        if token in text:
+            score += 3
+    for i in range(len(tokens)):
+        for j in range(i + 1, min(i + 3, len(tokens) + 1)):
+            part = "".join(tokens[i:j])
+            if len(part) >= 4 and part in compact:
+                score += 6
+    return score
+
+
 def _run_topic_search(
     *,
     query: str,
     search_text: str | None,
     grade: int | None,
     subject: str | None,
-    limit: int = 3,
+    limit: int = 5,
 ) -> list[PageRecord]:
     needle = (search_text or query).strip()
     if not needle:
         return []
-
-    def _score(page: PageRecord) -> int:
-        text = (page.text or "").replace("\u200c", "")
-        compact = text.replace(" ", "")
-        tokens = [t.replace("\u200c", "") for t in needle.split() if len(t) >= 2]
-        score = 0
-        for token in tokens:
-            if token in text:
-                score += 3
-        for i in range(len(tokens)):
-            for j in range(i + 1, min(i + 3, len(tokens) + 1)):
-                part = "".join(tokens[i:j])
-                if len(part) >= 4 and part in compact:
-                    score += 6
-        return score
 
     candidates: list[PageRecord] = []
     seen: set[tuple[int, str, int]] = set()
@@ -275,6 +278,7 @@ def _run_topic_search(
             seen.add(key)
             candidates.append(page)
 
+    # Prefer scoped search, then relax grade/subject so distinctive names still match.
     _add(topic_search(needle, grade=grade, subject=subject, limit=limit))
     if subject is not None:
         _add(topic_search(needle, grade=grade, subject=None, limit=limit))
@@ -285,12 +289,139 @@ def _run_topic_search(
 
     if not candidates:
         return []
-    ranked = sorted(candidates, key=_score, reverse=True)
-    # Drop clearly irrelevant pages when a strong match exists.
-    best = _score(ranked[0])
+    ranked = sorted(
+        candidates,
+        key=lambda p: _topic_hit_score(p, needle),
+        reverse=True,
+    )
+    best = _topic_hit_score(ranked[0], needle)
     if best >= 6:
-        ranked = [p for p in ranked if _score(p) >= max(3, best // 2)]
+        ranked = [p for p in ranked if _topic_hit_score(p, needle) >= max(3, best // 2)]
     return ranked[:limit]
+
+
+def _expand_topic_hits_to_lesson(
+    hits: list[PageRecord],
+    *,
+    topic: str | None,
+    include_image: IncludeImageMode,
+    confidence: float,
+    search_label: str | None,
+) -> RetrieveResponse | None:
+    """
+    Prefer a full lesson span around the best topic hit so the model gets
+    complete textbook context (not just a single matching page).
+    """
+    if not hits:
+        return None
+    primary = hits[0]
+    pages, lesson_no, start_page, end_page = get_lesson_pages(
+        primary.grade,
+        primary.subject,
+        page=primary.printed_page,
+    )
+    # Only treat as a lesson when we actually span more than the hit page.
+    if len(pages) >= 2 and start_page is not None and end_page is not None:
+        if end_page > start_page:
+            return _build_lesson_span_response(
+                pages,
+                lesson_number=lesson_no,
+                start_page=start_page,
+                end_page=end_page,
+                include_image=include_image,
+                confidence=confidence,
+                prefer_page=primary.printed_page,
+                topic=topic or search_label,
+            )
+    return None
+
+
+def _build_topic_search_response(
+    hits: list[PageRecord],
+    *,
+    include_neighbors: int,
+    include_image: IncludeImageMode,
+    confidence: float,
+    topic: str | None,
+    topic_label: str | None,
+    search_label: str | None,
+) -> RetrieveResponse:
+    """Build topic-search context: lesson span when possible, else pages + neighbors."""
+    expanded = _expand_topic_hits_to_lesson(
+        hits,
+        topic=topic_label or topic,
+        include_image=include_image,
+        confidence=max(confidence, 0.7),
+        search_label=search_label,
+    )
+    if expanded is not None:
+        # Keep match_type as topic_search so callers know how we found it,
+        # but retain the full lesson body from the span builder.
+        expanded.match_type = "topic_search"
+        if search_label and not expanded.detected_topic_label:
+            expanded.detected_topic_label = search_label
+        expanded.detected_topic = topic or expanded.detected_topic
+        return expanded
+
+    # Fallback: primary hit ± neighbors, plus up to two extra distinct hits.
+    primary = hits[0]
+    neighbor_radius = max(include_neighbors, 2)
+    ordered: list[PageRecord] = []
+    seen: set[tuple[int, str, int]] = set()
+
+    def _push(page: PageRecord) -> None:
+        key = (page.grade, page.subject, page.printed_page)
+        if key in seen:
+            return
+        seen.add(key)
+        ordered.append(page)
+
+    for neighbor in get_neighbor_pages(
+        primary.grade, primary.subject, primary.printed_page, neighbor_radius
+    ):
+        if neighbor.printed_page < primary.printed_page:
+            _push(neighbor)
+    _push(primary)
+    for neighbor in get_neighbor_pages(
+        primary.grade, primary.subject, primary.printed_page, neighbor_radius
+    ):
+        if neighbor.printed_page > primary.printed_page:
+            _push(neighbor)
+
+    for hit in hits[1:3]:
+        # Skip hits already covered by the primary window.
+        if hit.grade == primary.grade and hit.subject == primary.subject:
+            if abs(hit.printed_page - primary.printed_page) <= neighbor_radius:
+                continue
+        _push(hit)
+        for neighbor in get_neighbor_pages(
+            hit.grade, hit.subject, hit.printed_page, 1
+        ):
+            _push(neighbor)
+
+    blocks: list[str] = []
+    all_usable = True
+    for page in ordered:
+        block, ok = _format_page_block(page, topic=topic_label or search_label)
+        blocks.append(block)
+        all_usable = all_usable and ok
+
+    response = RetrieveResponse(
+        matched=True,
+        match_type="topic_search",
+        grade=primary.grade,
+        subject=primary.subject,
+        subject_title=primary.subject_title
+        or SUBJECT_TITLES.get(primary.subject, primary.subject),
+        page=primary.printed_page,
+        context_text="\n\n".join(blocks),
+        text_usable=all_usable,
+        confidence=max(confidence, 0.6),
+        detected_topic=topic,
+        detected_topic_label=topic_label or search_label,
+    )
+    _attach_image(response, primary, needs_image=_needs_image(primary, include_image))
+    return response
 
 
 def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
@@ -422,7 +553,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             confidence=parsed.confidence,
         )
 
-    # Topic / named-content FTS search
+    # Topic / named-content FTS search — expand to full lesson when possible.
     if _is_topic_search_query(
         request.query,
         parsed_topic=parsed.topic,
@@ -437,32 +568,17 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 search_text=parsed.search_text,
                 grade=grade,
                 subject=subject,
-                limit=3,
+                limit=5,
             )
             if hits:
-                blocks: list[str] = []
-                all_usable = True
-                for hit in hits:
-                    block, ok = _format_page_block(hit)
-                    blocks.append(block)
-                    all_usable = all_usable and ok
-                primary = hits[0]
-                needs_image = _needs_image(primary, request.include_image)
-                response = RetrieveResponse(
-                    matched=True,
-                    match_type="topic_search",
-                    grade=primary.grade,
-                    subject=primary.subject,
-                    subject_title=primary.subject_title
-                    or SUBJECT_TITLES.get(primary.subject, primary.subject),
-                    page=primary.printed_page,
-                    context_text="\n\n".join(blocks),
-                    text_usable=all_usable,
-                    confidence=max(parsed.confidence, 0.6),
-                    detected_topic=parsed.topic,
-                    detected_topic_label=topic_display or parsed.search_text,
+                return _build_topic_search_response(
+                    hits,
+                    include_neighbors=request.include_neighbors,
+                    include_image=request.include_image,
+                    confidence=parsed.confidence,
+                    topic=parsed.topic,
+                    topic_label=topic_display,
+                    search_label=parsed.search_text,
                 )
-                _attach_image(response, primary, needs_image=needs_image)
-                return response
 
     return RetrieveResponse(matched=False, match_type="none", confidence=0.0)

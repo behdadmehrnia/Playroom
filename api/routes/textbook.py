@@ -27,7 +27,7 @@ from .helpers import to_chat_messages
 
 router = APIRouter()
 
-@router.post("/v1/textbook/query", response_model=TextbookQueryResponse)
+@router.post("/v1/textbook/query", response_model=TextbookQueryResponse, tags=["Textbook"])
 async def textbook_query_endpoint(
     req: TextbookQueryRequest,
 ) -> TextbookQueryResponse:
@@ -42,7 +42,7 @@ async def textbook_query_endpoint(
     )
 
 
-@router.post("/v1/textbook/retrieve", response_model=TextbookRetrieveResponse)
+@router.post("/v1/textbook/retrieve", response_model=TextbookRetrieveResponse, tags=["Textbook"])
 async def retrieve_textbook_endpoint(
     req: TextbookRetrieveRequest,
     settings: Settings = Depends(get_settings),

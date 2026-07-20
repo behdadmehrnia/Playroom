@@ -25,7 +25,7 @@ from .helpers import to_chat_messages
 
 router = APIRouter()
 
-@router.post("/v1/web-search/query", response_model=WebSearchQueryResponse)
+@router.post("/v1/web-search/query", response_model=WebSearchQueryResponse, tags=["Web Search"])
 async def web_search_query_endpoint(
     req: WebSearchQueryRequest,
 ) -> WebSearchQueryResponse:
@@ -42,7 +42,7 @@ async def web_search_query_endpoint(
     )
 
 
-@router.post("/v1/web-search/retrieve", response_model=WebSearchRetrieveResponse)
+@router.post("/v1/web-search/retrieve", response_model=WebSearchRetrieveResponse, tags=["Web Search"])
 async def retrieve_web_search_endpoint(
     req: WebSearchRetrieveRequest,
     settings: Settings = Depends(get_settings),

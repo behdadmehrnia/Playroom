@@ -28,6 +28,6 @@ router.include_router(web_search_router)
 router.include_router(generate_router)
 router.include_router(chat_router)
 router.include_router(openai_compat_router)
-router.include_router(textbook_router, prefix="/v1")
+router.include_router(textbook_router, prefix="/v1", tags=["Textbook"])
 
 __all__ = ["router"]

@@ -10,7 +10,6 @@ from fastapi.responses import FileResponse
 
 from api.textbook.app.config import API_KEY, DATA_DIR, INDEX_PATH, PAGES_DIR, PDFS_DIR
 from api.textbook.app.models import (
-    HealthResponse,
     ParseJobStatus,
     ParsePdfRequest,
     ParsePdfResponse,
@@ -46,16 +45,6 @@ def verify_api_key(authorization: str | None = Header(default=None)) -> None:
     token = authorization.removeprefix("Bearer ").strip()
     if token != API_KEY:
         raise HTTPException(status_code=403, detail="Invalid API key")
-
-
-@router.get("/health", response_model=HealthResponse)
-def health() -> HealthResponse:
-    return HealthResponse(
-        status="ok",
-        index_exists=index_exists(),
-        page_count=page_count(),
-        catalog_books=len(load_catalog()),
-    )
 
 
 @router.post("/retrieve", response_model=RetrieveResponse)

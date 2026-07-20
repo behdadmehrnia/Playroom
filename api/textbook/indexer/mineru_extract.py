@@ -16,12 +16,29 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from api.textbook.app.text_quality import fix_rtl_char_reversal
+
 _HTML_TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"[ \t]+\n")
 
 
+def _mineru_binary() -> str | None:
+    """Resolve the mineru CLI, including the active venv's Scripts/ dir."""
+    found = shutil.which("mineru")
+    if found:
+        return found
+    # When the indexer runs as `python -m ...` without activating the venv,
+    # Scripts/ is often missing from PATH — look beside sys.executable.
+    scripts = Path(sys.executable).resolve().parent
+    for name in ("mineru.exe", "mineru"):
+        candidate = scripts / name
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def mineru_available() -> bool:
-    return shutil.which("mineru") is not None
+    return _mineru_binary() is not None
 
 
 def _strip_html(html: str) -> str:
@@ -180,7 +197,8 @@ def _block_text_v2(block: dict) -> str:
 def _normalize_page_text(chunks: list[str]) -> str:
     text = "\n".join(c for c in chunks if c and c.strip())
     text = _WS.sub("\n", text)
-    return text.strip()
+    text = text.strip()
+    return fix_rtl_char_reversal(text)
 
 
 def pages_from_content_list(data: object) -> dict[int, str]:
@@ -217,7 +235,11 @@ def pages_from_content_list(data: object) -> dict[int, str]:
 
 
 def find_content_list_file(output_root: Path, pdf_stem: str) -> Path | None:
-    """Locate MinerU content_list JSON under output_root (layout varies by version)."""
+    """Locate MinerU content_list JSON under output_root (layout varies by version).
+
+    Ignores files inside ``chunk_*`` directories — those are incomplete per-window
+    outputs and must not short-circuit a full parse.
+    """
     if not output_root.is_dir():
         return None
 
@@ -227,6 +249,9 @@ def find_content_list_file(output_root: Path, pdf_stem: str) -> Path | None:
     )
     candidates: list[Path] = []
     for path in output_root.rglob("*.json"):
+        # Skip per-chunk working dirs used by run_mineru.
+        if any(part.startswith("chunk_") for part in path.parts):
+            continue
         name = path.name
         if name in preferred or name.endswith("_content_list_v2.json") or name.endswith("_content_list.json"):
             candidates.append(path)
@@ -234,9 +259,8 @@ def find_content_list_file(output_root: Path, pdf_stem: str) -> Path | None:
     if not candidates:
         return None
 
-    def score(p: Path) -> tuple[int, int]:
+    def score(p: Path) -> tuple[int, int, int]:
         name = p.name
-        # Prefer v2, then exact stem match, then shallower paths
         v2 = 0 if name.endswith("_content_list_v2.json") else 1
         stem_hit = 0 if pdf_stem in name else 1
         depth = len(p.relative_to(output_root).parts)
@@ -245,10 +269,11 @@ def find_content_list_file(output_root: Path, pdf_stem: str) -> Path | None:
     candidates.sort(key=score)
     return candidates[0]
 
-
 def load_page_texts(content_list_path: Path) -> dict[int, str]:
     data = json.loads(content_list_path.read_text(encoding="utf-8"))
-    return pages_from_content_list(data)
+    pages = pages_from_content_list(data)
+    # Merged caches may predate RTL reversal fix — normalize again.
+    return {idx: fix_rtl_char_reversal(text) for idx, text in pages.items()}
 
 
 def _pdf_page_count(pdf_path: Path) -> int:
@@ -263,8 +288,13 @@ def _pdf_page_count(pdf_path: Path) -> int:
         return 0
 
 
-def _collect_chunk_pages(output_dir: Path, stem: str) -> dict[int, str]:
-    """Load all content_list JSON files under output_dir and merge page texts."""
+def _collect_chunk_pages(
+    output_dir: Path,
+    stem: str,
+    *,
+    page_offset: int = 0,
+) -> dict[int, str]:
+    """Load content_list JSON under output_dir; remap indices by page_offset."""
     all_pages: dict[int, str] = {}
     if not output_dir.is_dir():
         return all_pages
@@ -274,8 +304,9 @@ def _collect_chunk_pages(output_dir: Path, stem: str) -> dict[int, str]:
             continue
         try:
             pages = load_page_texts(path)
-            all_pages.update(pages)
-        except (json.JSONDecodeError, OSError):
+            for rel_idx, text in pages.items():
+                all_pages[int(rel_idx) + page_offset] = text
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
             continue
     return all_pages
 
@@ -295,8 +326,11 @@ def _run_mineru_chunk(
     timeout_sec: int | None,
 ) -> None:
     """Run MinerU on a page-range subset of a PDF."""
+    binary = _mineru_binary()
+    if not binary:
+        raise RuntimeError("mineru CLI not found on PATH or beside the Python interpreter")
     cmd = [
-        "mineru",
+        binary,
         "-p", str(pdf_path),
         "-o", str(output_dir),
         "-b", backend,
@@ -313,6 +347,8 @@ def _run_mineru_chunk(
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout_sec,
             check=False,
             env=env,
@@ -335,17 +371,19 @@ def run_mineru(
     backend: str = "pipeline",
     method: str = "auto",
     lang: str = "arabic",
-    formula: bool = True,
+    formula: bool = False,
     table: bool = True,
     force: bool = False,
     timeout_sec: int | None = None,
-    chunk_size: int = 5,
+    chunk_size: int = 8,
 ) -> dict[int, str]:
     """
     Parse one PDF with MinerU and return {pdf_page_index: text}.
 
     Reuses an existing content_list under output_dir unless force=True.
     Processes the PDF in page-range chunks to bound memory usage.
+    Keep chunks small (default 8) — MinerU 3.x pipeline on CPU/low VRAM
+    often crashes on large batches while 2–10 page windows are reliable.
     """
     if not mineru_available():
         raise RuntimeError(
@@ -361,7 +399,11 @@ def run_mineru(
     if not force:
         merged_file = output_dir / f"{stem}_merged_pages.json"
         if merged_file.is_file():
-            return json.loads(merged_file.read_text(encoding="utf-8"))
+            raw = json.loads(merged_file.read_text(encoding="utf-8"))
+            return {
+                int(k): fix_rtl_char_reversal(str(v))
+                for k, v in raw.items()
+            }
 
     existing = None if force else find_content_list_file(output_dir, stem)
     if existing is not None:
@@ -378,9 +420,13 @@ def run_mineru(
     for start in range(0, total_pages, chunk_size):
         end = min(start + chunk_size - 1, total_pages - 1)
         chunk_idx += 1
+        # Isolate each chunk so MinerU does not overwrite prior content_list
+        # files, and so we can remap relative page_idx → absolute PDF index.
+        chunk_out = output_dir / f"chunk_{start:04d}_{end:04d}"
+        chunk_out.mkdir(parents=True, exist_ok=True)
         try:
             _run_mineru_chunk(
-                pdf_path, output_dir,
+                pdf_path, chunk_out,
                 backend=backend, method=method, lang=lang,
                 formula=formula, table=table,
                 start_page=start, end_page=end,
@@ -389,7 +435,7 @@ def run_mineru(
         except RuntimeError as exc:
             print(f"  warning: {exc}", file=sys.stderr)
 
-        chunk_pages = _collect_chunk_pages(output_dir, stem)
+        chunk_pages = _collect_chunk_pages(chunk_out, stem, page_offset=start)
         if chunk_pages:
             chunk_file = output_dir / f"{stem}_chunk{chunk_idx}.json"
             chunk_file.write_text(json.dumps(chunk_pages, ensure_ascii=False), encoding="utf-8")

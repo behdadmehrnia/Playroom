@@ -8,14 +8,6 @@ from fastapi.testclient import TestClient
 from tests.conftest import DummyLLM
 
 
-def test_root(client: TestClient) -> None:
-    r = client.get("/")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["name"] == "Yar Kids API"
-    assert "docs" in body
-
-
 def test_health(client: TestClient) -> None:
     r = client.get("/health")
     assert r.status_code == 200

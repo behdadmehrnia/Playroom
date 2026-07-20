@@ -53,7 +53,7 @@ class Settings(BaseModel):
     textbook_request_timeout_sec: float = Field(
         default=DEFAULT_TEXTBOOK_TIMEOUT_SEC, ge=1.0, le=1200.0
     )
-    textbook_neighbor_pages: int = Field(default=1, ge=0, le=3)
+    textbook_neighbor_pages: int = Field(default=2, ge=0, le=3)
     textbook_include_image: str = Field(default="auto")
     textbook_debug: bool = Field(default=False)
 
@@ -129,7 +129,7 @@ class Settings(BaseModel):
             textbook_request_timeout_sec=env_float(
                 "YARKIDS_TEXTBOOK_REQUEST_TIMEOUT_SEC", DEFAULT_TEXTBOOK_TIMEOUT_SEC
             ),
-            textbook_neighbor_pages=env_int("YARKIDS_TEXTBOOK_NEIGHBOR_PAGES", 1),
+            textbook_neighbor_pages=env_int("YARKIDS_TEXTBOOK_NEIGHBOR_PAGES", 2),
             textbook_include_image=env("YARKIDS_TEXTBOOK_INCLUDE_IMAGE", "auto").strip().lower(),
             textbook_debug=env_bool("YARKIDS_TEXTBOOK_DEBUG", False),
             enable_web_search=env_bool("YARKIDS_ENABLE_WEB_SEARCH", True),

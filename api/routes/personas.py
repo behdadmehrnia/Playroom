@@ -13,7 +13,7 @@ from .helpers import build_resolve_body, resolve_backend_model, to_chat_messages
 
 router = APIRouter()
 
-@router.post("/v1/persona/resolve", response_model=PersonaResolveResponse)
+@router.post("/v1/persona/resolve", response_model=PersonaResolveResponse, tags=["Personas"])
 async def resolve_persona_endpoint(
     req: PersonaResolveRequest,
     settings: Settings = Depends(get_settings),

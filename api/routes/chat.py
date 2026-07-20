@@ -68,7 +68,7 @@ async def _chat_event_stream(
             yield {"event": "done", "data": out.model_dump_json()}
 
 
-@router.post("/v1/chat", response_model=ChatResultOut)
+@router.post("/v1/chat", response_model=ChatResultOut, tags=["Chat"])
 async def chat_endpoint(
     req: ChatRequest,
     settings: Settings = Depends(get_settings),

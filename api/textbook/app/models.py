@@ -10,7 +10,7 @@ MatchType = Literal["exact_page", "lesson", "lesson_span", "topic_search", "none
 
 class RetrieveRequest(BaseModel):
     query: str = Field(..., min_length=1, description="پیام کاربر به فارسی")
-    include_neighbors: int = Field(default=1, ge=0, le=3)
+    include_neighbors: int = Field(default=2, ge=0, le=3)
     include_image: IncludeImageMode = "auto"
     grade: int | None = Field(default=None, ge=3, le=6)
     subject: str | None = Field(default=None, description="شناسه درس مثل math")

@@ -14,7 +14,7 @@ from .helpers import resolve_backend_model, to_chat_messages
 
 router = APIRouter()
 
-@router.post("/v1/intent", response_model=IntentResponse)
+@router.post("/v1/intent", response_model=IntentResponse, tags=["Intent"])
 async def detect_intent_endpoint(
     req: IntentRequest,
     settings: Settings = Depends(get_settings),

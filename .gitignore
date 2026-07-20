@@ -8,6 +8,7 @@ build/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.venv-indexer/
 venv/
 .env
 pipe_embedded.py
@@ -16,6 +17,8 @@ api/textbook/data/index.sqlite
 api/textbook/data/pdfs/*.pdf
 api/textbook/data/pages/*.png
 api/textbook/data/mineru/
+api/textbook/data/build_index.log
+api/textbook/data/build_index.err.log
 .DS_Store
 custom-config.yml
 custom-config.yaml

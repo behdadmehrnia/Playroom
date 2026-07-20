@@ -409,8 +409,8 @@ def _wants_topic_search(text: str, parsed: ParsedQuery) -> bool:
         return True
     # Named content with grade/subject but no page (e.g. «میرزا کوچک خان فارسی ششم»)
     if parsed.search_text and (parsed.grade or parsed.subject):
-        # Ignore tiny leftover phrases like «شروع کنیم»
-        if len(parsed.search_text.split()) >= 2 or len(parsed.search_text) >= 6:
+        # Ignore tiny leftover phrases; allow single tokens like «ستایش».
+        if len(parsed.search_text.split()) >= 2 or len(parsed.search_text) >= 5:
             return True
     return False
 
