@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .constants import (
@@ -21,6 +23,7 @@ from .messages import (
     _http_post_json,
     _normalize_api_base_url,
 )
+from .status import status_fetching_web_search, status_web_search_unavailable
 from .types import ChatMessage, WebSearchContext, WebSearchQueryDiag, WebSearchResult
 
 _WEB_SEARCH_NEED_RE = re.compile(
