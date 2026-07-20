@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
@@ -54,6 +55,53 @@ class TextbookContext(BaseModel):
     need_info: bool = False
     text_usable: bool = True
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class TextbookScope:
+    """Structured textbook position resolved from chat (grade, book, page)."""
+
+    grade: int | None = None
+    subject: str | None = None  # Persian keyword, e.g. «فارسی»
+    subject_id: str | None = None  # catalog id, e.g. «persian»
+    page: int | None = None
+
+    def has_page_lookup(self) -> bool:
+        return (
+            self.grade is not None
+            and self.subject_id is not None
+            and self.page is not None
+        )
+
+    def compose_query(self, *, user_message: str | None = None) -> str:
+        parts: list[str] = []
+        if user_message and user_message.strip():
+            parts.append(user_message.strip())
+        if self.page is not None:
+            parts.append(f"صفحه {self.page}")
+        if self.subject:
+            parts.append(self.subject)
+        if self.grade is not None:
+            parts.append(_GRADE_INT_LABELS.get(self.grade, f"پایه {self.grade}"))
+        return " ".join(parts).strip()
+
+    def to_metadata(self) -> dict[str, int | str]:
+        payload: dict[str, int | str] = {}
+        if self.grade is not None:
+            payload["grade"] = self.grade
+        if self.subject_id:
+            payload["subject"] = self.subject_id
+        if self.page is not None:
+            payload["page"] = self.page
+        return payload
+
+
+_GRADE_INT_LABELS: dict[int, str] = {
+    3: "سوم",
+    4: "چهارم",
+    5: "پنجم",
+    6: "ششم",
+}
 
 
 class WebSearchResult(BaseModel):

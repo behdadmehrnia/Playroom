@@ -17,6 +17,7 @@ from api.core import (
     SAFE_FALLBACK_RESPONSE,
     STATUS_DISPLAY_PAUSE_SEC,
     STREAM_CHUNK_SIZE,
+    ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY,
     ChatMessage,
     IntentDetectionResult,
     LLMClient,
@@ -43,6 +44,7 @@ from api.core import (
     reflect_on_response,
     resolve_active_persona,
     resolve_manual_persona,
+    resolve_textbook_scope,
     resolve_web_search_context,
     run_math_tool_for_message,
     status_calculating_math,
@@ -162,6 +164,7 @@ async def _resolve_textbook_context(
     messages: list[ChatMessage],
     persona: PersonaId,
     enable_textbook_context: bool | None,
+    body: dict[str, Any] | None = None,
     emit: Callable[[str], Awaitable[None]],
 ) -> tuple[TextbookContext | None, str | None]:
     """Fetch textbook context using the same gate and heuristics as chat."""
@@ -171,7 +174,16 @@ async def _resolve_textbook_context(
         else settings.enable_textbook_context
     )
     user_message = _get_latest_user_message(messages)
-    textbook_query = build_textbook_query(messages)
+    sticky_scope: dict[str, Any] | None = None
+    if isinstance(body, dict):
+        metadata = body.get("metadata")
+        if isinstance(metadata, dict):
+            raw_scope = metadata.get(ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY)
+            if isinstance(raw_scope, dict):
+                sticky_scope = raw_scope
+
+    scope = resolve_textbook_scope(messages, sticky=sticky_scope)
+    textbook_query = build_textbook_query(messages, sticky=sticky_scope)
 
     should_fetch = bool(
         ctx_enabled
@@ -188,6 +200,9 @@ async def _resolve_textbook_context(
             include_neighbors=settings.textbook_neighbor_pages,
             include_image=settings.normalized_include_image(),
             timeout_sec=settings.textbook_request_timeout_sec,
+            grade=scope.grade,
+            subject=scope.subject_id,
+            page=scope.page,
         )
         if settings.textbook_debug and textbook_context:
             await emit(
@@ -205,6 +220,20 @@ async def _resolve_textbook_context(
                 textbook_context.need_info = True
             if not settings.textbook_debug:
                 await emit(status_textbook_unavailable())
+        if (
+            textbook_context
+            and textbook_context.matched
+            and isinstance(body, dict)
+        ):
+            metadata = body.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+                body["metadata"] = metadata
+            metadata[ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY] = {
+                "grade": textbook_context.grade,
+                "subject": textbook_context.subject,
+                "page": textbook_context.page,
+            }
         return textbook_context, textbook_query
 
     if (
@@ -372,6 +401,7 @@ async def run_chat(
         messages=messages,
         persona=resolved_persona,
         enable_textbook_context=enable_textbook_context,
+        body=body,
         emit=emit,
     )
 

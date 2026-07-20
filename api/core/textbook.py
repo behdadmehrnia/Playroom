@@ -17,7 +17,7 @@ from .messages import (
     _http_post_json,
     _normalize_api_base_url,
 )
-from .types import ChatMessage, TextbookContext, TextbookQueryDiag
+from .types import ChatMessage, TextbookContext, TextbookQueryDiag, TextbookScope
 
 _TEXTBOOK_PAGE_QUERY_RE = re.compile(
     r"(?:صفحه|صفحهٔ|ص\.?)\s*[\d۰-۹٠-٩]+",
@@ -91,6 +91,73 @@ _TEXTBOOK_SUBJECT_KEYWORDS: tuple[str, ...] = (
 )
 # Real subjects (excludes the generic word «کتاب») for carrying forward.
 _TEXTBOOK_SUBJECT_TOKENS: tuple[str, ...] = _TEXTBOOK_SUBJECT_KEYWORDS[:-1]
+
+# Persian ordinal / digit → grade int (grades 3–6 in the index).
+_GRADE_TOKEN_TO_INT: dict[str, int] = {
+    "سوم": 3,
+    "سه": 3,
+    "۳": 3,
+    "3": 3,
+    "چهارم": 4,
+    "چهار": 4,
+    "۴": 4,
+    "4": 4,
+    "پنجم": 5,
+    "پنج": 5,
+    "۵": 5,
+    "5": 5,
+    "ششم": 6,
+    "شش": 6,
+    "۶": 6,
+    "6": 6,
+}
+
+# Minimal subject keyword → catalog id (mirrors api.textbook.app.subjects).
+_SUBJECT_KEYWORD_TO_ID: dict[str, str] = {
+    "ریاضی": "math",
+    "ریاضیات": "math",
+    "علوم": "science",
+    "علوم تجربی": "science",
+    "فارسی": "persian",
+    "نگارش": "writing",
+    "مطالعات": "social",
+    "مطالعات اجتماعی": "social",
+    "اجتماعی": "social",
+    "قرآن": "quran",
+    "هدیه": "gifts",
+    "تفکر": "thinking",
+    "فناوری": "technology",
+}
+
+# Follow-up questions that should re-use the current page scope.
+_TEXTBOOK_FOLLOWUP_MARKERS: tuple[str, ...] = (
+    "چه داستانی",
+    "چه داستان",
+    "اسم داستان",
+    "عنوان داستان",
+    "عنوان",
+    "معنی",
+    "یعنی چی",
+    "یعنی چه",
+    "یعنی چیه",
+    "ادامه",
+    "بیشتر توضیح",
+    "توضیح بده",
+    "این صفحه",
+    "همین صفحه",
+    "اینجا",
+    "چی نوشته",
+    "چی گفته",
+    "نفهمیدم",
+    "سخت بود",
+    "می‌خونیم",
+    "میخونیم",
+    "بخون",
+    "بخوان",
+    "خلاصه",
+    "چی یاد",
+    "چی یاد گرفتیم",
+)
 def _format_textbook_debug(*, query: str, api_url: str, context: TextbookContext) -> str:
     short_query = query if len(query) <= 60 else query[:57] + "..."
     if context.error:
@@ -176,6 +243,33 @@ def looks_like_textbook_help_request(text: str) -> bool:
     if not text.strip():
         return False
     return any(marker in text for marker in _TEXTBOOK_HELP_MARKERS)
+
+
+def looks_like_textbook_followup(text: str) -> bool:
+    """True when the child is still discussing the current textbook page."""
+    if not text.strip():
+        return False
+    if _textbook_has_topic_intent(text) and not _textbook_has_anchor(text):
+        return True
+    lowered = text.strip().lower()
+    return any(marker in lowered for marker in _TEXTBOOK_FOLLOWUP_MARKERS)
+
+
+def _grade_token_to_int(token: str) -> int | None:
+    cleaned = token.strip()
+    for key in ("پایه", "کلاس"):
+        if cleaned.startswith(key):
+            cleaned = cleaned[len(key) :].strip()
+    if cleaned.isdigit():
+        value = int(cleaned)
+        return value if 3 <= value <= 6 else None
+    return _GRADE_TOKEN_TO_INT.get(cleaned)
+
+
+def _subject_keyword_to_id(keyword: str | None) -> str | None:
+    if not keyword:
+        return None
+    return _SUBJECT_KEYWORD_TO_ID.get(keyword.strip())
 def _textbook_has_topic_intent(text: str) -> bool:
     return any(marker in text for marker in _TEXTBOOK_TOPIC_INTENT_MARKERS)
 
@@ -216,8 +310,8 @@ def _textbook_has_subject(text: str) -> bool:
 
 
 def _extract_grade_token(text: str) -> str | None:
-    # Avoid confusing «سوم/چهارم/...» that appears as an exercise number
-    # (e.g. «تمرین سوم») with the student's grade (e.g. «پایه ششم»).
+    # Avoid confusing «سوم/چهارم/...» that appears as an exercise or lesson number
+    # (e.g. «تمرین سوم»، «درس سوم») with the student's grade (e.g. «پایه ششم»).
     exercise_context = any(
         kw in text
         for kw in (
@@ -231,13 +325,23 @@ def _extract_grade_token(text: str) -> str | None:
         )
     )
     has_grade_keyword = any(kw in text for kw in ("پایه", "کلاس", "دبستان"))
+    lesson_context = _textbook_has_lesson(text)
 
-    if exercise_context and not has_grade_keyword:
+    if (exercise_context or lesson_context) and not has_grade_keyword:
         return None
 
     match = _TEXTBOOK_GRADE_TOKEN_RE.search(text)
     if match:
-        return match.group(0).strip()
+        token = match.group(0).strip()
+        # Bare ordinals (سوم، چهارم، …) must not follow درس/فصل.
+        if re.fullmatch(r"سوم|چهارم|پنجم|ششم", token, flags=re.IGNORECASE):
+            if re.search(
+                rf"(?:درس|فصل)\s*{token}|{token}\s*(?:درس|فصل)",
+                text,
+                flags=re.IGNORECASE,
+            ):
+                return None
+        return token
     casual = _TEXTBOOK_GRADE_CASUAL_RE.search(text)
     if casual and (has_grade_keyword or casual.group(1)):
         # Normalize «چهارمم» → «چهارم»
@@ -372,7 +476,89 @@ def _resolve_relative_page(recent_user_texts: list[str]) -> int | None:
     return current
 
 
-def build_textbook_query(messages: list[ChatMessage], *, window: int = 12) -> str:
+def resolve_textbook_scope(
+    messages: list[ChatMessage],
+    *,
+    sticky: dict[str, Any] | None = None,
+    window: int = 16,
+) -> TextbookScope:
+    """
+    Walk recent user turns and resolve the current textbook position.
+
+    Unlike a single-turn query parser, this tracks page navigation across turns
+    (e.g. «صفحه ۳۳» → «بریم صفحه بعد» → «چه داستانیه؟» stays on page 34).
+    """
+    user_texts = [
+        message.content.strip()
+        for message in messages
+        if message.role == "user" and message.content.strip()
+    ]
+    if not user_texts:
+        return TextbookScope()
+
+    recent = user_texts[-window:]
+    grade: int | None = None
+    subject_kw: str | None = None
+    subject_id: str | None = None
+    current_page: int | None = None
+
+    if sticky:
+        raw_grade = sticky.get("grade")
+        if isinstance(raw_grade, int) and 3 <= raw_grade <= 6:
+            grade = raw_grade
+        raw_subject = sticky.get("subject")
+        if isinstance(raw_subject, str) and raw_subject.strip():
+            subject_id = raw_subject.strip()
+            subject_kw = next(
+                (k for k, v in _SUBJECT_KEYWORD_TO_ID.items() if v == subject_id),
+                None,
+            )
+        raw_page = sticky.get("page")
+        if isinstance(raw_page, int) and raw_page > 0:
+            current_page = raw_page
+
+    for text in recent:
+        grade_token = _extract_grade_token(text)
+        if grade_token:
+            parsed_grade = _grade_token_to_int(grade_token)
+            if parsed_grade is not None:
+                grade = parsed_grade
+
+        subject_token = _extract_subject_token(text)
+        if subject_token:
+            subject_kw = subject_token
+            subject_id = _subject_keyword_to_id(subject_token)
+
+        explicit_page = _extract_page_number(text)
+        if explicit_page is not None:
+            current_page = explicit_page
+            continue
+
+        page_words = _extract_page_word_phrase(text)
+        if page_words:
+            from api.textbook.app.parser import PAGE_NUMBER_WORDS
+
+            current_page = PAGE_NUMBER_WORDS.get(page_words.split()[0], current_page)
+            continue
+
+        delta = _relative_page_delta(text)
+        if delta and current_page is not None:
+            current_page += delta
+
+    return TextbookScope(
+        grade=grade,
+        subject=subject_kw,
+        subject_id=subject_id,
+        page=current_page,
+    )
+
+
+def build_textbook_query(
+    messages: list[ChatMessage],
+    *,
+    sticky: dict[str, Any] | None = None,
+    window: int = 12,
+) -> str:
     """
     Build a focused textbook query, scoped to the current page conversation.
 
@@ -394,6 +580,21 @@ def build_textbook_query(messages: list[ChatMessage], *, window: int = 12) -> st
     if not user_texts:
         return ""
     recent = user_texts[-window:]
+    latest = recent[-1]
+    scope = resolve_textbook_scope(messages, sticky=sticky, window=window)
+
+    # Established page session: navigation, follow-ups, or reaffirming grade.
+    if scope.has_page_lookup():
+        if (
+            _textbook_has_anchor(latest)
+            or _relative_page_delta(latest) != 0
+            or looks_like_textbook_followup(latest)
+            or _textbook_wants_whole_lesson(latest)
+            or any(kw in latest for kw in ("پایه", "کلاس", "دبستان"))
+        ):
+            return scope.compose_query(
+                user_message=latest if looks_like_textbook_followup(latest) else None
+            )
 
     def _lookup_subject(from_idx: int) -> str | None:
         # Prefer subject in/after the anchor turn; else carry from earlier turns.
@@ -526,6 +727,9 @@ async def _fetch_textbook_context_local(
     *,
     include_neighbors: int = 2,
     include_image: str = "auto",
+    grade: int | None = None,
+    subject: str | None = None,
+    page: int | None = None,
 ) -> TextbookContext | None:
     from api.textbook.app.models import RetrieveRequest
     from api.textbook.app.retrieve_service import retrieve_context
@@ -541,6 +745,9 @@ async def _fetch_textbook_context_local(
                     query=query,
                     include_neighbors=include_neighbors,
                     include_image=mode,  # type: ignore[arg-type]
+                    grade=grade,
+                    subject=subject,
+                    page=page,
                 )
             )
         except Exception as exc:  # noqa: BLE001 — graceful degrade
@@ -561,6 +768,9 @@ async def fetch_textbook_context(
     include_neighbors: int = 2,
     include_image: str = "auto",
     timeout_sec: float = DEFAULT_TEXTBOOK_TIMEOUT_SEC,
+    grade: int | None = None,
+    subject: str | None = None,
+    page: int | None = None,
 ) -> TextbookContext | None:
     """Retrieve textbook context via the embedded package, or optional external HTTP URL."""
     if _use_embedded_textbook(api_url):
@@ -568,6 +778,9 @@ async def fetch_textbook_context(
             query,
             include_neighbors=include_neighbors,
             include_image=include_image,
+            grade=grade,
+            subject=subject,
+            page=page,
         )
 
     base = _normalize_api_base_url(api_url)
@@ -583,6 +796,12 @@ async def fetch_textbook_context(
         "include_neighbors": include_neighbors,
         "include_image": include_image,
     }
+    if grade is not None:
+        payload["grade"] = grade
+    if subject:
+        payload["subject"] = subject
+    if page is not None:
+        payload["page"] = page
 
     def _retrieve() -> tuple[dict[str, Any] | None, str | None]:
         try:

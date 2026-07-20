@@ -13,6 +13,7 @@ INTENT_CONFIDENCE_THRESHOLD = 0.7
 MANUAL_PERSONA_METADATA_KEY = "yarkids_persona"
 ACTIVE_PERSONA_METADATA_KEY = "yarkids_active_persona"
 PENDING_PERSONA_METADATA_KEY = "yarkids_pending_persona"
+ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY = "yarkids_textbook_scope"
 # Legacy HTML marker (may still appear in older chat history).
 _PERSONA_MARKER_RE = re.compile(r"<!--\s*yarkids:([a-z_]+)\s*-->", re.IGNORECASE)
 # Invisible sticky marker: Word Joiner + 2 zero-width chars + Word Joiner.

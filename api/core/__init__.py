@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .constants import (
     ACTIVE_PERSONA_METADATA_KEY,
+    ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY,
     DEFAULT_TEXTBOOK_TIMEOUT_SEC,
     DEFAULT_WEB_SEARCH_MAX_RESULTS,
     DEFAULT_WEB_SEARCH_TIMEOUT_SEC,
@@ -104,8 +105,10 @@ from .textbook import (
     build_textbook_diag,
     build_textbook_query,
     fetch_textbook_context,
+    looks_like_textbook_followup,
     looks_like_textbook_help_request,
     looks_like_textbook_page_query,
+    resolve_textbook_scope,
 )
 from .types import (
     ChatMessage,
@@ -116,6 +119,7 @@ from .types import (
     ReflectionResult,
     TextbookContext,
     TextbookQueryDiag,
+    TextbookScope,
     WebSearchContext,
     WebSearchQueryDiag,
     WebSearchResult,
@@ -131,6 +135,7 @@ from .web_search import (
 
 __all__ = [
     "ACTIVE_PERSONA_METADATA_KEY",
+    "ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY",
     "ChatMessage",
     "DEFAULT_TEXTBOOK_TIMEOUT_SEC",
     "DEFAULT_WEB_SEARCH_MAX_RESULTS",
@@ -162,6 +167,7 @@ __all__ = [
     "TEXTBOOK_PERSONAS",
     "TextbookContext",
     "TextbookQueryDiag",
+    "TextbookScope",
     "VALID_PERSONAS",
     "WEB_SEARCH_PERSONAS",
     "WebSearchContext",
@@ -207,6 +213,7 @@ __all__ = [
     "get_reflection_prompt",
     "get_user_persona_selection",
     "iter_text_chunks",
+    "looks_like_textbook_followup",
     "looks_like_textbook_help_request",
     "looks_like_textbook_page_query",
     "looks_like_web_search_request",
@@ -219,6 +226,7 @@ __all__ = [
     "reflect_on_response",
     "resolve_active_persona",
     "resolve_manual_persona",
+    "resolve_textbook_scope",
     "resolve_web_search_context",
     "run_math_tool_for_message",
     "run_response_loop",

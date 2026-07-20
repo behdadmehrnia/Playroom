@@ -11,6 +11,8 @@ from api.core.textbook import (
     _extract_subject_token,
     _textbook_context_from_payload,
     _use_embedded_textbook,
+    looks_like_textbook_followup,
+    resolve_textbook_scope,
 )
 
 
@@ -49,6 +51,76 @@ def test_build_textbook_query_page_reference() -> None:
 def test_build_textbook_query_empty_without_reference() -> None:
     messages = [ChatMessage(role="user", content="سلام")]
     assert build_textbook_query(messages) == ""
+
+
+def test_extract_grade_ignores_lesson_number() -> None:
+    assert _extract_grade_token("درس سوم") is None
+    assert _extract_grade_token("فصل چهارم") is None
+    assert _extract_grade_token("کلاس چهارم") == "چهارم"
+    assert _extract_grade_token("پایه ششم") is not None
+
+
+def test_build_textbook_query_carries_grade_past_lesson_number() -> None:
+    """«درس سوم» is lesson 3, not grade 3 — grade comes from earlier «کلاس چهارم»."""
+    messages = [
+        ChatMessage(role="user", content="کمک درسی"),
+        ChatMessage(role="user", content="کلاس چهارم"),
+        ChatMessage(role="user", content="فارسی"),
+        ChatMessage(role="user", content="درس سوم"),
+        ChatMessage(role="user", content="صفحه ۳۳"),
+    ]
+    query = build_textbook_query(messages)
+    assert query
+    assert "33" in query or "۳۳" in query
+    assert "فارسی" in query
+    assert "چهارم" in query
+    assert "سوم" not in query.split()[-1:]  # grade slot must not be lesson ordinal
+
+
+def test_resolve_textbook_scope_tracks_relative_navigation() -> None:
+    messages = [
+        ChatMessage(role="user", content="کلاس چهارم"),
+        ChatMessage(role="user", content="فارسی"),
+        ChatMessage(role="user", content="صفحه ۳۳"),
+        ChatMessage(role="assistant", content="..."),
+        ChatMessage(role="user", content="بریم صفحه بعد"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.grade == 4
+    assert scope.subject_id == "persian"
+    assert scope.page == 34
+
+
+def test_build_textbook_query_followup_after_next_page() -> None:
+    """«چه داستانیه؟» after «بریم صفحه بعد» must stay on page 34, not regress to 33."""
+    messages = [
+        ChatMessage(role="user", content="کلاس چهارم"),
+        ChatMessage(role="user", content="فارسی"),
+        ChatMessage(role="user", content="درس سوم"),
+        ChatMessage(role="user", content="صفحه ۳۳"),
+        ChatMessage(role="assistant", content="..."),
+        ChatMessage(role="user", content="من پایه چهارمم ها"),
+        ChatMessage(role="assistant", content="..."),
+        ChatMessage(role="user", content="بریم صفحه بعد"),
+        ChatMessage(role="assistant", content="..."),
+        ChatMessage(role="user", content="چه داستانیه ؟"),
+    ]
+    query = build_textbook_query(messages)
+    assert query
+    assert "34" in query or "۳۴" in query
+    assert "33" not in query and "۳۳" not in query
+    assert looks_like_textbook_followup("چه داستانیه ؟")
+
+
+def test_resolve_textbook_scope_uses_sticky_metadata() -> None:
+    scope = resolve_textbook_scope(
+        [ChatMessage(role="user", content="چه داستانیه؟")],
+        sticky={"grade": 4, "subject": "persian", "page": 34},
+    )
+    assert scope.grade == 4
+    assert scope.subject_id == "persian"
+    assert scope.page == 34
+    assert scope.has_page_lookup()
 
 
 @pytest.mark.parametrize(
