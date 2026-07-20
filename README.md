@@ -58,7 +58,7 @@ pytest
 ```
 
 تست‌ها بر اساس ماژول‌های `api/core/` و `api/routes/` سازمان‌دهی شده‌اند (`tests/test_core_*.py`, `tests/test_routes.py`, …).  
-چک‌لیست ۸۵ مورد TC و **پرامپت Agent** برای پیاده‌سازی/اجرای تست‌ها: [`tests/persona_system_tests.md`](tests/persona_system_tests.md).
+چک‌لیست تست دستی (پرامپت + انتظار): [`tests/README.md`](tests/README.md).
 
 ## نصب در OpenWebUI (مسیر توصیه‌شده)
 
