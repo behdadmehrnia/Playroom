@@ -384,7 +384,7 @@ class Pipe:
         """Yield normalized ``(event_kind, text)`` tuples from the API stream.
 
         event_kind is one of: ``status``, ``status_clear``, ``chunk``,
-        ``error``, ``done``. The generator ends naturally when the SSE stream
+        ``title``, ``error``, ``done``. The generator ends naturally when the SSE stream
         completes, ensuring clean teardown of the background reader thread.
         """
         payload = self._build_api_payload(body, __user__)
@@ -409,6 +409,13 @@ class Pipe:
                     text = data
                 if text:
                     yield "chunk", text
+            elif event_type == "title":
+                try:
+                    title = json.loads(data).get("title", "")
+                except json.JSONDecodeError:
+                    title = data
+                if title:
+                    yield "title", title
             elif event_type == "error":
                 try:
                     message = json.loads(data).get("message", data)
@@ -452,6 +459,11 @@ class Pipe:
                 elif kind == "chunk":
                     yield value
                     await asyncio.sleep(0)
+                elif kind == "title":
+                    if __event_emitter__:
+                        await __event_emitter__(
+                            {"type": "chat:title", "data": value}
+                        )
                 elif kind == "error":
                     await clear_status_message(__event_emitter__)
                     yield f"\n\n⚠️ {value}"
@@ -470,6 +482,7 @@ class Pipe:
         emit_status = self._build_status_emitter(__event_emitter__)
         chunks: list[str] = []
         error_message: str | None = None
+        title: str | None = None
         try:
             async for kind, value in self._iter_api_events(body, __user__):
                 if kind == "status":
@@ -479,11 +492,17 @@ class Pipe:
                     await clear_status_message(__event_emitter__)
                 elif kind == "chunk":
                     chunks.append(value)
+                elif kind == "title":
+                    title = value
                 elif kind == "error":
                     error_message = value
         except RuntimeError as exc:
             error_message = str(exc)
         await clear_status_message(__event_emitter__)
+        if title and __event_emitter__:
+            await __event_emitter__(
+                {"type": "chat:title", "data": title}
+            )
         if error_message:
             return f"⚠️ {error_message}"
         return "".join(chunks) if chunks else SAFE_FALLBACK_RESPONSE
