@@ -2,19 +2,29 @@ from __future__ import annotations
 
 import base64
 
-from api.textbook.app.models import IncludeImageMode, MatchType, RetrieveRequest, RetrieveResponse
+from api.textbook.app.models import (
+    FailureReason,
+    IncludeImageMode,
+    RetrieveRequest,
+    RetrieveResponse,
+)
 from api.textbook.app.parser import parse_persian_query
-from api.textbook.app.subjects import SUBJECT_TITLES, topic_label
+from api.textbook.app.subjects import canonical_subject_title, topic_label
 from api.textbook.app.store import (
     PageRecord,
     get_lesson_pages,
     get_neighbor_pages,
     get_page,
+    get_printed_page_bounds,
     lesson_search,
     resolve_image_path,
     topic_search,
 )
 from api.textbook.app.text_quality import is_text_garbled
+
+
+def _book_title(page: PageRecord) -> str:
+    return canonical_subject_title(page.subject, page.subject_title) or page.subject
 
 
 def _page_text_for_context(page: PageRecord) -> tuple[str, bool]:
@@ -23,7 +33,7 @@ def _page_text_for_context(page: PageRecord) -> tuple[str, bool]:
     if not raw:
         return "[متن استخراج نشد — از تصویر صفحه استفاده کن]", False
     if not page.text_usable or is_text_garbled(raw):
-        title_bits = [page.subject_title, f"پایه {page.grade}", f"صفحه {page.printed_page}"]
+        title_bits = [_book_title(page), f"پایه {page.grade}", f"صفحه {page.printed_page}"]
         note = (
             f"[متن این صفحه ({'، '.join(title_bits)}) به‌درستی و کامل قابل استخراج نبود "
             "(مثلاً خط تحریری/نستعلیق). تصویر صفحه پیوست شده — محتوا را از تصویر بخوان.]"
@@ -33,13 +43,73 @@ def _page_text_for_context(page: PageRecord) -> tuple[str, bool]:
 
 
 def _format_page_block(page: PageRecord, *, topic: str | None = None) -> tuple[str, bool]:
-    header = f"--- صفحه {page.printed_page} ({page.subject_title}، پایه {page.grade})"
+    header = f"--- صفحه {page.printed_page} ({_book_title(page)}، پایه {page.grade})"
     if topic:
         header += f" — بخش: {topic}"
     header += " ---"
     body, usable = _page_text_for_context(page)
     return f"{header}\n{body}", usable
 
+
+def _title_for(subject: str | None) -> str | None:
+    return canonical_subject_title(subject)
+
+
+def _out_of_range_response(
+    *,
+    grade: int | None,
+    subject: str | None,
+    page: int,
+    min_page: int,
+    max_page: int,
+    confidence: float,
+) -> RetrieveResponse:
+    title = _title_for(subject)
+    return RetrieveResponse(
+        matched=False,
+        match_type="none",
+        grade=grade,
+        subject=subject,
+        subject_title=title,
+        page=page,
+        confidence=confidence,
+        failure_reason="page_out_of_range",
+        min_page=min_page,
+        max_page=max_page,
+    )
+
+
+def _unmatched(
+    *,
+    grade: int | None = None,
+    subject: str | None = None,
+    page: int | None = None,
+    confidence: float = 0.0,
+    failure_reason: FailureReason | None = None,
+    min_page: int | None = None,
+    max_page: int | None = None,
+) -> RetrieveResponse:
+    return RetrieveResponse(
+        matched=False,
+        match_type="none",
+        grade=grade,
+        subject=subject,
+        subject_title=_title_for(subject),
+        page=page,
+        confidence=confidence,
+        failure_reason=failure_reason,
+        min_page=min_page,
+        max_page=max_page,
+    )
+
+
+def _resolve_page_bounds(
+    grade: int | None,
+    subject: str | None,
+) -> tuple[int, int] | None:
+    if not subject:
+        return None
+    return get_printed_page_bounds(grade, subject)
 
 def _build_context_text(
     center: PageRecord,
@@ -159,7 +229,7 @@ def _build_lesson_span_response(
     span_label = " — ".join(label_bits) if label_bits else "کل درس"
     header = (
         f"توجه: متن کامل «{span_label}» در ادامه آمده است "
-        f"({primary.subject_title}، پایه {primary.grade}). "
+        f"({_book_title(primary)}، پایه {primary.grade}). "
         "برای درخواست‌هایی مثل کلمات سختِ کل درس یا بقیهٔ درس، از همهٔ این صفحات استفاده کن؛ "
         "از کودک نخواه صفحهٔ بعد را خودش باز کند."
     )
@@ -174,7 +244,7 @@ def _build_lesson_span_response(
         match_type="lesson_span",
         grade=primary.grade,
         subject=primary.subject,
-        subject_title=primary.subject_title or SUBJECT_TITLES.get(primary.subject, primary.subject),
+        subject_title=_book_title(primary),
         page=prefer_page or primary.printed_page,
         context_text="\n\n".join(blocks),
         text_usable=all_usable,
@@ -411,8 +481,7 @@ def _build_topic_search_response(
         match_type="topic_search",
         grade=primary.grade,
         subject=primary.subject,
-        subject_title=primary.subject_title
-        or SUBJECT_TITLES.get(primary.subject, primary.subject),
+        subject_title=_book_title(primary),
         page=primary.printed_page,
         context_text="\n\n".join(blocks),
         text_usable=all_usable,
@@ -432,16 +501,37 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
     lesson = parsed.lesson
     topic_display = topic_label(parsed.topic) if parsed.topic else parsed.topic_alias
 
-    # A page/lesson is only meaningful together with a specific book + grade.
-    if (page or lesson) and not (grade and subject):
-        return RetrieveResponse(
-            matched=False,
-            match_type="none",
+    # Page + book without grade: still catch impossible page numbers against
+    # the subject's printed-page range across grades (existing MinerU index).
+    if page and subject and not grade:
+        bounds = _resolve_page_bounds(None, subject)
+        if bounds is not None:
+            min_page, max_page = bounds
+            if page < min_page or page > max_page:
+                return _out_of_range_response(
+                    grade=None,
+                    subject=subject,
+                    page=page,
+                    min_page=min_page,
+                    max_page=max_page,
+                    confidence=parsed.confidence,
+                )
+        return _unmatched(
             grade=grade,
             subject=subject,
-            subject_title=SUBJECT_TITLES.get(subject) if subject else None,
             page=page,
             confidence=parsed.confidence,
+            failure_reason="need_grade_or_subject",
+        )
+
+    # A page/lesson is only meaningful together with a specific book + grade.
+    if (page or lesson) and not (grade and subject):
+        return _unmatched(
+            grade=grade,
+            subject=subject,
+            page=page,
+            confidence=parsed.confidence,
+            failure_reason="need_grade_or_subject",
         )
 
     # Whole-lesson span (کل درس / بقیه درس / کلمات سخت کل درس)
@@ -464,12 +554,45 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 topic=topic_display,
             )
 
-    # Exact page lookup
+    # Exact page lookup — prefer full lesson/chapter context when boundaries exist.
     if grade and subject and page:
-        # If user asked for a numbered lesson without "کل درس", still prefer
-        # the single page they named; whole-lesson is handled above.
+        bounds = _resolve_page_bounds(grade, subject)
+        if bounds is not None:
+            min_page, max_page = bounds
+            if page < min_page or page > max_page:
+                return _out_of_range_response(
+                    grade=grade,
+                    subject=subject,
+                    page=page,
+                    min_page=min_page,
+                    max_page=max_page,
+                    confidence=parsed.confidence,
+                )
+
         center = get_page(grade, subject, page)
         if center:
+            pages, lesson_no, start_page, end_page = get_lesson_pages(
+                grade,
+                subject,
+                page=page,
+            )
+            if (
+                len(pages) >= 2
+                and start_page is not None
+                and end_page is not None
+                and end_page > start_page
+            ):
+                return _build_lesson_span_response(
+                    pages,
+                    lesson_number=lesson_no,
+                    start_page=start_page,
+                    end_page=end_page,
+                    include_image=request.include_image,
+                    confidence=max(parsed.confidence, 0.9),
+                    prefer_page=page,
+                    topic=topic_display,
+                )
+
             neighbors = get_neighbor_pages(grade, subject, page, request.include_neighbors)
             needs_image = _needs_image(center, request.include_image)
             context_text, text_usable = _build_context_text(
@@ -480,7 +603,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 match_type="exact_page",
                 grade=grade,
                 subject=subject,
-                subject_title=center.subject_title or SUBJECT_TITLES.get(subject, subject),
+                subject_title=_book_title(center),
                 page=page,
                 context_text=context_text,
                 text_usable=text_usable,
@@ -490,15 +613,18 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             )
             _attach_image(response, center, needs_image=needs_image)
             return response
-        # Page requested but not in index → not matched (do not guess)
-        return RetrieveResponse(
-            matched=False,
-            match_type="none",
+
+        # Inside printed range but missing from index — do not guess content.
+        min_page = bounds[0] if bounds else None
+        max_page = bounds[1] if bounds else None
+        return _unmatched(
             grade=grade,
             subject=subject,
-            subject_title=SUBJECT_TITLES.get(subject, subject),
             page=page,
             confidence=parsed.confidence,
+            failure_reason="page_missing",
+            min_page=min_page,
+            max_page=max_page,
         )
 
     # Lesson / chapter lookup — return the full lesson span (all its pages).
@@ -534,7 +660,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 match_type="lesson",
                 grade=grade,
                 subject=subject,
-                subject_title=center.subject_title or SUBJECT_TITLES.get(subject, subject),
+                subject_title=_book_title(center),
                 page=center.printed_page,
                 context_text=context_text,
                 text_usable=text_usable,
@@ -544,13 +670,11 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             )
             _attach_image(response, center, needs_image=needs_image)
             return response
-        return RetrieveResponse(
-            matched=False,
-            match_type="none",
+        return _unmatched(
             grade=grade,
             subject=subject,
-            subject_title=SUBJECT_TITLES.get(subject, subject),
             confidence=parsed.confidence,
+            failure_reason="lesson_missing",
         )
 
     # Topic / named-content FTS search — expand to full lesson when possible.
@@ -581,4 +705,4 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                     search_label=parsed.search_text,
                 )
 
-    return RetrieveResponse(matched=False, match_type="none", confidence=0.0)
+    return _unmatched(confidence=0.0)

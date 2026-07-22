@@ -170,6 +170,35 @@ def get_page(grade: int, subject: str, printed_page: int) -> PageRecord | None:
     return _row_to_page(row)
 
 
+def get_printed_page_bounds(
+    grade: int | None,
+    subject: str,
+) -> tuple[int, int] | None:
+    """
+    Return (min_printed_page, max_printed_page) for a book in the existing index.
+
+    Uses only ``printed_page`` values already stored by the MinerU/indexer pipeline
+    (offset already applied at index time). Does not read raw PDF page counts.
+    When ``grade`` is None, aggregates across all grades for that subject.
+    """
+    if not subject or not index_exists():
+        return None
+    sql = """
+        SELECT MIN(printed_page) AS min_p, MAX(printed_page) AS max_p
+        FROM pages
+        WHERE subject = ? AND printed_page > 0
+    """
+    params: list[object] = [subject]
+    if grade is not None:
+        sql += " AND grade = ?"
+        params.append(grade)
+    with _connect() as conn:
+        row = conn.execute(sql, params).fetchone()
+    if not row or row["min_p"] is None or row["max_p"] is None:
+        return None
+    return int(row["min_p"]), int(row["max_p"])
+
+
 def get_neighbor_pages(
     grade: int,
     subject: str,

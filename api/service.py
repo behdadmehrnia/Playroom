@@ -214,7 +214,13 @@ async def _resolve_textbook_context(
             )
             await asyncio.sleep(1.2)
         if textbook_context and not textbook_context.matched:
-            if looks_like_textbook_page_query(textbook_query):
+            if (
+                textbook_context.page_out_of_range
+                or textbook_context.failure_reason == "page_out_of_range"
+            ):
+                textbook_context.page_out_of_range = True
+                textbook_context.page_query_failed = True
+            elif looks_like_textbook_page_query(textbook_query):
                 textbook_context.page_query_failed = True
             else:
                 textbook_context.need_info = True

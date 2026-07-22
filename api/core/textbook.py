@@ -701,6 +701,7 @@ def _textbook_context_from_payload(data: dict[str, Any]) -> TextbookContext:
     if raw_image:
         images = [part.strip() for part in raw_image.split("\n---YK_IMAGE---\n") if part.strip()]
 
+    failure_reason = str(data["failure_reason"]) if data.get("failure_reason") else None
     return TextbookContext(
         matched=True,
         match_type=str(data.get("match_type")) if data.get("match_type") else None,
@@ -713,6 +714,10 @@ def _textbook_context_from_payload(data: dict[str, Any]) -> TextbookContext:
         image_base64=images[0] if images else None,
         images_base64=images,
         text_usable=bool(data.get("text_usable", True)),
+        failure_reason=failure_reason,
+        min_page=int(data["min_page"]) if data.get("min_page") is not None else None,
+        max_page=int(data["max_page"]) if data.get("max_page") is not None else None,
+        page_out_of_range=failure_reason == "page_out_of_range",
     )
 
 
@@ -753,9 +758,26 @@ async def _fetch_textbook_context_local(
         except Exception as exc:  # noqa: BLE001 — graceful degrade
             return TextbookContext(matched=False, error=f"{type(exc).__name__}: {exc}")
 
+        payload = response.model_dump()
         if not response.matched:
-            return TextbookContext(matched=False)
-        return _textbook_context_from_payload(response.model_dump())
+            failure_reason = (
+                str(payload["failure_reason"]) if payload.get("failure_reason") else None
+            )
+            return TextbookContext(
+                matched=False,
+                match_type=str(payload["match_type"]) if payload.get("match_type") else None,
+                grade=int(payload["grade"]) if payload.get("grade") is not None else None,
+                subject=str(payload["subject"]) if payload.get("subject") else None,
+                subject_title=(
+                    str(payload["subject_title"]) if payload.get("subject_title") else None
+                ),
+                page=int(payload["page"]) if payload.get("page") is not None else None,
+                failure_reason=failure_reason,
+                min_page=int(payload["min_page"]) if payload.get("min_page") is not None else None,
+                max_page=int(payload["max_page"]) if payload.get("max_page") is not None else None,
+                page_out_of_range=failure_reason == "page_out_of_range",
+            )
+        return _textbook_context_from_payload(payload)
 
     return await asyncio.to_thread(_retrieve)
 
@@ -823,7 +845,21 @@ async def fetch_textbook_context(
     if error is not None:
         return TextbookContext(matched=False, error=error)
     if not data or not data.get("matched"):
-        return TextbookContext(matched=False)
+        failure_reason = str(data["failure_reason"]) if data and data.get("failure_reason") else None
+        return TextbookContext(
+            matched=False,
+            match_type=str(data["match_type"]) if data and data.get("match_type") else None,
+            grade=int(data["grade"]) if data and data.get("grade") is not None else None,
+            subject=str(data["subject"]) if data and data.get("subject") else None,
+            subject_title=(
+                str(data["subject_title"]) if data and data.get("subject_title") else None
+            ),
+            page=int(data["page"]) if data and data.get("page") is not None else None,
+            failure_reason=failure_reason,
+            min_page=int(data["min_page"]) if data and data.get("min_page") is not None else None,
+            max_page=int(data["max_page"]) if data and data.get("max_page") is not None else None,
+            page_out_of_range=failure_reason == "page_out_of_range",
+        )
 
     context = _textbook_context_from_payload(data)
 
@@ -866,4 +902,8 @@ def build_textbook_diag(
         error=context.error if context else None,
         need_info=bool(context and context.need_info),
         page_query_failed=bool(context and context.page_query_failed),
+        page_out_of_range=bool(context and context.page_out_of_range),
+        failure_reason=context.failure_reason if context else None,
+        min_page=context.min_page if context else None,
+        max_page=context.max_page if context else None,
     )

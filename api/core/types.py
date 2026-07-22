@@ -52,10 +52,13 @@ class TextbookContext(BaseModel):
     image_base64: str | None = None
     images_base64: list[str] = Field(default_factory=list)
     page_query_failed: bool = False
+    page_out_of_range: bool = False
     need_info: bool = False
     text_usable: bool = True
     error: str | None = None
-
+    failure_reason: str | None = None
+    min_page: int | None = None
+    max_page: int | None = None
 
 @dataclass(frozen=True)
 class TextbookScope:
@@ -132,6 +135,10 @@ class TextbookQueryDiag(BaseModel):
     error: str | None = None
     need_info: bool = False
     page_query_failed: bool = False
+    page_out_of_range: bool = False
+    failure_reason: str | None = None
+    min_page: int | None = None
+    max_page: int | None = None
 
 
 class WebSearchQueryDiag(BaseModel):

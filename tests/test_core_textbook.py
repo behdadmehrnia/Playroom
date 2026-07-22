@@ -151,3 +151,20 @@ def test_textbook_context_from_payload() -> None:
     assert ctx.matched is True
     assert ctx.page == 7
     assert ctx.context_text == "متن"
+
+
+def test_build_textbook_query_lesson_reference() -> None:
+    messages = [
+        ChatMessage(role="user", content="کلاس چهارم"),
+        ChatMessage(role="user", content="درس سوم ریاضی"),
+    ]
+    query = build_textbook_query(messages)
+    assert query
+    assert "درس سوم" in query
+    assert "ریاضی" in query
+    assert "چهارم" in query
+
+
+def test_looks_like_page_query_gifts_out_of_range_style() -> None:
+    assert looks_like_textbook_page_query("صفحه ۲۵۱ هدیه های آسمان") is True
+    assert looks_like_textbook_page_query("صفحه 251 هدایای آسمان پایه سوم") is True

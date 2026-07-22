@@ -46,6 +46,12 @@ This writes `data/index.sqlite`, `data/pages/*.png`, and caches MinerU JSON unde
 First run downloads OCR models (~several hundred MB). Expect a long wall-clock time for all books
 (8-page MinerU windows on CPU — often many hours for ~30 textbooks).
 
+**Deploy note:** Runtime features (printed-page bounds, lesson/chapter span context,
+canonical book titles like «هدیه های آسمان») read the **existing** `pages` /
+`printed_page` schema. Redeploying the API against a MinerU index already built
+on the server does **not** require re-parsing PDFs. `page_offset` remains an
+index-time mapping only; bounds are computed from indexed `printed_page` values.
+
 Monitor progress:
 
 ```powershell

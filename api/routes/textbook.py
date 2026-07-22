@@ -109,7 +109,10 @@ async def retrieve_textbook_endpoint(
         )
         fetched = True
         if context and not context.matched:
-            if looks_like_textbook_page_query(query):
+            if context.page_out_of_range or context.failure_reason == "page_out_of_range":
+                context.page_out_of_range = True
+                context.page_query_failed = True
+            elif looks_like_textbook_page_query(query):
                 context.page_query_failed = True
             else:
                 context.need_info = True

@@ -6,6 +6,13 @@ from pydantic import BaseModel, Field
 
 IncludeImageMode = Literal["never", "auto", "always"]
 MatchType = Literal["exact_page", "lesson", "lesson_span", "topic_search", "none"]
+FailureReason = Literal[
+    "page_out_of_range",
+    "page_missing",
+    "lesson_missing",
+    "need_grade_or_subject",
+    "none",
+]
 
 
 class RetrieveRequest(BaseModel):
@@ -32,6 +39,10 @@ class RetrieveResponse(BaseModel):
     detected_topic: str | None = None
     detected_topic_label: str | None = None
     text_usable: bool = True
+    # Structured miss reasons (optional; keeps older clients compatible).
+    failure_reason: FailureReason | None = None
+    min_page: int | None = None
+    max_page: int | None = None
 
 
 class HealthResponse(BaseModel):

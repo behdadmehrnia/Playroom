@@ -12,6 +12,8 @@ from pathlib import Path
 
 from api.textbook.app.config import DATA_DIR
 
+# Canonical display titles for agent responses. Prefer these over any title
+# baked into an older index.sqlite so deployed MinerU data need not be rebuilt.
 SUBJECT_TITLES: dict[str, str] = {
     "math": "ریاضی",
     "science": "علوم تجربی",
@@ -19,7 +21,7 @@ SUBJECT_TITLES: dict[str, str] = {
     "writing": "نگارش",
     "social": "مطالعات اجتماعی",
     "quran": "قرآن",
-    "gifts": "هدیه‌های آسمان",
+    "gifts": "هدیه های آسمان",
     "thinking": "تفکر و پژوهش",
     "technology": "کار و فناوری",
 }
@@ -46,13 +48,20 @@ BOOK_SUBJECT_SYNONYMS: dict[str, str] = {
     "quran": "quran",
     "قرآن": "quran",
     "قران": "quran",
-    # gifts / hadiye
+    # gifts / hadiye — include common misspellings; responses always use SUBJECT_TITLES
     "gifts": "gifts",
     "hadiye": "gifts",
     "هدیه": "gifts",
+    "هدیه ها": "gifts",
+    "هدیه‌ها": "gifts",
+    "هدیه های": "gifts",
+    "هدیه‌های": "gifts",
     "هدیه های آسمان": "gifts",
     "هدیه‌های آسمان": "gifts",
-    "هدیه‌های": "gifts",
+    "هدیههای آسمان": "gifts",
+    "هدایای آسمان": "gifts",
+    "هدایایآسمان": "gifts",
+    "هدایا": "gifts",
     # grade 6 extras
     "thinking": "thinking",
     "تفکر": "thinking",
@@ -63,6 +72,15 @@ BOOK_SUBJECT_SYNONYMS: dict[str, str] = {
     "فناوری": "technology",
     "کارفناوری": "technology",
 }
+
+
+def canonical_subject_title(subject: str | None, fallback: str | None = None) -> str | None:
+    """Official book title for prompts/UI; never return misspelled aliases."""
+    if subject and subject in SUBJECT_TITLES:
+        return SUBJECT_TITLES[subject]
+    if fallback and fallback.strip():
+        return fallback.strip()
+    return subject
 
 # Default topic → parent subject (overridable via data/subject_topics.json)
 DEFAULT_TOPIC_ALIASES: dict[str, str] = {

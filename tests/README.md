@@ -180,9 +180,16 @@ pytest tests/ -q
 | # | پرامپت | توضیح | انتظار | unittest |
 |---|--------|--------|--------|----------|
 | 36 | «صفحه ۱۲ ریاضی پایه پنجم» | ارجاع کامل | `build_textbook_query` غیرخالی؛ `looks_like_page_query=true` | `test_build_textbook_query_page_reference` |
-| 39 | «صفحه ۷» (بدون پایه/کتاب) | کوئری ناقص | کوئری خالی یا `need_info`؛ درخاست پایه/کتاب | `test_build_textbook_query_empty_without_reference` |
+| 39 | «صفحه ۷» (بدون پایه/کتاب) | کوئری ناقص | کوئری خالی یا `need_info`؛ درخواست پایه/کتاب | `test_build_textbook_query_empty_without_reference` |
 | 83 | «کتاب خوندن دوست دارم» | کلمه کتاب بدون صفحه | کمک درسی به نظر برسد ولی کوئری صفحه ساخته **نشود** | `test_looks_like_textbook_help_request` |
 | 38 | پرسونا `creative` + «صفحه ۷ کتاب فارسی» | gate پرسونا | retrieve کتاب **نشود** (فقط teacher/homework) | `TEXTBOOK_PERSONAS` |
+| 89 | «صفحه ۲۵۱ هدیه های آسمان پایه سوم» | صفحه خارج از محدوده | `failure_reason=page_out_of_range`؛ عنوان رسمی «هدیه های آسمان»؛ پاسخ: این کتاب آن صفحه را ندارد — **نه** «یک خط از همان صفحه بنویس» | `test_page_out_of_range_for_gifts` |
+| 90 | «صفحه ۲۵۱ هدیه های آسمان» (بدون پایه) | خارج از محدوده حتی بدون پایه | همان `page_out_of_range` با max صفحهٔ چاپی subject | `test_page_out_of_range_without_grade_uses_subject_bounds` |
+| 91 | «صفحه ۵۵ هدیه های آسمان پایه سوم» وقتی صفحه در ایندکس نیست ولی در محدوده است | page_missing | unmatched با `page_missing` (نه out_of_range) | `test_page_missing_inside_range_is_not_out_of_range` |
+| 92 | «صفحه ۱۰ هدایای آسمان پایه سوم» | غلط‌نویسی نام کتاب | resolve به `gifts`؛ در پاسخ/کانتکست عنوان = **هدیه های آسمان** (نه هدایای) | `test_parser_resolves_gifts_aliases`, `test_canonical_gifts_title_and_misspelling_synonyms` |
+| 93 | «درس سوم ریاضی پایه چهارم» | ارجاع درس/فصل | `match_type=lesson_span` و چند صفحه از همان درس در کانتکست | `test_lesson_number_returns_full_span`, `test_build_textbook_query_lesson_reference` |
+| 94 | «صفحه ۳۳ فارسی پایه چهارم» وقتی مرز درس مشخص است | گسترش به کل درس | کانتکست چندصفحه‌ای درس (نه فقط ±همسایه) | `test_exact_page_expands_to_lesson_span` |
+| 95 | بافت: کلاس چهارم → فارسی → صفحه ۳۳ → بریم صفحه بعد → چه داستانیه؟ | ناوبری نسبی | روی صفحه ۳۴ بماند | `test_build_textbook_query_followup_after_next_page` |
 
 **API — `/v1/textbook/query`:**
 ```json

@@ -14,6 +14,7 @@ from .constants import (
     TEXTBOOK_IMAGE_ONLY_INSTRUCTION,
     TEXTBOOK_LOOKUP_FAILED_INSTRUCTION,
     TEXTBOOK_NEED_INFO_INSTRUCTION,
+    TEXTBOOK_PAGE_OUT_OF_RANGE_INSTRUCTION,
     TEXTBOOK_UNREADABLE_INSTRUCTION,
     WEB_SEARCH_CONTEXT_HEADER,
     WEB_SEARCH_CONTEXT_INSTRUCTION,
@@ -36,6 +37,28 @@ from .types import (
     TextbookContext,
     WebSearchContext,
 )
+
+
+def format_page_out_of_range_instruction(context: TextbookContext) -> str:
+    """Inject concrete book/page bounds into the out-of-range system note."""
+    title = context.subject_title or "این کتاب"
+    bits = [
+        TEXTBOOK_PAGE_OUT_OF_RANGE_INSTRUCTION,
+        f"کتاب: {title}",
+    ]
+    if context.page is not None:
+        bits.append(f"صفحهٔ درخواستی: {context.page}")
+    if context.max_page is not None:
+        range_bits = f"حداکثر صفحهٔ چاپی در پایگاه: {context.max_page}"
+        if context.min_page is not None and context.min_page > 1:
+            range_bits = (
+                f"محدودهٔ صفحات چاپی در پایگاه: {context.min_page} تا {context.max_page}"
+            )
+        bits.append(range_bits)
+    if context.grade is not None:
+        bits.append(f"پایه: {context.grade}")
+    return "\n".join(bits)
+
 
 def build_system_prompt(
     persona: PersonaId,
@@ -69,6 +92,11 @@ def build_system_prompt(
         if meta:
             header = f"{header}\n({meta})"
         sections.append(f"{header}\n{textbook_context.context_text}")
+    elif textbook_context and (
+        textbook_context.page_out_of_range
+        or textbook_context.failure_reason == "page_out_of_range"
+    ):
+        sections.append(format_page_out_of_range_instruction(textbook_context))
     elif textbook_context and textbook_context.page_query_failed:
         sections.append(TEXTBOOK_LOOKUP_FAILED_INSTRUCTION)
     elif textbook_context and textbook_context.need_info:
@@ -244,7 +272,9 @@ async def reflect_on_response(
             "(مگر اینکه ناامن یا نامناسب باشد)."
         )
     elif textbook_context and (
-        textbook_context.page_query_failed or textbook_context.need_info
+        textbook_context.page_query_failed
+        or textbook_context.page_out_of_range
+        or textbook_context.need_info
     ):
         textbook_note = (
             "\n\nتوجه بازبین: نویسنده متن صفحه را نداشته؛ اگر محتوای دقیق صفحه را ساخته، REVISE."
