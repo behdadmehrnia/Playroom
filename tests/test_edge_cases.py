@@ -73,7 +73,7 @@ def test_extract_subject_prefers_full_gifts_phrase() -> None:
 
 
 def test_resolve_scope_keeps_math_chapter_across_grade_followup() -> None:
-    """«فصل سوم ریاضی» سپس «پایه ششم» → structured scope, no brittle NL query."""
+    """«فصل سوم ریاضی» سپس «پایه ششم» → structured scope; wait for page (no lesson retrieve)."""
     messages = [
         ChatMessage(
             role="user",
@@ -86,10 +86,11 @@ def test_resolve_scope_keeps_math_chapter_across_grade_followup() -> None:
     assert scope.subject_id == "math"
     assert scope.lesson == 3
     assert scope.grade == 6
+    # Chapter is enough to retrieve; page remains the preferred locator.
     assert scope.can_retrieve() is True
+    assert scope.has_lesson_lookup() is True
     assert "ریاضی" in scope.debug_label()
     assert "3" in scope.debug_label()
-    # Must not depend on a re-parsed string like «فصل سوم کلاس ششم» (subject lost).
     assert scope.compose_query()
     assert "ریاضی" in scope.compose_query()
 
@@ -101,6 +102,7 @@ def test_resolve_scope_page_words_compound() -> None:
     ]
     scope = resolve_textbook_scope(messages)
     assert scope.page == 21
+    assert scope.can_retrieve() is True
     query = build_textbook_query(messages)
     assert "21" in query or "۲۱" in query
     assert "20" not in query.replace("21", "")
@@ -131,9 +133,11 @@ def test_lesson_missing_system_prompt_is_specific() -> None:
         page_query_failed=True,
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "درس/فصل" in prompt or "درس" in prompt
+    assert "درس" in prompt or "فصل" in prompt
     assert "ریاضی" in prompt
     assert "از خودت نساز" in prompt or "حدس نزن" in prompt
+    assert "عکس" in prompt
+    assert "صفحه" in prompt
 
 
 def test_need_info_asks_only_missing_grade_when_chapter_known() -> None:
@@ -150,8 +154,51 @@ def test_need_info_asks_only_missing_grade_when_chapter_known() -> None:
     assert "ریاضی" in prompt
     assert "درس/فصل: 3" in prompt or "فصل: 3" in prompt
     assert "هنوز لازم است بپرسی" in prompt
-    # Must not insist on page when chapter is already known.
-    assert "شمارهٔ صفحه یا شمارهٔ درس/فصل؟" not in prompt
+    # Chapter already known — only ask for missing grade, not page/chapter again.
+    assert "شمارهٔ صفحه؟ (ترجیح) یا شمارهٔ فصل/درس؟" not in prompt
+
+
+def test_need_info_prefers_page_but_accepts_chapter() -> None:
+    ctx = TextbookContext(
+        matched=False,
+        need_info=True,
+        subject="math",
+        subject_title="ریاضی",
+        grade=6,
+    )
+    prompt = build_system_prompt("homework", textbook_context=ctx)
+    assert "هنوز لازم است بپرسی: شمارهٔ صفحه؟ (ترجیح) یا شمارهٔ فصل/درس؟" in prompt
+    assert "هنوز لازم است بپرسی: کلاس چندمی؟" not in prompt
+    assert "هنوز لازم است بپرسی: کدام کتاب" not in prompt
+
+
+def test_need_info_does_not_reask_locator_when_lesson_known() -> None:
+    ctx = TextbookContext(
+        matched=False,
+        need_info=True,
+        subject="math",
+        subject_title="ریاضی",
+        grade=6,
+        lesson=3,
+    )
+    prompt = build_system_prompt("homework", textbook_context=ctx)
+    assert "درس/فصل: 3" in prompt or "فصل: 3" in prompt
+    assert "شمارهٔ صفحه؟ (ترجیح) یا شمارهٔ فصل/درس؟" not in prompt
+
+
+def test_lookup_failed_asks_for_photo_or_question_text() -> None:
+    ctx = TextbookContext(
+        matched=False,
+        page_query_failed=True,
+        subject="math",
+        subject_title="ریاضی",
+        grade=6,
+        page=42,
+    )
+    prompt = build_system_prompt("homework", textbook_context=ctx)
+    assert "پیدا" in prompt
+    assert "عکس" in prompt
+    assert "سوال" in prompt
 
 
 def test_math_tool_rejects_dunder_and_handles_div_zero() -> None:

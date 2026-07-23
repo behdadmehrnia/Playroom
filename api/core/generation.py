@@ -62,7 +62,7 @@ def format_page_out_of_range_instruction(context: TextbookContext) -> str:
 
 
 def format_need_info_instruction(context: TextbookContext) -> str:
-    """Ask only for slots still missing (e.g. grade when chapter+book known)."""
+    """Ask only for slots still missing — prefer page, accept chapter/lesson."""
     known: list[str] = []
     missing: list[str] = []
     if context.subject_title or context.subject:
@@ -75,11 +75,13 @@ def format_need_info_instruction(context: TextbookContext) -> str:
         missing.append("کلاس چندمی؟")
     if context.lesson is not None:
         known.append(f"درس/فصل: {context.lesson}")
-    elif context.page is not None:
+    if context.page is not None:
         known.append(f"صفحه: {context.page}")
-    else:
-        # Page is optional when a lesson/chapter number is already known.
-        missing.append("شمارهٔ صفحه یا شمارهٔ درس/فصل؟")
+    elif context.lesson is None and (
+        context.subject_title or context.subject or context.grade is not None
+    ):
+        # Prefer page (precise); chapter/lesson is an acceptable alternative.
+        missing.append("شمارهٔ صفحه؟ (ترجیح) یا شمارهٔ فصل/درس؟")
 
     bits = [TEXTBOOK_NEED_INFO_INSTRUCTION]
     if known:

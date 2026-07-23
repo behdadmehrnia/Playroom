@@ -88,7 +88,11 @@ class TextbookScope:
         )
 
     def can_retrieve(self) -> bool:
-        """True when structured fields (or a topic query) are enough to hit the index."""
+        """True when structured fields (or a topic query) can hit the index.
+
+        Page lookup is preferred (most precise). Lesson/chapter is also enough
+        to attempt retrieve when the child gave a chapter instead of a page.
+        """
         if self.has_page_lookup() or self.has_lesson_lookup():
             return True
         if self.topic_query and self.topic_query.strip():

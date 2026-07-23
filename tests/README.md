@@ -193,14 +193,16 @@ pytest tests/ -q
 | 96 | «صفحه ۱۰ هدیه های آسمان پایه سوم» (query builder) | نام کامل کتاب در کوئری | کوئری شامل «هدیه های آسمان» نه فقط «هدیه» | `test_compose_query_keeps_full_gifts_title` |
 | 97 | «فصل سوم ریاضی» وقتی OCR به شکل «فصل :3» است | پارس درس/فصل | الگوی درس با دونقطه/خط تیره هم match شود | `test_lesson_patterns_accept_ocr_punctuation` |
 | 98 | صفحه ۱ ریاضی + همسایه | صفحه ≤۰ وارد کانتکست نشود | همسایه‌های غیرمثبت skip | `test_neighbor_pages_skip_nonpositive` |
-| 99 | درس ناموجود در ایندکس | `lesson_missing` | پرامپت مخصوص: محتوا نساز؛ صفحه یا موضوع بپرس | `test_lesson_missing_system_prompt_is_specific` |
-| 105 | «فصل سوم ریاضی» → «پایه ششم» | scope ساخت‌یافته | subject=math، lesson=3، grade=6 بدون کوئری NL خراب | `test_resolve_scope_keeps_math_chapter_across_grade_followup` |
+| 99 | درس ناموجود در ایندکس | `lesson_missing` | پرامپت: صفحه بخواه؛ در صورت نیاز عکس/متن سوال | `test_lesson_missing_system_prompt_is_specific` |
+| 105 | «فصل سوم ریاضی» → «پایه ششم» | scope ساخت‌یافته | subject=math، lesson=3، grade=6؛ `can_retrieve=True` (صفحه ترجیح، فصل هم کافی) | `test_resolve_scope_keeps_math_chapter_across_grade_followup` |
 | 100 | «صفحه بیست و یکم فارسی پایه ششم» | عدد واژه‌ای مرکب | صفحه = **۲۱** نه ۲۰ | `test_resolve_scope_page_words_compound` |
 
 | 101 | «صفحه ۱۰ هدایای آسمان پایه سوم» | غلط‌نویسی در مسیر چت | کوئری با عنوان کامل gifts | `test_build_textbook_query_preserves_gifts_misspelling` |
 | 102 | وسط بازی کلمات → «صفحه ۱۲ ریاضی پایه پنجم» | sticky gamer | نباید روی gamer بماند؛ intent به homework/teacher | `test_sticky_gamer_does_not_block_textbook_page_request`, `test_resolve_persona_breaks_word_chain_for_textbook` |
 | 103 | homework + «سوال بعد» | ادامه فعالیت | نباید `need_info` کتاب تزریق شود | `test_help_marker_ignores_activity_continuation` |
 | 104 | `failure_reason=need_grade_or_subject` | نگاشت شکست | NEED_INFO نه «یک خط از تمرین بنویس» | `test_need_grade_or_subject_maps_to_need_info_prompt` |
+| 106 | پایه+کتاب بدون صفحه/فصل | need_info | صفحه (ترجیح) یا فصل/درس | `test_need_info_prefers_page_but_accepts_chapter` |
+| 107 | صفحه پیدا نشد | lookup failed | بگو پیدا نشد؛ عکس صفحه یا متن سوال بخواه | `test_lookup_failed_asks_for_photo_or_question_text` |
 
 **API — `/v1/textbook/query`:**
 ```json
