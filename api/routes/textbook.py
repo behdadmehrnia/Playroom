@@ -109,8 +109,13 @@ async def retrieve_textbook_endpoint(
         )
         fetched = True
         if context and not context.matched:
-            if context.page_out_of_range or context.failure_reason == "page_out_of_range":
+            reason = context.failure_reason
+            if context.page_out_of_range or reason == "page_out_of_range":
                 context.page_out_of_range = True
+                context.page_query_failed = True
+            elif reason == "need_grade_or_subject":
+                context.need_info = True
+            elif reason == "lesson_missing":
                 context.page_query_failed = True
             elif looks_like_textbook_page_query(query):
                 context.page_query_failed = True

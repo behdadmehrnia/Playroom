@@ -108,6 +108,7 @@ from .textbook import (
     looks_like_textbook_followup,
     looks_like_textbook_help_request,
     looks_like_textbook_page_query,
+    looks_like_textbook_session_switch,
     resolve_textbook_scope,
 )
 from .types import (
@@ -216,6 +217,7 @@ __all__ = [
     "looks_like_textbook_followup",
     "looks_like_textbook_help_request",
     "looks_like_textbook_page_query",
+    "looks_like_textbook_session_switch",
     "looks_like_web_search_request",
     "normalize_math_expression",
     "normalize_messages",

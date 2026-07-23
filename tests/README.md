@@ -190,6 +190,15 @@ pytest tests/ -q
 | 93 | «درس سوم ریاضی پایه چهارم» | ارجاع درس/فصل | `match_type=lesson_span` و چند صفحه از همان درس در کانتکست | `test_lesson_number_returns_full_span`, `test_build_textbook_query_lesson_reference` |
 | 94 | «صفحه ۳۳ فارسی پایه چهارم» وقتی مرز درس مشخص است | گسترش به کل درس | کانتکست چندصفحه‌ای درس (نه فقط ±همسایه) | `test_exact_page_expands_to_lesson_span` |
 | 95 | بافت: کلاس چهارم → فارسی → صفحه ۳۳ → بریم صفحه بعد → چه داستانیه؟ | ناوبری نسبی | روی صفحه ۳۴ بماند | `test_build_textbook_query_followup_after_next_page` |
+| 96 | «صفحه ۱۰ هدیه های آسمان پایه سوم» (query builder) | نام کامل کتاب در کوئری | کوئری شامل «هدیه های آسمان» نه فقط «هدیه» | `test_compose_query_keeps_full_gifts_title` |
+| 97 | «فصل سوم ریاضی» وقتی OCR به شکل «فصل :3» است | پارس درس/فصل | الگوی درس با دونقطه/خط تیره هم match شود | `test_lesson_patterns_accept_ocr_punctuation` |
+| 98 | صفحه ۱ ریاضی + همسایه | صفحه ≤۰ وارد کانتکست نشود | همسایه‌های غیرمثبت skip | `test_neighbor_pages_skip_nonpositive` |
+| 99 | درس ناموجود در ایندکس | `lesson_missing` | پرامپت مخصوص: محتوا نساز؛ صفحه یا موضوع بپرس | `test_lesson_missing_system_prompt_is_specific` |
+| 100 | «صفحه بیست و یکم فارسی پایه ششم» | عدد واژه‌ای مرکب | صفحه = **۲۱** نه ۲۰ | `test_resolve_scope_page_words_compound` |
+| 101 | «صفحه ۱۰ هدایای آسمان پایه سوم» | غلط‌نویسی در مسیر چت | کوئری با عنوان کامل gifts | `test_build_textbook_query_preserves_gifts_misspelling` |
+| 102 | وسط بازی کلمات → «صفحه ۱۲ ریاضی پایه پنجم» | sticky gamer | نباید روی gamer بماند؛ intent به homework/teacher | `test_sticky_gamer_does_not_block_textbook_page_request`, `test_resolve_persona_breaks_word_chain_for_textbook` |
+| 103 | homework + «سوال بعد» | ادامه فعالیت | نباید `need_info` کتاب تزریق شود | `test_help_marker_ignores_activity_continuation` |
+| 104 | `failure_reason=need_grade_or_subject` | نگاشت شکست | NEED_INFO نه «یک خط از تمرین بنویس» | `test_need_grade_or_subject_maps_to_need_info_prompt` |
 
 **API — `/v1/textbook/query`:**
 ```json
@@ -200,7 +209,26 @@ pytest tests/ -q
 }
 ```
 
-**در چat (teacher/homework):** اگر صفحه پیدا نشد، **نباید** متن کتاب از خودش ساخته شود (ضد هالوسینیشن).
+**در چات (teacher/homework):** اگر صفحه پیدا نشد، **نباید** متن کتاب از خودش ساخته شود (ضد هالوسینیشن).
+
+---
+
+## ۷٫۱ ریسک‌های edge-case (ممیزی سیستم)
+
+مواردی که شبیه باگ «صفحه ۲۵۱ / اسم غلط کتاب / درس ریاضی» هستند و باید در چت دستی هم چک شوند:
+
+| ناحیه | ریسک | علائم در چت | پوشش تست |
+|--------|------|-------------|----------|
+| کتاب | صفحه خارج از محدوده | نباید بگوید «یک خط از همان صفحه بنویس» | TC-89/90 |
+| کتاب | غلط‌نویسی نام کتاب | نباید «هدایای آسمان» را تکرار کند | TC-92/96 |
+| کتاب | درس/فصل با OCR خراب (`فصل :3`) | باید فصل را پیدا کند یا صادقانه page بخواهد | TC-97/99 |
+| کتاب | صفحهٔ جلد/فهرست با شماره ≤۰ | نباید به‌عنوان صفحهٔ درس به مدل برسد | TC-98 |
+| کتاب | ناوبری «صفحه بعد» بعد از آخر کتاب | out_of_range یا توقف مهربان | TC-89 + relative |
+| پرسونا | جواب زنجیره‌ای «داستان» وسط بازی | نباید به storyteller بپرد | TC-19 |
+| ریاضی | تقسیم بر صفر / عبارت ناامن | پیام دوستانه؛ بدون eval خطرناک | `test_math_tool_*`, `test_edge_cases` |
+| وب | داستان خیالی | نباید سرچ شود | TC داستان |
+| وب | بدون نتیجه | نباید بگوید «این بازی وجود ندارد» | `WEB_SEARCH_NO_RESULTS_INSTRUCTION` |
+| تولید | lookup شکست | ضد هالوسینیشن صفحه/درس | TC-89 + generation |
 
 ---
 
@@ -209,8 +237,8 @@ pytest tests/ -q
 | # | پرسونا | پرامپت | توضیح | انتظار | unittest |
 |---|--------|--------|--------|--------|----------|
 | 48 | `gamer` | «ماینکرفت چطور الماس پیدا کنم؟» | سوال واقعی بازی | `looks_like_search_request=true` | `test_web_search_query_endpoint` |
-| 51 | `teacher` | «ماینکرفت چطور الماس پیدا کنم؟» | gate پرسونا | جستجو **فعال نشود** | `test_looks_like_web_search_respects_persona_gate` |
-| — | `gamer` | «داستان یه ربات فضایی بگو» | داستان خیالی | جستجو **نیاز نیست** | `test_looks_like_web_search_request` |
+| 51 | `teacher` | «بازی minecraft» | gate heuristic بازی | جستجو از مسیر game-talk **فعال نشود** | `test_looks_like_web_search_respects_persona_gate` |
+| — | `gamer` | «داستان یه ربات فضایی بگو» | داستان خیالی | جستجو **نیاز نیست** | `test_looks_like_web_search_request`, `test_web_search_skips_pure_story_request` |
 
 **API — `/v1/web-search/query` با persona=gamer:**
 ```json

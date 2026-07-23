@@ -211,7 +211,12 @@ def get_neighbor_pages(
     for offset in range(-radius, radius + 1):
         if offset == 0:
             continue
-        neighbor = get_page(grade, subject, center_page + offset)
+        neighbor_page = center_page + offset
+        # Front-matter / offset leftovers (printed_page <= 0) must not leak into
+        # LLM context as if they were real student pages.
+        if neighbor_page <= 0:
+            continue
+        neighbor = get_page(grade, subject, neighbor_page)
         if neighbor:
             pages.append(neighbor)
     return sorted(pages, key=lambda p: p.printed_page)
@@ -248,22 +253,25 @@ _LESSON_TOC_THRESHOLD = 3
 def _lesson_target_patterns(lesson_number: int):
     """Patterns that mark the start of a specific lesson/chapter.
 
-    PDF text extraction for RTL books often yields «3 فصل» instead of «فصل 3»,
-    so we accept both orders and both digit/ordinal forms.
+    PDF/OCR for RTL books often yields «3 فصل», «فصل :3», or «فصل-۳» instead of
+    a clean «فصل 3», so we accept both orders, optional punctuation, and
+    digit/ordinal forms.
     """
     import re as _re
 
     ordinal = _LESSON_ORDINALS.get(lesson_number)
     digit = str(lesson_number)
     persian_digit = digit.translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+    # Optional OCR junk between unit word and number (colon, dash, Persian colon).
+    sep = r"[\s:：\-–—٫.]{0,3}"
     patterns: list = []
     for unit in _LESSON_UNIT_WORDS:
         if ordinal:
-            patterns.append(_re.compile(rf"{unit}\s*{ordinal}"))
-            patterns.append(_re.compile(rf"{ordinal}\s*{unit}"))
+            patterns.append(_re.compile(rf"{unit}{sep}{ordinal}"))
+            patterns.append(_re.compile(rf"{ordinal}{sep}{unit}"))
         for num in {digit, persian_digit}:
-            patterns.append(_re.compile(rf"{unit}\s*{num}\b"))
-            patterns.append(_re.compile(rf"(?<!\d){num}\s*{unit}"))
+            patterns.append(_re.compile(rf"{unit}{sep}{num}\b"))
+            patterns.append(_re.compile(rf"(?<!\d){num}{sep}{unit}"))
     return patterns
 
 

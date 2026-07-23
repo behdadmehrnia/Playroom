@@ -220,6 +220,12 @@ def _should_keep_current_persona(
         return True
     if _looks_like_hard_switch_request(text):
         return False
+    # Concrete textbook page/lesson asks must leave sticky gamer/creative/etc.
+    # so teacher/homework can retrieve the real page (avoid invented homework).
+    from .textbook import looks_like_textbook_session_switch
+
+    if looks_like_textbook_session_switch(text) and persona not in {"teacher", "homework"}:
+        return False
     if _is_activity_continuation(text, persona):
         return True
     # Word-chain answers like «داستان» must stay on gamer.
@@ -566,11 +572,15 @@ async def resolve_active_persona(
     if manual_persona:
         return PersonaResolution(persona=manual_persona)
 
-    # Hard stay during word-chain even if sticky metadata/history was lost.
+    # Hard stay during word-chain even if sticky metadata/history was lost —
+    # unless the child clearly asks for a textbook page/lesson.
+    from .textbook import looks_like_textbook_session_switch
+
     if (
         latest_user_msg
         and _looks_like_word_chain_awaiting_answer(messages)
         and not _looks_like_hard_switch_request(latest_user_msg)
+        and not looks_like_textbook_session_switch(latest_user_msg)
     ):
         return PersonaResolution(persona="gamer")
 
@@ -605,6 +615,15 @@ async def resolve_active_persona(
         or _last_assistant_is_welcome(messages)
     ):
         return PersonaResolution(persona=menu_pick)
+
+    # Concrete textbook asks leave sticky play modes immediately (no confirmation),
+    # so the child gets real page lookup instead of invented homework.
+    if (
+        latest_user_msg
+        and looks_like_textbook_session_switch(latest_user_msg)
+        and current_persona not in {"teacher", "homework"}
+    ):
+        return PersonaResolution(persona="homework")
 
     # Answer a pending switch confirmation from the previous assistant turn.
     pending = _extract_pending_switch_from_history(messages)

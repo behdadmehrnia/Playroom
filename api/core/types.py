@@ -82,8 +82,23 @@ class TextbookScope:
             parts.append(user_message.strip())
         if self.page is not None:
             parts.append(f"صفحه {self.page}")
-        if self.subject:
-            parts.append(self.subject)
+        # Prefer canonical book labels (e.g. هدیه های آسمان, not bare هدیه).
+        _labels = {
+            "math": "ریاضی",
+            "science": "علوم",
+            "persian": "فارسی",
+            "writing": "نگارش",
+            "social": "مطالعات اجتماعی",
+            "quran": "قرآن",
+            "gifts": "هدیه های آسمان",
+            "thinking": "تفکر",
+            "technology": "فناوری",
+        }
+        subject_label = (
+            _labels.get(self.subject_id) if self.subject_id else None
+        ) or self.subject
+        if subject_label:
+            parts.append(subject_label)
         if self.grade is not None:
             parts.append(_GRADE_INT_LABELS.get(self.grade, f"پایه {self.grade}"))
         return " ".join(parts).strip()

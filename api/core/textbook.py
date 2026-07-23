@@ -92,6 +92,19 @@ _TEXTBOOK_SUBJECT_KEYWORDS: tuple[str, ...] = (
 # Real subjects (excludes the generic word «کتاب») for carrying forward.
 _TEXTBOOK_SUBJECT_TOKENS: tuple[str, ...] = _TEXTBOOK_SUBJECT_KEYWORDS[:-1]
 
+# Longer book-name phrases preferred over short tokens like «هدیه» alone.
+_TEXTBOOK_SUBJECT_PHRASES: tuple[str, ...] = (
+    "هدیه های آسمان",
+    "هدیه‌های آسمان",
+    "هدایای آسمان",
+    "هدیههای آسمان",
+    "مطالعات اجتماعی",
+    "علوم تجربی",
+    "تفکر و پژوهش",
+    "کار و فناوری",
+    "املا",
+) + _TEXTBOOK_SUBJECT_TOKENS
+
 # Persian ordinal / digit → grade int (grades 3–6 in the index).
 _GRADE_TOKEN_TO_INT: dict[str, int] = {
     "سوم": 3,
@@ -125,8 +138,28 @@ _SUBJECT_KEYWORD_TO_ID: dict[str, str] = {
     "اجتماعی": "social",
     "قرآن": "quran",
     "هدیه": "gifts",
+    "هدیه های آسمان": "gifts",
+    "هدیه‌های آسمان": "gifts",
+    "هدایای آسمان": "gifts",
+    "هدیههای آسمان": "gifts",
+    "املا": "persian",
     "تفکر": "thinking",
+    "تفکر و پژوهش": "thinking",
     "فناوری": "technology",
+    "کار و فناوری": "technology",
+}
+
+# Prefer these display forms when composing a retrieval query.
+_SUBJECT_ID_TO_QUERY_LABEL: dict[str, str] = {
+    "math": "ریاضی",
+    "science": "علوم",
+    "persian": "فارسی",
+    "writing": "نگارش",
+    "social": "مطالعات اجتماعی",
+    "quran": "قرآن",
+    "gifts": "هدیه های آسمان",
+    "thinking": "تفکر",
+    "technology": "فناوری",
 }
 
 # Follow-up questions that should re-use the current page scope.
@@ -193,6 +226,27 @@ def looks_like_textbook_page_query(text: str) -> bool:
     if has_lesson:
         return True
     return has_page and (has_grade or has_subject)
+
+
+def looks_like_textbook_session_switch(text: str) -> bool:
+    """Strong schoolbook cue — safe to leave sticky gamer/creative mid-session.
+
+    Unlike ``looks_like_textbook_page_query``, bare words like «داستان» (word-chain
+    answers) must NOT match.
+    """
+    if not text.strip():
+        return False
+    if _relative_page_delta(text) != 0:
+        return True
+    if _textbook_wants_whole_lesson(text):
+        return True
+    has_page_ref = _textbook_has_page_reference(text)
+    has_lesson = _textbook_has_lesson(text)
+    has_grade = _textbook_has_grade(text)
+    has_subject = _extract_subject_token(text) is not None
+    if (has_page_ref or has_lesson) and (has_grade or has_subject):
+        return True
+    return False
 
 
 # Words that signal the child is talking about their schoolbook / homework
@@ -352,29 +406,53 @@ def _extract_grade_token(text: str) -> str | None:
 def _extract_subject_token(text: str) -> str | None:
     """Pick the subject the user most likely means right now.
 
+    Prefers the longest phrase (e.g. «هدیه های آسمان» over bare «هدیه»).
     When several subjects appear (e.g. «ریاضی تموم شد بریم سراغ فارسی صفحه ۴۱»),
     prefer the one closest to the page marker; otherwise the last mentioned.
     """
-    hits: list[tuple[int, str]] = []
-    for keyword in _TEXTBOOK_SUBJECT_TOKENS:
+    hits: list[tuple[int, int, str]] = []  # start, length, phrase
+    for phrase in _TEXTBOOK_SUBJECT_PHRASES:
         start = 0
         while True:
-            idx = text.find(keyword, start)
+            idx = text.find(phrase, start)
             if idx < 0:
                 break
-            hits.append((idx, keyword))
-            start = idx + len(keyword)
+            hits.append((idx, len(phrase), phrase))
+            start = idx + len(phrase)
     if not hits:
         return None
 
     page_match = _TEXTBOOK_PAGE_MARKER_RE.search(text)
     if page_match:
         page_pos = page_match.start()
-        hits.sort(key=lambda item: (abs(item[0] - page_pos), -item[0]))
-        return hits[0][1]
+        hits.sort(key=lambda item: (abs(item[0] - page_pos), -item[1], -item[0]))
+        return hits[0][2]
 
-    hits.sort(key=lambda item: item[0])
-    return hits[-1][1]
+    # Prefer longer phrases, then later mentions.
+    hits.sort(key=lambda item: (item[0], item[1]))
+    best = hits[0]
+    for hit in hits[1:]:
+        # Later mention wins unless an earlier one is a longer containing phrase.
+        if hit[0] >= best[0]:
+            if hit[1] >= best[1] or hit[0] > best[0] + best[1]:
+                best = hit
+    # Among overlapping hits at the winning span, keep the longest.
+    span_start = best[0]
+    candidates = [h for h in hits if h[0] <= span_start < h[0] + h[1] or span_start <= h[0] < best[0] + best[1]]
+    if not candidates:
+        candidates = [best]
+    candidates.sort(key=lambda item: (item[1], item[0]), reverse=True)
+    return candidates[0][2]
+
+
+def _subject_query_label(subject_token: str | None) -> str | None:
+    """Canonical short label for retrieve queries (full gifts title, not «هدیه»)."""
+    if not subject_token:
+        return None
+    subject_id = _subject_keyword_to_id(subject_token)
+    if subject_id and subject_id in _SUBJECT_ID_TO_QUERY_LABEL:
+        return _SUBJECT_ID_TO_QUERY_LABEL[subject_id]
+    return subject_token
 
 
 def _extract_page_number(text: str) -> int | None:
@@ -433,8 +511,9 @@ def _compose_textbook_query(
         parts.append(lesson_phrase)
     else:
         return ""
-    if subject:
-        parts.append(subject)
+    subject_label = _subject_query_label(subject)
+    if subject_label:
+        parts.append(subject_label)
     if grade:
         parts.append(grade)
     return " ".join(parts)
@@ -509,7 +588,7 @@ def resolve_textbook_scope(
         raw_subject = sticky.get("subject")
         if isinstance(raw_subject, str) and raw_subject.strip():
             subject_id = raw_subject.strip()
-            subject_kw = next(
+            subject_kw = _SUBJECT_ID_TO_QUERY_LABEL.get(subject_id) or next(
                 (k for k, v in _SUBJECT_KEYWORD_TO_ID.items() if v == subject_id),
                 None,
             )
@@ -536,9 +615,11 @@ def resolve_textbook_scope(
 
         page_words = _extract_page_word_phrase(text)
         if page_words:
-            from api.textbook.app.parser import PAGE_NUMBER_WORDS
+            from api.textbook.app.parser import _parse_persian_number_phrase
 
-            current_page = PAGE_NUMBER_WORDS.get(page_words.split()[0], current_page)
+            parsed = _parse_persian_number_phrase(page_words)
+            if parsed is not None:
+                current_page = parsed
             continue
 
         delta = _relative_page_delta(text)

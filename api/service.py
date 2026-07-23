@@ -214,11 +214,16 @@ async def _resolve_textbook_context(
             )
             await asyncio.sleep(1.2)
         if textbook_context and not textbook_context.matched:
+            reason = textbook_context.failure_reason
             if (
                 textbook_context.page_out_of_range
-                or textbook_context.failure_reason == "page_out_of_range"
+                or reason == "page_out_of_range"
             ):
                 textbook_context.page_out_of_range = True
+                textbook_context.page_query_failed = True
+            elif reason == "need_grade_or_subject":
+                textbook_context.need_info = True
+            elif reason == "lesson_missing":
                 textbook_context.page_query_failed = True
             elif looks_like_textbook_page_query(textbook_query):
                 textbook_context.page_query_failed = True
@@ -247,7 +252,10 @@ async def _resolve_textbook_context(
         and persona in TEXTBOOK_PERSONAS
         and looks_like_textbook_help_request(user_message)
     ):
-        return TextbookContext(need_info=True), textbook_query or None
+        from api.core.persona import _is_activity_continuation
+
+        if not _is_activity_continuation(user_message, persona):
+            return TextbookContext(need_info=True), textbook_query or None
 
     return None, textbook_query or None
 
