@@ -72,6 +72,28 @@ def test_extract_subject_prefers_full_gifts_phrase() -> None:
     assert _subject_query_label("املا") == "فارسی"
 
 
+def test_resolve_scope_keeps_math_chapter_across_grade_followup() -> None:
+    """«فصل سوم ریاضی» سپس «پایه ششم» → structured scope, no brittle NL query."""
+    messages = [
+        ChatMessage(
+            role="user",
+            content="میخوام تمرین های فصل سوم کتاب ریاضی رو حل کنیم",
+        ),
+        ChatMessage(role="assistant", content="کلاس چندمی؟"),
+        ChatMessage(role="user", content="پایه ششم"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.subject_id == "math"
+    assert scope.lesson == 3
+    assert scope.grade == 6
+    assert scope.can_retrieve() is True
+    assert "ریاضی" in scope.debug_label()
+    assert "3" in scope.debug_label()
+    # Must not depend on a re-parsed string like «فصل سوم کلاس ششم» (subject lost).
+    assert scope.compose_query()
+    assert "ریاضی" in scope.compose_query()
+
+
 def test_resolve_scope_page_words_compound() -> None:
     """«بیست و یکم» must resolve to 21, not first-token 20."""
     messages = [
@@ -114,17 +136,22 @@ def test_lesson_missing_system_prompt_is_specific() -> None:
     assert "از خودت نساز" in prompt or "حدس نزن" in prompt
 
 
-def test_need_grade_or_subject_maps_to_need_info_prompt() -> None:
+def test_need_info_asks_only_missing_grade_when_chapter_known() -> None:
     ctx = TextbookContext(
         matched=False,
-        failure_reason="need_grade_or_subject",
         need_info=True,
-        page=10,
+        failure_reason="need_grade_or_subject",
+        subject="math",
+        subject_title="ریاضی",
+        lesson=3,
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "کلاس چندم" in prompt or "کدام کتاب" in prompt
-    # LOOKUP_FAILED path asks for a line from the missing page; NEED_INFO must not.
-    assert "صفحه/درس مشخصی خواسته" not in prompt
+    assert "کلاس چندمی" in prompt or "کلاس چندم" in prompt
+    assert "ریاضی" in prompt
+    assert "درس/فصل: 3" in prompt or "فصل: 3" in prompt
+    assert "هنوز لازم است بپرسی" in prompt
+    # Must not insist on page when chapter is already known.
+    assert "شمارهٔ صفحه یا شمارهٔ درس/فصل؟" not in prompt
 
 
 def test_math_tool_rejects_dunder_and_handles_div_zero() -> None:

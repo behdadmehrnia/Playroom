@@ -194,7 +194,9 @@ pytest tests/ -q
 | 97 | «فصل سوم ریاضی» وقتی OCR به شکل «فصل :3» است | پارس درس/فصل | الگوی درس با دونقطه/خط تیره هم match شود | `test_lesson_patterns_accept_ocr_punctuation` |
 | 98 | صفحه ۱ ریاضی + همسایه | صفحه ≤۰ وارد کانتکست نشود | همسایه‌های غیرمثبت skip | `test_neighbor_pages_skip_nonpositive` |
 | 99 | درس ناموجود در ایندکس | `lesson_missing` | پرامپت مخصوص: محتوا نساز؛ صفحه یا موضوع بپرس | `test_lesson_missing_system_prompt_is_specific` |
+| 105 | «فصل سوم ریاضی» → «پایه ششم» | scope ساخت‌یافته | subject=math، lesson=3، grade=6 بدون کوئری NL خراب | `test_resolve_scope_keeps_math_chapter_across_grade_followup` |
 | 100 | «صفحه بیست و یکم فارسی پایه ششم» | عدد واژه‌ای مرکب | صفحه = **۲۱** نه ۲۰ | `test_resolve_scope_page_words_compound` |
+
 | 101 | «صفحه ۱۰ هدایای آسمان پایه سوم» | غلط‌نویسی در مسیر چت | کوئری با عنوان کامل gifts | `test_build_textbook_query_preserves_gifts_misspelling` |
 | 102 | وسط بازی کلمات → «صفحه ۱۲ ریاضی پایه پنجم» | sticky gamer | نباید روی gamer بماند؛ intent به homework/teacher | `test_sticky_gamer_does_not_block_textbook_page_request`, `test_resolve_persona_breaks_word_chain_for_textbook` |
 | 103 | homework + «سوال بعد» | ادامه فعالیت | نباید `need_info` کتاب تزریق شود | `test_help_marker_ignores_activity_continuation` |

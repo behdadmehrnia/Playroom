@@ -59,15 +59,19 @@ class TextbookContext(BaseModel):
     failure_reason: str | None = None
     min_page: int | None = None
     max_page: int | None = None
+    lesson: int | None = None
 
 @dataclass(frozen=True)
 class TextbookScope:
-    """Structured textbook position resolved from chat (grade, book, page)."""
+    """Structured textbook position resolved from chat (no NL query round-trip)."""
 
     grade: int | None = None
     subject: str | None = None  # Persian keyword, e.g. «فارسی»
     subject_id: str | None = None  # catalog id, e.g. «persian»
     page: int | None = None
+    lesson: int | None = None
+    # Free-text leftover for topic search only (names, «میرزا کوچک خان», …).
+    topic_query: str | None = None
 
     def has_page_lookup(self) -> bool:
         return (
@@ -76,13 +80,59 @@ class TextbookScope:
             and self.page is not None
         )
 
+    def has_lesson_lookup(self) -> bool:
+        return (
+            self.grade is not None
+            and self.subject_id is not None
+            and self.lesson is not None
+        )
+
+    def can_retrieve(self) -> bool:
+        """True when structured fields (or a topic query) are enough to hit the index."""
+        if self.has_page_lookup() or self.has_lesson_lookup():
+            return True
+        if self.topic_query and self.topic_query.strip():
+            return True
+        return False
+
+    def debug_label(self) -> str:
+        """Human-readable scope for logs/debug — not used as a parser input."""
+        parts: list[str] = []
+        if self.lesson is not None:
+            parts.append(f"درس/فصل {self.lesson}")
+        if self.page is not None:
+            parts.append(f"صفحه {self.page}")
+        label = (
+            {
+                "math": "ریاضی",
+                "science": "علوم",
+                "persian": "فارسی",
+                "writing": "نگارش",
+                "social": "مطالعات اجتماعی",
+                "quran": "قرآن",
+                "gifts": "هدیه های آسمان",
+                "thinking": "تفکر",
+                "technology": "فناوری",
+            }.get(self.subject_id or "")
+            or self.subject
+        )
+        if label:
+            parts.append(label)
+        if self.grade is not None:
+            parts.append(_GRADE_INT_LABELS.get(self.grade, f"پایه {self.grade}"))
+        if self.topic_query:
+            parts.append(f"موضوع:{self.topic_query}")
+        return " | ".join(parts) if parts else "(empty)"
+
     def compose_query(self, *, user_message: str | None = None) -> str:
+        """Legacy NL string for diagnostics / topic search fallback only."""
         parts: list[str] = []
         if user_message and user_message.strip():
             parts.append(user_message.strip())
+        if self.lesson is not None:
+            parts.append(f"درس {self.lesson}")
         if self.page is not None:
             parts.append(f"صفحه {self.page}")
-        # Prefer canonical book labels (e.g. هدیه های آسمان, not bare هدیه).
         _labels = {
             "math": "ریاضی",
             "science": "علوم",
@@ -111,6 +161,8 @@ class TextbookScope:
             payload["subject"] = self.subject_id
         if self.page is not None:
             payload["page"] = self.page
+        if self.lesson is not None:
+            payload["lesson"] = self.lesson
         return payload
 
 

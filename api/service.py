@@ -183,18 +183,23 @@ async def _resolve_textbook_context(
                 sticky_scope = raw_scope
 
     scope = resolve_textbook_scope(messages, sticky=sticky_scope)
-    textbook_query = build_textbook_query(messages, sticky=sticky_scope)
+    # Prefer structured scope for retrieve; keep a debug label (not a re-parsed NL query).
+    textbook_query = scope.debug_label() if scope.can_retrieve() else build_textbook_query(
+        messages, sticky=sticky_scope
+    )
+    # Topic-only path still needs free text.
+    retrieve_query = scope.topic_query or ""
 
     should_fetch = bool(
         ctx_enabled
-        and textbook_query
+        and scope.can_retrieve()
         and persona in TEXTBOOK_PERSONAS
     )
 
     if should_fetch:
         await emit(status_fetching_textbook())
         textbook_context = await fetch_textbook_context(
-            textbook_query,
+            retrieve_query,
             api_url=settings.textbook_api_url,
             api_key=settings.textbook_api_key or None,
             include_neighbors=settings.textbook_neighbor_pages,
@@ -203,11 +208,12 @@ async def _resolve_textbook_context(
             grade=scope.grade,
             subject=scope.subject_id,
             page=scope.page,
+            lesson=scope.lesson,
         )
         if settings.textbook_debug and textbook_context:
             await emit(
                 _format_textbook_debug(
-                    query=textbook_query,
+                    query=textbook_query or retrieve_query or scope.debug_label(),
                     api_url=settings.textbook_api_url or "embedded",
                     context=textbook_context,
                 )
@@ -225,7 +231,7 @@ async def _resolve_textbook_context(
                 textbook_context.need_info = True
             elif reason == "lesson_missing":
                 textbook_context.page_query_failed = True
-            elif looks_like_textbook_page_query(textbook_query):
+            elif looks_like_textbook_page_query(textbook_query) or scope.lesson or scope.page:
                 textbook_context.page_query_failed = True
             else:
                 textbook_context.need_info = True
@@ -244,8 +250,9 @@ async def _resolve_textbook_context(
                 "grade": textbook_context.grade,
                 "subject": textbook_context.subject,
                 "page": textbook_context.page,
+                "lesson": textbook_context.lesson or scope.lesson,
             }
-        return textbook_context, textbook_query
+        return textbook_context, textbook_query or None
 
     if (
         ctx_enabled
@@ -255,7 +262,31 @@ async def _resolve_textbook_context(
         from api.core.persona import _is_activity_continuation
 
         if not _is_activity_continuation(user_message, persona):
-            return TextbookContext(need_info=True), textbook_query or None
+            # Partial scope → ask only for missing slots.
+            partial = TextbookContext(
+                need_info=True,
+                failure_reason="need_grade_or_subject",
+                grade=scope.grade,
+                subject=scope.subject_id,
+                subject_title=(
+                    {
+                        "math": "ریاضی",
+                        "science": "علوم تجربی",
+                        "persian": "فارسی",
+                        "writing": "نگارش",
+                        "social": "مطالعات اجتماعی",
+                        "quran": "قرآن",
+                        "gifts": "هدیه های آسمان",
+                        "thinking": "تفکر و پژوهش",
+                        "technology": "کار و فناوری",
+                    }.get(scope.subject_id or "")
+                    if scope.subject_id
+                    else None
+                ),
+                page=scope.page,
+                lesson=scope.lesson,
+            )
+            return partial, textbook_query or None
 
     return None, textbook_query or None
 

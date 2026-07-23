@@ -192,18 +192,21 @@ _TEXTBOOK_FOLLOWUP_MARKERS: tuple[str, ...] = (
     "چی یاد گرفتیم",
 )
 def _format_textbook_debug(*, query: str, api_url: str, context: TextbookContext) -> str:
-    short_query = query if len(query) <= 60 else query[:57] + "..."
+    short_query = query if len(query) <= 80 else query[:77] + "..."
     if context.error:
-        return f"🐞 دیباگ کتاب | خطا: {context.error} | URL: {api_url}"
+        return f"🐞 دیباگ کتاب | خطا: {context.error} | scope: «{short_query}»"
     if context.matched:
         return (
             f"🐞 دیباگ کتاب | ✅ یافت شد: پایه {context.grade} "
-            f"{context.subject_title or context.subject} صفحه {context.page} "
-            f"({context.match_type}) | کوئری: «{short_query}»"
+            f"{context.subject_title or context.subject} "
+            f"{'درس/فصل ' + str(context.lesson) + ' ' if context.lesson else ''}"
+            f"صفحه {context.page} "
+            f"({context.match_type}) | scope: «{short_query}»"
         )
     return (
-        f"🐞 دیباگ کتاب | ❌ چیزی یافت نشد (matched=false) | "
-        f"کوئری: «{short_query}» | URL: {api_url}"
+        f"🐞 دیباگ کتاب | ❌ چیزی یافت نشد (matched=false"
+        f"{', ' + context.failure_reason if context.failure_reason else ''}) | "
+        f"scope: «{short_query}» | URL: {api_url}"
     )
 
 
@@ -555,6 +558,28 @@ def _resolve_relative_page(recent_user_texts: list[str]) -> int | None:
     return current
 
 
+def _extract_lesson_number(text: str) -> int | None:
+    """Parse «درس سوم» / «فصل 3» into an int (None if absent)."""
+    from api.textbook.app.parser import LESSON_ORDINAL_WORDS, normalize_digits
+
+    normalized = normalize_digits(text)
+    digit_match = re.search(r"(?:درس|فصل)\s*(\d{1,2})\b", normalized)
+    if not digit_match:
+        digit_match = re.search(r"(?<!\d)(\d{1,2})\s*(?:درس|فصل)", normalized)
+    if digit_match:
+        value = int(digit_match.group(1))
+        return value if value >= 1 else None
+    # Longer ordinals first so «سوم» wins over «سه».
+    ordinals = sorted(LESSON_ORDINAL_WORDS.keys(), key=len, reverse=True)
+    alt = "|".join(map(re.escape, ordinals))
+    word_match = re.search(rf"(?:درس|فصل)\s+({alt})", text)
+    if not word_match:
+        word_match = re.search(rf"({alt})\s*(?:درس|فصل)", text)
+    if word_match:
+        return LESSON_ORDINAL_WORDS.get(word_match.group(1))
+    return None
+
+
 def resolve_textbook_scope(
     messages: list[ChatMessage],
     *,
@@ -564,8 +589,8 @@ def resolve_textbook_scope(
     """
     Walk recent user turns and resolve the current textbook position.
 
-    Unlike a single-turn query parser, this tracks page navigation across turns
-    (e.g. «صفحه ۳۳» → «بریم صفحه بعد» → «چه داستانیه؟» stays on page 34).
+    Returns structured fields (grade/subject/page/lesson) for direct retrieve —
+    callers should NOT re-serialize this into Persian and re-parse it.
     """
     user_texts = [
         message.content.strip()
@@ -580,6 +605,7 @@ def resolve_textbook_scope(
     subject_kw: str | None = None
     subject_id: str | None = None
     current_page: int | None = None
+    lesson: int | None = None
 
     if sticky:
         raw_grade = sticky.get("grade")
@@ -595,6 +621,9 @@ def resolve_textbook_scope(
         raw_page = sticky.get("page")
         if isinstance(raw_page, int) and raw_page > 0:
             current_page = raw_page
+        raw_lesson = sticky.get("lesson")
+        if isinstance(raw_lesson, int) and raw_lesson >= 1:
+            lesson = raw_lesson
 
     for text in recent:
         grade_token = _extract_grade_token(text)
@@ -607,6 +636,10 @@ def resolve_textbook_scope(
         if subject_token:
             subject_kw = subject_token
             subject_id = _subject_keyword_to_id(subject_token)
+
+        lesson_no = _extract_lesson_number(text)
+        if lesson_no is not None:
+            lesson = lesson_no
 
         explicit_page = _extract_page_number(text)
         if explicit_page is not None:
@@ -626,11 +659,26 @@ def resolve_textbook_scope(
         if delta and current_page is not None:
             current_page += delta
 
+    topic_query: str | None = None
+    latest = recent[-1]
+    # Topic/named-content search only when we don't already have a page/lesson target.
+    if not current_page and not lesson and (
+        _textbook_has_topic_intent(latest)
+        or (
+            subject_id
+            and grade is not None
+            and any(m in latest for m in ("تمرین", "شعر", "داستان", "معنی", "متن", "فعالیت"))
+        )
+    ):
+        topic_query = latest
+
     return TextbookScope(
         grade=grade,
         subject=subject_kw,
         subject_id=subject_id,
         page=current_page,
+        lesson=lesson,
+        topic_query=topic_query,
     )
 
 
@@ -790,6 +838,7 @@ def _textbook_context_from_payload(data: dict[str, Any]) -> TextbookContext:
         subject=str(data["subject"]) if data.get("subject") else None,
         subject_title=str(data["subject_title"]) if data.get("subject_title") else None,
         page=int(data["page"]) if data.get("page") is not None else None,
+        lesson=int(data["lesson"]) if data.get("lesson") is not None else None,
         context_text=str(data["context_text"]) if data.get("context_text") else None,
         needs_image=bool(data.get("needs_image")),
         image_base64=images[0] if images else None,
@@ -816,6 +865,7 @@ async def _fetch_textbook_context_local(
     grade: int | None = None,
     subject: str | None = None,
     page: int | None = None,
+    lesson: int | None = None,
 ) -> TextbookContext | None:
     from api.textbook.app.models import RetrieveRequest
     from api.textbook.app.retrieve_service import retrieve_context
@@ -828,12 +878,13 @@ async def _fetch_textbook_context_local(
         try:
             response = retrieve_context(
                 RetrieveRequest(
-                    query=query,
+                    query=query or "",
                     include_neighbors=include_neighbors,
                     include_image=mode,  # type: ignore[arg-type]
                     grade=grade,
                     subject=subject,
                     page=page,
+                    lesson=lesson,
                 )
             )
         except Exception as exc:  # noqa: BLE001 — graceful degrade
@@ -853,6 +904,7 @@ async def _fetch_textbook_context_local(
                     str(payload["subject_title"]) if payload.get("subject_title") else None
                 ),
                 page=int(payload["page"]) if payload.get("page") is not None else None,
+                lesson=int(payload["lesson"]) if payload.get("lesson") is not None else None,
                 failure_reason=failure_reason,
                 min_page=int(payload["min_page"]) if payload.get("min_page") is not None else None,
                 max_page=int(payload["max_page"]) if payload.get("max_page") is not None else None,
@@ -864,7 +916,7 @@ async def _fetch_textbook_context_local(
 
 
 async def fetch_textbook_context(
-    query: str,
+    query: str = "",
     *,
     api_url: str = "",
     api_key: str | None = None,
@@ -874,8 +926,9 @@ async def fetch_textbook_context(
     grade: int | None = None,
     subject: str | None = None,
     page: int | None = None,
+    lesson: int | None = None,
 ) -> TextbookContext | None:
-    """Retrieve textbook context via the embedded package, or optional external HTTP URL."""
+    """Retrieve via structured scope fields; ``query`` is optional (topic search)."""
     if _use_embedded_textbook(api_url):
         return await _fetch_textbook_context_local(
             query,
@@ -884,6 +937,7 @@ async def fetch_textbook_context(
             grade=grade,
             subject=subject,
             page=page,
+            lesson=lesson,
         )
 
     base = _normalize_api_base_url(api_url)
@@ -894,8 +948,8 @@ async def fetch_textbook_context(
     if api_key and api_key.strip():
         headers["Authorization"] = f"Bearer {api_key.strip()}"
 
-    payload = {
-        "query": query,
+    payload: dict[str, Any] = {
+        "query": query or "",
         "include_neighbors": include_neighbors,
         "include_image": include_image,
     }
@@ -905,6 +959,8 @@ async def fetch_textbook_context(
         payload["subject"] = subject
     if page is not None:
         payload["page"] = page
+    if lesson is not None:
+        payload["lesson"] = lesson
 
     def _retrieve() -> tuple[dict[str, Any] | None, str | None]:
         try:
@@ -936,6 +992,7 @@ async def fetch_textbook_context(
                 str(data["subject_title"]) if data and data.get("subject_title") else None
             ),
             page=int(data["page"]) if data and data.get("page") is not None else None,
+            lesson=int(data["lesson"]) if data and data.get("lesson") is not None else None,
             failure_reason=failure_reason,
             min_page=int(data["min_page"]) if data and data.get("min_page") is not None else None,
             max_page=int(data["max_page"]) if data and data.get("max_page") is not None else None,

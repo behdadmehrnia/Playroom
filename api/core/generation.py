@@ -61,6 +61,36 @@ def format_page_out_of_range_instruction(context: TextbookContext) -> str:
     return "\n".join(bits)
 
 
+def format_need_info_instruction(context: TextbookContext) -> str:
+    """Ask only for slots still missing (e.g. grade when chapter+book known)."""
+    known: list[str] = []
+    missing: list[str] = []
+    if context.subject_title or context.subject:
+        known.append(f"کتاب: {context.subject_title or context.subject}")
+    else:
+        missing.append("کدام کتاب؟ (مثلاً ریاضی، فارسی، هدیه های آسمان)")
+    if context.grade is not None:
+        known.append(f"پایه/کلاس: {context.grade}")
+    else:
+        missing.append("کلاس چندمی؟")
+    if context.lesson is not None:
+        known.append(f"درس/فصل: {context.lesson}")
+    elif context.page is not None:
+        known.append(f"صفحه: {context.page}")
+    else:
+        # Page is optional when a lesson/chapter number is already known.
+        missing.append("شمارهٔ صفحه یا شمارهٔ درس/فصل؟")
+
+    bits = [TEXTBOOK_NEED_INFO_INSTRUCTION]
+    if known:
+        bits.append("همین الان می‌دانیم: " + "؛ ".join(known))
+    if missing:
+        bits.append("هنوز لازم است بپرسی: " + "؛ ".join(missing))
+    else:
+        bits.append("اگر هنوز مطمئن نیستی، یک سوال کوتاه بپرس — چیز تکراری نپرس.")
+    return "\n".join(bits)
+
+
 def build_system_prompt(
     persona: PersonaId,
     revision_reasons: list[str] | None = None,
@@ -107,7 +137,7 @@ def build_system_prompt(
     elif textbook_context and textbook_context.page_query_failed:
         sections.append(TEXTBOOK_LOOKUP_FAILED_INSTRUCTION)
     elif textbook_context and textbook_context.need_info:
-        sections.append(TEXTBOOK_NEED_INFO_INSTRUCTION)
+        sections.append(format_need_info_instruction(textbook_context))
 
     if (
         web_search_context

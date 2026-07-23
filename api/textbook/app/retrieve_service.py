@@ -84,6 +84,7 @@ def _unmatched(
     grade: int | None = None,
     subject: str | None = None,
     page: int | None = None,
+    lesson: int | None = None,
     confidence: float = 0.0,
     failure_reason: FailureReason | None = None,
     min_page: int | None = None,
@@ -96,6 +97,7 @@ def _unmatched(
         subject=subject,
         subject_title=_title_for(subject),
         page=page,
+        lesson=lesson,
         confidence=confidence,
         failure_reason=failure_reason,
         min_page=min_page,
@@ -494,11 +496,16 @@ def _build_topic_search_response(
 
 
 def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
-    parsed = parse_persian_query(request.query)
-    grade = request.grade or parsed.grade
+    # Structured fields from chat scope win; query is only for topic / legacy NL.
+    parsed = (
+        parse_persian_query(request.query)
+        if (request.query or "").strip()
+        else parse_persian_query("")
+    )
+    grade = request.grade if request.grade is not None else parsed.grade
     subject = request.subject or parsed.subject
-    page = request.page or parsed.page
-    lesson = parsed.lesson
+    page = request.page if request.page is not None else parsed.page
+    lesson = request.lesson if request.lesson is not None else parsed.lesson
     topic_display = topic_label(parsed.topic) if parsed.topic else parsed.topic_alias
 
     # Page + book without grade: still catch impossible page numbers against
@@ -520,6 +527,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             grade=grade,
             subject=subject,
             page=page,
+            lesson=lesson,
             confidence=parsed.confidence,
             failure_reason="need_grade_or_subject",
         )
@@ -530,6 +538,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             grade=grade,
             subject=subject,
             page=page,
+            lesson=lesson,
             confidence=parsed.confidence,
             failure_reason="need_grade_or_subject",
         )
@@ -673,6 +682,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
         return _unmatched(
             grade=grade,
             subject=subject,
+            lesson=lesson,
             confidence=parsed.confidence,
             failure_reason="lesson_missing",
         )

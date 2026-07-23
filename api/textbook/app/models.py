@@ -16,12 +16,18 @@ FailureReason = Literal[
 
 
 class RetrieveRequest(BaseModel):
-    query: str = Field(..., min_length=1, description="پیام کاربر به فارسی")
+    """Structured retrieve. Prefer grade/subject/page/lesson over re-parsing ``query``."""
+
+    query: str = Field(
+        default="",
+        description="Free-text for topic search only; optional when structured fields are set",
+    )
     include_neighbors: int = Field(default=2, ge=0, le=3)
     include_image: IncludeImageMode = "auto"
     grade: int | None = Field(default=None, ge=3, le=6)
     subject: str | None = Field(default=None, description="شناسه درس مثل math")
     page: int | None = Field(default=None, ge=1)
+    lesson: int | None = Field(default=None, ge=1, description="شماره درس/فصل")
 
 
 class RetrieveResponse(BaseModel):
@@ -43,6 +49,7 @@ class RetrieveResponse(BaseModel):
     failure_reason: FailureReason | None = None
     min_page: int | None = None
     max_page: int | None = None
+    lesson: int | None = None
 
 
 class HealthResponse(BaseModel):
