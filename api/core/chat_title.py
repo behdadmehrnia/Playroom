@@ -66,19 +66,74 @@ def is_generic_chat_title(title: str | None) -> bool:
     return bool(_GENERIC_TITLE_RE.match(cleaned))
 
 
+_CHAT_HISTORY_SPLIT_RE = re.compile(
+    r"(?:###\s*)?Chat History\s*:?\s*",
+    re.IGNORECASE,
+)
+_HISTORY_TURN_RE = re.compile(
+    r"^(?:User|Assistant|Human|AI|کودک|یار کودک)\s*:\s*(.*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _parse_embedded_chat_history(text: str) -> list[ChatMessage]:
+    """Parse OpenWebUI title-task blob that embeds history in one message."""
+    parts = _CHAT_HISTORY_SPLIT_RE.split(text, maxsplit=1)
+    if len(parts) < 2:
+        return []
+    history = parts[1].strip()
+    if not history:
+        return []
+
+    messages: list[ChatMessage] = []
+    current_role: str | None = None
+    current_bits: list[str] = []
+
+    def _flush() -> None:
+        nonlocal current_role, current_bits
+        if current_role and current_bits:
+            content = "\n".join(current_bits).strip()
+            if content:
+                messages.append(ChatMessage(role=current_role, content=content))
+        current_role = None
+        current_bits = []
+
+    for line in history.splitlines():
+        match = re.match(
+            r"^(User|Assistant|Human|AI|کودک|یار کودک)\s*:\s*(.*)$",
+            line.strip(),
+            flags=re.IGNORECASE,
+        )
+        if match:
+            _flush()
+            label = match.group(1).lower()
+            current_role = (
+                "assistant"
+                if label in {"assistant", "ai", "یار کودک"}
+                else "user"
+            )
+            rest = match.group(2).strip()
+            current_bits = [rest] if rest else []
+        elif current_role is not None:
+            current_bits.append(line)
+    _flush()
+    return messages
+
+
 def extract_conversation_for_title(messages: list[ChatMessage]) -> list[ChatMessage]:
-    """Drop title-task system/user prompts; keep real chat turns."""
+    """Drop title-task prompts; keep real chat turns (incl. embedded OWUI history)."""
     kept: list[ChatMessage] = []
     for message in messages:
         text = (message.content or "").strip()
         if not text:
             continue
         lowered = text.lower()
-        if any(marker in lowered for marker in _TITLE_GEN_MARKERS):
-            continue
-        if message.role == "system" and (
-            "title" in lowered or "عنوان" in text
+        if any(marker in lowered for marker in _TITLE_GEN_MARKERS) or (
+            message.role == "system" and ("title" in lowered or "عنوان" in text)
         ):
+            embedded = _parse_embedded_chat_history(text)
+            if embedded:
+                kept.extend(embedded)
             continue
         kept.append(message)
     return kept

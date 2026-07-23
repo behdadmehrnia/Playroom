@@ -25,17 +25,29 @@ def test_chat_title_prompt_is_persian_and_child_friendly() -> None:
     assert "نمونه بد" in prompt
 
 
-def test_detects_openwebui_title_task() -> None:
+def test_extracts_openwebui_embedded_chat_history() -> None:
+    from api.core.chat_title import extract_conversation_for_title
+
     messages = [
         ChatMessage(
             role="user",
             content=(
                 "### Task:\nGenerate a concise, 3-5 word title with an emoji "
-                "summarizing the chat history.\n### Chat History:\nUser: سلام"
+                "summarizing the chat history.\n"
+                "### Chat History:\n"
+                "User: میخوام تمرین ریاضی فصل سه حل کنیم\n"
+                "Assistant: کلاس چندمی؟\n"
+                "User: ششم\n"
+                "Assistant: شماره صفحه؟\n"
+                "User: ۳۷"
             ),
         )
     ]
-    assert looks_like_title_generation_request(messages) is True
+    convo = extract_conversation_for_title(messages)
+    assert conversation_ready_for_title(convo) is True
+    users = [m.content for m in convo if m.role == "user"]
+    assert users[-1] == "۳۷"
+    assert any("ریاضی" in u for u in users)
 
 
 def test_normal_homework_message_is_not_title_task() -> None:
