@@ -689,6 +689,14 @@ def resolve_textbook_scope(
         lesson_no = _extract_lesson_number(text)
         if lesson_no is not None:
             lesson = lesson_no
+            # «درس پنجم منظورم بود» after a wrong page must drop the old page,
+            # otherwise page lookup wins and we keep returning out_of_range.
+            if (
+                _extract_page_number(text) is None
+                and _extract_bare_page_number(text) is None
+                and _extract_page_word_phrase(text) is None
+            ):
+                current_page = None
 
         explicit_page = _extract_page_number(text)
         if explicit_page is not None:

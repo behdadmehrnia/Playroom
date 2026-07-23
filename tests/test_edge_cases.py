@@ -111,7 +111,9 @@ def test_bare_digit_after_grade_ask_is_grade_not_page() -> None:
     assert scope.grade == 6
     assert scope.page is None
 
-    """«فصل سوم ریاضی» سپس «پایه ششم» → structured scope; wait for page (no lesson retrieve)."""
+
+def test_resolve_scope_keeps_math_chapter_across_grade_followup() -> None:
+    """«فصل سوم ریاضی» سپس «پایه ششم» → structured scope with lesson retrieve."""
     messages = [
         ChatMessage(
             role="user",
@@ -131,6 +133,27 @@ def test_bare_digit_after_grade_ask_is_grade_not_page() -> None:
     assert "3" in scope.debug_label()
     assert scope.compose_query()
     assert "ریاضی" in scope.compose_query()
+
+
+def test_resolve_scope_lesson_correction_clears_bad_page() -> None:
+    """Wrong page then «درس پنجم منظورم بود» → lesson lookup, not stuck out-of-range page."""
+    messages = [
+        ChatMessage(
+            role="user",
+            content="صفحه ۲۵۰ کتاب هدیه های آسمان رو حل میکنی",
+        ),
+        ChatMessage(role="assistant", content="کلاس چندمی؟"),
+        ChatMessage(role="user", content="کلاس ششم"),
+        ChatMessage(role="assistant", content="این کتاب صفحه ۲۵۰ ندارد."),
+        ChatMessage(role="user", content="حالا درس پنجم منظورم بود"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.subject_id == "gifts"
+    assert scope.grade == 6
+    assert scope.lesson == 5
+    assert scope.page is None
+    assert scope.has_lesson_lookup() is True
+    assert scope.has_page_lookup() is False
 
 
 def test_resolve_scope_page_words_compound() -> None:

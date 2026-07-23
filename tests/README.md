@@ -204,6 +204,7 @@ pytest tests/ -q
 | 106 | پایه+کتاب بدون صفحه/فصل | need_info | صفحه (ترجیح) یا فصل/درس | `test_need_info_prefers_page_but_accepts_chapter` |
 | 107 | صفحه پیدا نشد | lookup failed | بگو پیدا نشد؛ عکس صفحه یا متن سوال بخواه | `test_lookup_failed_asks_for_photo_or_question_text` |
 | 108 | فصل ریاضی → ششم → «۳۷» | صفحهٔ تکی بعد از سوال صفحه | scope.page=37 و retrieve exact_page (نه lesson_missing) | `test_resolve_scope_bare_page_after_page_ask` |
+| 109 | صفحه ۲۵۰ هدیه → ششم → «درس پنجم منظورم بود» | تصحیح صفحه به درس | page پاک شود؛ lesson=5 gifts؛ نه page_out_of_range | `test_resolve_scope_lesson_correction_clears_bad_page` |
 
 **API — `/v1/textbook/query`:**
 ```json
