@@ -56,6 +56,11 @@ async def _chat_event_stream(
                 "event": "chunk",
                 "data": json.dumps({"text": event["text"]}, ensure_ascii=False),
             }
+        elif etype == "title":
+            yield {
+                "event": "title",
+                "data": json.dumps({"title": event["title"]}, ensure_ascii=False),
+            }
         elif etype == "error":
             yield {
                 "event": "error",

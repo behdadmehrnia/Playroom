@@ -14,6 +14,7 @@ from api.core import (
     fetch_textbook_context,
     looks_like_textbook_help_request,
     looks_like_textbook_page_query,
+    resolve_textbook_scope,
 )
 from api.models import (
     TextbookQueryRequest,
@@ -32,11 +33,18 @@ async def textbook_query_endpoint(
     req: TextbookQueryRequest,
 ) -> TextbookQueryResponse:
     messages = to_chat_messages(req.messages)
-    query = build_textbook_query(messages)
+    scope = resolve_textbook_scope(messages)
+    query = (
+        scope.debug_label()
+        if scope.can_retrieve()
+        else build_textbook_query(messages)
+    )
     latest = _get_latest_user_message(messages)
     return TextbookQueryResponse(
         query=query,
-        looks_like_page_query=looks_like_textbook_page_query(query),
+        looks_like_page_query=looks_like_textbook_page_query(query)
+        or scope.page is not None
+        or scope.lesson is not None,
         looks_like_help_request=looks_like_textbook_help_request(latest),
         latest_user_message=latest,
     )
@@ -47,17 +55,22 @@ async def retrieve_textbook_endpoint(
     req: TextbookRetrieveRequest,
     settings: Settings = Depends(get_settings),
 ) -> TextbookRetrieveResponse:
+    messages = to_chat_messages(req.messages) if req.messages else []
+    scope = resolve_textbook_scope(messages) if messages else None
+
     if req.query is not None:
         query = req.query.strip()
-    elif req.messages:
-        query = build_textbook_query(to_chat_messages(req.messages))
+    elif scope is not None and scope.can_retrieve():
+        query = scope.debug_label()
+    elif messages:
+        query = build_textbook_query(messages)
     else:
         query = ""
 
     if req.user_message is not None:
         user_message = req.user_message.strip()
-    elif req.messages:
-        user_message = _get_latest_user_message(to_chat_messages(req.messages))
+    elif messages:
+        user_message = _get_latest_user_message(messages)
     else:
         user_message = ""
 
@@ -78,7 +91,8 @@ async def retrieve_textbook_endpoint(
         gate_blocked = True
         gate_reason = "textbook_context_disabled"
 
-    should_fetch = bool(ctx_enabled and query and eligible)
+    use_scope = scope is not None and scope.can_retrieve()
+    should_fetch = bool(ctx_enabled and eligible and (use_scope or bool(query)))
 
     context: TextbookContext | None = None
     fetched = False
@@ -99,14 +113,28 @@ async def retrieve_textbook_endpoint(
             if req.include_neighbors is not None
             else settings.textbook_neighbor_pages
         )
-        context = await fetch_textbook_context(
-            query,
-            api_url=settings.textbook_api_url,
-            api_key=settings.textbook_api_key or None,
-            include_neighbors=neighbors,
-            include_image=include_image,  # type: ignore[arg-type]
-            timeout_sec=timeout,
-        )
+        if use_scope and scope is not None:
+            context = await fetch_textbook_context(
+                scope.topic_query or "",
+                api_url=settings.textbook_api_url,
+                api_key=settings.textbook_api_key or None,
+                include_neighbors=neighbors,
+                include_image=include_image,  # type: ignore[arg-type]
+                timeout_sec=timeout,
+                grade=scope.grade,
+                subject=scope.subject_id,
+                page=scope.page,
+                lesson=scope.lesson if scope.page is None else None,
+            )
+        else:
+            context = await fetch_textbook_context(
+                query,
+                api_url=settings.textbook_api_url,
+                api_key=settings.textbook_api_key or None,
+                include_neighbors=neighbors,
+                include_image=include_image,  # type: ignore[arg-type]
+                timeout_sec=timeout,
+            )
         fetched = True
         if context and not context.matched:
             reason = context.failure_reason
@@ -117,14 +145,16 @@ async def retrieve_textbook_endpoint(
                 context.need_info = True
             elif reason == "lesson_missing":
                 context.page_query_failed = True
-            elif looks_like_textbook_page_query(query):
+            elif looks_like_textbook_page_query(query) or (
+                scope is not None and (scope.page is not None or scope.lesson is not None)
+            ):
                 context.page_query_failed = True
             else:
                 context.need_info = True
         debug_enabled = req.debug if req.debug is not None else settings.textbook_debug
         if debug_enabled and context:
             debug = _format_textbook_debug(
-                query=query,
+                query=query or (scope.debug_label() if scope else ""),
                 api_url=settings.textbook_api_url or "embedded",
                 context=context,
             )

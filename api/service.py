@@ -80,6 +80,7 @@ class ChatResult:
     textbook: TextbookQueryDiag | None = None
     web_search: WebSearchQueryDiag | None = None
     math_tool: list[MathToolUsage] = field(default_factory=list)
+    chat_title: str | None = None
 
 
 async def _resolve_persona(
@@ -208,7 +209,8 @@ async def _resolve_textbook_context(
             grade=scope.grade,
             subject=scope.subject_id,
             page=scope.page,
-            lesson=scope.lesson,
+            # Prefer exact page; only fall back to lesson when page is unknown.
+            lesson=scope.lesson if scope.page is None else None,
         )
         if settings.textbook_debug and textbook_context:
             await emit(
@@ -499,6 +501,39 @@ async def run_chat(
         query_sent=web_search_query, context=web_search_context
     )
 
+    chat_title: str | None = None
+    if settings.enable_chat_title:
+        from api.core import (
+            CHAT_TITLE_METADATA_KEY,
+            generate_chat_title,
+            should_emit_chat_title,
+        )
+
+        current_title = None
+        if isinstance(body, dict):
+            metadata = body.get("metadata")
+            if isinstance(metadata, dict):
+                raw_title = metadata.get(CHAT_TITLE_METADATA_KEY)
+                if isinstance(raw_title, str):
+                    current_title = raw_title
+        if should_emit_chat_title(
+            messages,
+            current_title=current_title,
+            min_user_messages=settings.chat_title_min_user_messages,
+        ):
+            chat_title = await generate_chat_title(
+                llm_client,
+                backend_model=backend_model,
+                messages=messages,
+                min_user_messages=settings.chat_title_min_user_messages,
+            )
+            if isinstance(body, dict) and chat_title:
+                metadata = body.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                    body["metadata"] = metadata
+                metadata[CHAT_TITLE_METADATA_KEY] = chat_title
+
     return ChatResult(
         response=response,
         persona=resolved_persona,
@@ -514,6 +549,7 @@ async def run_chat(
         textbook=textbook_diag,
         web_search=web_search_diag,
         math_tool=math_tool_usages,
+        chat_title=chat_title,
     )
 
 
@@ -537,6 +573,7 @@ async def run_chat_stream(
       - ``{"type": "status", "description": str}``
       - ``{"type": "status_clear"}``
       - ``{"type": "chunk", "text": str}``
+      - ``{"type": "title", "title": str}``
       - ``{"type": "error", "message": str}``
       - ``{"type": "done", "result": ChatResult}``
     """
@@ -588,6 +625,9 @@ async def run_chat_stream(
     for chunk in iter_text_chunks(chat_result.response, STREAM_CHUNK_SIZE):
         yield {"type": "chunk", "text": chunk}
         await asyncio.sleep(0)
+
+    if chat_result.chat_title:
+        yield {"type": "title", "title": chat_result.chat_title}
 
     yield {"type": "done", "result": chat_result}
 

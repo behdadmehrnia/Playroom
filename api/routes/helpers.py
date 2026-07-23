@@ -50,6 +50,7 @@ def chat_result_to_out(result: Any) -> ChatResultOut:
         web_search=getattr(result, "web_search", None),
         math_tool=list(getattr(result, "math_tool", None) or []),
         used_safe_fallback=result.used_safe_fallback,
+        chat_title=getattr(result, "chat_title", None),
     )
 
 
@@ -66,6 +67,7 @@ def chat_result_to_yarkids_meta(result: Any) -> YarKidsMeta:
         reflection=out.reflection,
         revised=out.revised,
         used_safe_fallback=out.used_safe_fallback,
+        chat_title=out.chat_title,
     )
 
 

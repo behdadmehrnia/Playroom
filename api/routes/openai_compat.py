@@ -350,6 +350,74 @@ async def _handle_chat_completions(
     messages = openai_messages_to_chat_messages(req.messages)
     if not messages:
         raise HTTPException(status_code=400, detail="messages must not be empty")
+
+    # OpenWebUI title-generation calls — answer with Persian child-friendly titles
+    # instead of running the full chat pipeline (and avoid English "Introduction…").
+    from api.core import (
+        generate_chat_title,
+        looks_like_title_generation_request,
+    )
+
+    if settings.enable_chat_title and looks_like_title_generation_request(messages):
+        title = await generate_chat_title(
+            llm_client,
+            backend_model=backend_model,
+            messages=messages,
+            min_user_messages=settings.chat_title_min_user_messages,
+        )
+        completion_id = _openai_completion_id()
+        created = int(time.time())
+        if req.stream:
+
+            async def title_stream():
+                chunk = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": MODEL_ID,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": title},
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                final = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": MODEL_ID,
+                    "choices": [
+                        {"index": 0, "delta": {}, "finish_reason": "stop"}
+                    ],
+                }
+                yield f"data: {json.dumps(final, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(title_stream(), media_type="text/event-stream")
+
+        return {
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": created,
+            "model": MODEL_ID,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": title},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            },
+            "yarkids": {"chat_title": title, "title_generation": True},
+        }
+
     body = build_resolve_body(req.metadata)
 
     if req.stream:

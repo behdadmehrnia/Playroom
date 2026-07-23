@@ -214,6 +214,7 @@ class YarKidsMeta(BaseModel):
     reflection: ReflectionResult | None = None
     revised: bool = False
     used_safe_fallback: bool = False
+    chat_title: str | None = None
 
 
 class ChatResultOut(BaseModel):
@@ -231,6 +232,7 @@ class ChatResultOut(BaseModel):
     web_search: WebSearchQueryDiag | None = None
     math_tool: list[MathToolUsage] = Field(default_factory=list)
     used_safe_fallback: bool
+    chat_title: str | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,8 @@ class Settings(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     enable_reflection: bool = Field(default=True)
     enable_status_updates: bool = Field(default=True)
+    enable_chat_title: bool = Field(default=True)
+    chat_title_min_user_messages: int = Field(default=2, ge=1, le=6)
 
     # --- Textbook (embedded by default; optional external URL) ---
     enable_textbook_context: bool = Field(default=True)
@@ -123,6 +125,10 @@ class Settings(BaseModel):
             temperature=env_float("YARKIDS_TEMPERATURE", 0.7),
             enable_reflection=env_bool("YARKIDS_ENABLE_REFLECTION", True),
             enable_status_updates=env_bool("YARKIDS_ENABLE_STATUS_UPDATES", True),
+            enable_chat_title=env_bool("YARKIDS_ENABLE_CHAT_TITLE", True),
+            chat_title_min_user_messages=env_int(
+                "YARKIDS_CHAT_TITLE_MIN_USER_MESSAGES", 2
+            ),
             enable_textbook_context=env_bool("YARKIDS_ENABLE_TEXTBOOK_CONTEXT", True),
             textbook_api_url=env("YARKIDS_TEXTBOOK_API_URL", "").strip(),
             textbook_api_key=env("YARKIDS_TEXTBOOK_API_KEY").strip(),

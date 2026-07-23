@@ -81,10 +81,21 @@ from .persona import (
     resolve_manual_persona,
 )
 from .prompts import (
+    get_chat_title_prompt,
     get_core_prompt,
     get_intent_detection_prompt,
     get_persona_prompt,
     get_reflection_prompt,
+)
+from .chat_title import (
+    CHAT_TITLE_METADATA_KEY,
+    PLACEHOLDER_CHAT_TITLE,
+    conversation_ready_for_title,
+    generate_chat_title,
+    is_generic_chat_title,
+    looks_like_title_generation_request,
+    sanitize_chat_title,
+    should_emit_chat_title,
 )
 from .status import (
     clear_status_message,
@@ -138,7 +149,9 @@ __all__ = [
     "ACTIVE_PERSONA_METADATA_KEY",
     "ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY",
     "ChatMessage",
+    "CHAT_TITLE_METADATA_KEY",
     "DEFAULT_TEXTBOOK_TIMEOUT_SEC",
+    "PLACEHOLDER_CHAT_TITLE",
     "DEFAULT_WEB_SEARCH_MAX_RESULTS",
     "DEFAULT_WEB_SEARCH_TIMEOUT_SEC",
     "INTENT_CONFIDENCE_THRESHOLD",
@@ -197,7 +210,14 @@ __all__ = [
     "calculate_math",
     "clear_status_message",
     "coerce_bool",
+    "conversation_ready_for_title",
     "detect_intent",
+    "generate_chat_title",
+    "get_chat_title_prompt",
+    "is_generic_chat_title",
+    "looks_like_title_generation_request",
+    "sanitize_chat_title",
+    "should_emit_chat_title",
     "extract_math_expressions",
     "extract_message_content",
     "extract_persona_marker",

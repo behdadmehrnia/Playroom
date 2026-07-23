@@ -72,7 +72,45 @@ def test_extract_subject_prefers_full_gifts_phrase() -> None:
     assert _subject_query_label("املا") == "فارسی"
 
 
-def test_resolve_scope_keeps_math_chapter_across_grade_followup() -> None:
+def test_resolve_scope_bare_page_after_page_ask() -> None:
+    """«۳۷» after asking for page must become page=37, not keep lesson-only retrieve."""
+    messages = [
+        ChatMessage(
+            role="user",
+            content="میخوام تمرین های فصل سه کتاب ریاضی رو با هم حل کنیم",
+        ),
+        ChatMessage(
+            role="assistant",
+            content="کلاس چندمی؟ اگر شماره صفحه رو هم بدونی بهم بگو.",
+        ),
+        ChatMessage(role="user", content="ششم"),
+        ChatMessage(
+            role="assistant",
+            content="می‌شه شماره صفحه رو بهم بگی؟ (چون شماره صفحه خیلی دقیق‌تره)",
+        ),
+        ChatMessage(role="user", content="۳۷"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.subject_id == "math"
+    assert scope.grade == 6
+    assert scope.page == 37
+    assert scope.lesson == 3
+    assert scope.has_page_lookup() is True
+    query = build_textbook_query(messages)
+    assert "37" in query or "۳۷" in query
+    assert "صفحه" in query
+
+
+def test_bare_digit_after_grade_ask_is_grade_not_page() -> None:
+    messages = [
+        ChatMessage(role="user", content="تمرین ریاضی فصل دو"),
+        ChatMessage(role="assistant", content="کلاس چندمی هستی؟"),
+        ChatMessage(role="user", content="۶"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.grade == 6
+    assert scope.page is None
+
     """«فصل سوم ریاضی» سپس «پایه ششم» → structured scope; wait for page (no lesson retrieve)."""
     messages = [
         ChatMessage(

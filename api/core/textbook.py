@@ -38,6 +38,26 @@ _TEXTBOOK_PAGE_NUMBER_RE = re.compile(
     r"(?:صفحه|صفحهٔ|صفحه‌ی|ص\.?)\s*([\d۰-۹٠-٩]+)",
     re.IGNORECASE,
 )
+# Bare reply like «۳۷» / «37» / «صفحه ۳۷» when the child answers a page ask.
+_TEXTBOOK_BARE_PAGE_RE = re.compile(
+    r"^[\s\u200c]*(?:صفحه[\s\u200cٔی]*[:：]?\s*)?([\d۰-۹٠-٩]{1,3})[\s\u200c.]*$",
+    re.IGNORECASE,
+)
+_ASSISTANT_ASKED_PAGE_RE = re.compile(
+    r"(?:"
+    r"شماره[\s\u200c]*[ٔی]?صفحه|صفحه[\s\u200c]*چند|کدام[\s\u200c]*صفحه|"
+    r"چه[\s\u200c]*صفحه‌?ا[یي]|صفحه[\s\u200c]*رو[\s\u200c]*ب|صفحه[\s\u200c]*را[\s\u200c]*ب|"
+    r"صفحه[\s\u200c]*رو[\s\u200c]*بهم|صفحه[\s\u200c]*را[\s\u200c]*بهم"
+    r")",
+    re.IGNORECASE,
+)
+_ASSISTANT_ASKED_GRADE_RE = re.compile(
+    r"(?:"
+    r"کلاس[\s\u200c]*چندم|پایه[\s\u200c]*چندم|چندمی[\s\u200c]*هست|"
+    r"کلاس[\s\u200c]*چند[\s\u200c]*هست"
+    r")",
+    re.IGNORECASE,
+)
 # Relative page references: «صفحه بعد/بعدی»، «بعدش»، «صفحه قبل/قبلی»، «قبلش»،
 # «بریم صفحه بعد»، «صفحه بعدی».
 _TEXTBOOK_NEXT_PAGE_RE = re.compile(
@@ -468,6 +488,26 @@ def _extract_page_number(text: str) -> int | None:
         return None
 
 
+def _extract_bare_page_number(text: str) -> int | None:
+    """Parse a short reply that is only a page number (e.g. «۳۷»)."""
+    match = _TEXTBOOK_BARE_PAGE_RE.fullmatch(text.strip())
+    if not match:
+        return None
+    try:
+        value = int(match.group(1).translate(_PERSIAN_DIGIT_MAP))
+    except ValueError:
+        return None
+    return value if 1 <= value <= 999 else None
+
+
+def _assistant_asked_for_page(text: str | None) -> bool:
+    return bool(text and _ASSISTANT_ASKED_PAGE_RE.search(text))
+
+
+def _assistant_asked_for_grade(text: str | None) -> bool:
+    return bool(text and _ASSISTANT_ASKED_GRADE_RE.search(text))
+
+
 def _extract_page_word_phrase(text: str) -> str | None:
     """Return Persian number-word phrase after «صفحه» when digits are absent."""
     if _extract_page_number(text) is not None:
@@ -587,20 +627,17 @@ def resolve_textbook_scope(
     window: int = 16,
 ) -> TextbookScope:
     """
-    Walk recent user turns and resolve the current textbook position.
+    Walk recent turns and resolve the current textbook position.
 
     Returns structured fields (grade/subject/page/lesson) for direct retrieve —
     callers should NOT re-serialize this into Persian and re-parse it.
     """
-    user_texts = [
-        message.content.strip()
-        for message in messages
-        if message.role == "user" and message.content.strip()
-    ]
-    if not user_texts:
+    if not messages:
         return TextbookScope()
 
-    recent = user_texts[-window:]
+    # Keep enough turns for multi-step homework (grade → page replies).
+    recent_messages = messages[-(window * 2) :]
+
     grade: int | None = None
     subject_kw: str | None = None
     subject_id: str | None = None
@@ -625,7 +662,19 @@ def resolve_textbook_scope(
         if isinstance(raw_lesson, int) and raw_lesson >= 1:
             lesson = raw_lesson
 
-    for text in recent:
+    last_assistant: str | None = None
+    user_texts: list[str] = []
+
+    for message in recent_messages:
+        if message.role == "assistant" and message.content.strip():
+            last_assistant = message.content.strip()
+            continue
+        if message.role != "user" or not message.content.strip():
+            continue
+
+        text = message.content.strip()
+        user_texts.append(text)
+
         grade_token = _extract_grade_token(text)
         if grade_token:
             parsed_grade = _grade_token_to_int(grade_token)
@@ -646,6 +695,25 @@ def resolve_textbook_scope(
             current_page = explicit_page
             continue
 
+        bare_page = _extract_bare_page_number(text)
+        if bare_page is not None:
+            # «۶» after «کلاس چندمی؟» is grade, not page.
+            if (
+                _assistant_asked_for_grade(last_assistant)
+                and grade is None
+                and 3 <= bare_page <= 6
+            ):
+                grade = bare_page
+                continue
+            # «۳۷» after page ask, or once grade is known in a homework thread.
+            if (
+                _assistant_asked_for_page(last_assistant)
+                or grade is not None
+                or (subject_id is not None and lesson is not None)
+            ):
+                current_page = bare_page
+                continue
+
         page_words = _extract_page_word_phrase(text)
         if page_words:
             from api.textbook.app.parser import _parse_persian_number_phrase
@@ -660,9 +728,9 @@ def resolve_textbook_scope(
             current_page += delta
 
     topic_query: str | None = None
-    latest = recent[-1]
+    latest = user_texts[-1] if user_texts else ""
     # Topic/named-content search only when we don't already have a page/lesson target.
-    if not current_page and not lesson and (
+    if latest and not current_page and not lesson and (
         _textbook_has_topic_intent(latest)
         or (
             subject_id
@@ -716,6 +784,7 @@ def build_textbook_query(
     if scope.has_page_lookup():
         if (
             _textbook_has_anchor(latest)
+            or _extract_bare_page_number(latest) is not None
             or _relative_page_delta(latest) != 0
             or looks_like_textbook_followup(latest)
             or _textbook_wants_whole_lesson(latest)
