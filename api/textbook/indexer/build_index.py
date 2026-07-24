@@ -173,6 +173,33 @@ def _printed_page_from_offset(pdf_page_index: int, page_offset: int) -> int:
     return pdf_page_index + 1 - page_offset
 
 
+def _report_lesson_map(grade: int, subject: str) -> None:
+    """Print درس/فصل map quality after indexing a book (helps catch weak OCR)."""
+    from api.textbook.app.store import get_lesson_bounds, list_lesson_starts
+
+    starts = list_lesson_starts(grade, subject)
+    bounds = get_lesson_bounds(grade, subject)
+    if not starts:
+        print(
+            "  lesson map: EMPTY — chapter headers not found in OCR text; "
+            "lesson lookups will ask for page/photo (not false out-of-range)"
+        )
+        return
+    preview = ", ".join(f"{n}@p{p}" for n, p in starts[:12])
+    if len(starts) > 12:
+        preview += ", …"
+    if bounds is None:
+        print(
+            f"  lesson map: WEAK ({len(starts)} markers: {preview}) — "
+            "re-check MinerU text / page_offset; bounds not trusted for out-of-range"
+        )
+    else:
+        print(
+            f"  lesson map: OK bounds={bounds[0]}..{bounds[1]} "
+            f"({len(starts)} markers: {preview})"
+        )
+
+
 def _init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -448,6 +475,7 @@ def build_index(
             # and crashes don't wipe prior progress from an open transaction).
             conn.commit()
             print(f"  committed {pdf_name} (running total: {total_pages} pages)")
+            _report_lesson_map(grade, subject)
 
         conn.execute(
             """
@@ -578,6 +606,7 @@ def index_book(
         )
         conn.commit()
 
+    _report_lesson_map(book.grade, book.subject)
     print(
         f"Done. Indexed {count} pages for {book.file} "
         f"(engine={ocr_engine}, OCR/parse on {stats['ocr_pages']} pages, "

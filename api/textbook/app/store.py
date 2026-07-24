@@ -319,7 +319,7 @@ def _lesson_target_patterns(lesson_number: int):
     digit = str(lesson_number)
     persian_digit = digit.translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
     # Optional OCR junk between unit word and number (colon, dash, Persian colon).
-    sep = r"[\s:：\-–—٫.]{0,3}"
+    sep = r"[\s:：\-–—٫.\u200c]{0,4}"
     patterns: list = []
     for unit in _LESSON_UNIT_WORDS:
         if ordinal:
@@ -328,6 +328,8 @@ def _lesson_target_patterns(lesson_number: int):
         for num in {digit, persian_digit}:
             patterns.append(_re.compile(rf"{unit}{sep}{num}\b"))
             patterns.append(_re.compile(rf"(?<!\d){num}{sep}{unit}"))
+            # OCR often drops the word boundary after Persian digits.
+            patterns.append(_re.compile(rf"{unit}{sep}{num}(?!\d)"))
     return patterns
 
 
@@ -358,7 +360,7 @@ def lesson_search(grade: int, subject: str, lesson_number: int) -> PageRecord | 
             (grade, subject),
         ).fetchall()
 
-    candidates: list[tuple[int, int, sqlite3.Row]] = []
+    candidates: list[tuple[int, int, int, sqlite3.Row]] = []
     for row in rows:
         text = str(row["text"] or "")
         if not any(p.search(text) for p in target_patterns):
@@ -368,16 +370,18 @@ def lesson_search(grade: int, subject: str, lesson_number: int) -> PageRecord | 
             for n, patterns in patterns_by_number.items()
             if any(p.search(text) for p in patterns)
         )
-        candidates.append((distinct, int(row["printed_page"]), row))
+        head = text[:_LESSON_HEADER_CHARS]
+        not_in_header = 0 if any(p.search(head) for p in target_patterns) else 1
+        candidates.append((distinct, not_in_header, int(row["printed_page"]), row))
 
     if not candidates:
         return None
 
     filtered = [c for c in candidates if c[0] < _LESSON_TOC_THRESHOLD]
     pool = filtered or candidates
-    # Prefer real chapter openers (e.g. page 45 «3 فصل») over TOC-like pages.
-    pool.sort(key=lambda c: (c[0], c[1]))
-    return _row_to_page(pool[0][2])
+    # Prefer real chapter openers (header + few markers) over TOC-like pages.
+    pool.sort(key=lambda c: (c[0], c[1], c[2]))
+    return _row_to_page(pool[0][3])
 
 
 _MAX_LESSON_PAGES = 14
@@ -387,6 +391,7 @@ def list_lesson_starts(grade: int, subject: str) -> list[tuple[int, int]]:
     """Return [(lesson_number, start_page), ...] sorted by start page.
 
     Single pass over the book pages (avoids N full scans).
+    Prefers chapter-opener pages (header-zone match, few distinct markers).
     """
     if not index_exists():
         return []
@@ -394,8 +399,8 @@ def list_lesson_starts(grade: int, subject: str) -> list[tuple[int, int]]:
     patterns_by_number = {
         n: _lesson_target_patterns(n) for n in range(1, _MAX_DETECTABLE_LESSONS + 1)
     }
-    # lesson_number -> best (distinct_count, printed_page)
-    best: dict[int, tuple[int, int]] = {}
+    # lesson_number -> best (distinct_count, not_in_header, printed_page)
+    best: dict[int, tuple[int, int, int]] = {}
 
     with _connect() as conn:
         rows = conn.execute(
@@ -421,21 +426,24 @@ def list_lesson_starts(grade: int, subject: str) -> list[tuple[int, int]]:
             continue
         distinct = len(present)
         page = int(row["printed_page"])
+        head = text[:_LESSON_HEADER_CHARS]
         for number in present:
+            patterns = patterns_by_number[number]
+            not_in_header = 0 if any(p.search(head) for p in patterns) else 1
             prev = best.get(number)
-            # Prefer non-TOC pages, then earlier pages.
-            score = (distinct, page)
+            # Prefer non-TOC, header-zone hits, then earlier pages.
+            score = (distinct, not_in_header, page)
             if prev is None or score < prev:
                 best[number] = score
 
     starts = [
         (number, page)
-        for number, (distinct, page) in best.items()
+        for number, (distinct, _h, page) in best.items()
         if distinct < _LESSON_TOC_THRESHOLD
     ]
     if not starts:
         # Fall back to whatever we saw (including TOC-heavy pages).
-        starts = [(number, page) for number, (_d, page) in best.items()]
+        starts = [(number, page) for number, (_d, _h, page) in best.items()]
     starts.sort(key=lambda item: item[1])
     deduped: list[tuple[int, int]] = []
     seen_pages: set[int] = set()
@@ -447,17 +455,45 @@ def list_lesson_starts(grade: int, subject: str) -> list[tuple[int, int]]:
     return deduped
 
 
+# Minimum distinct lesson/chapter headers before we trust max/min for
+# lesson_out_of_range. Sparse OCR (e.g. only «فصل 7» found) must not reject
+# legitimate requests for درس ۳ as out-of-range — fall through to lesson_missing.
+_MIN_TRUSTED_LESSON_MARKERS = 3
+# Detected lessons must cover at least this fraction of 1..max to count as a
+# real chapter map (avoids {1, 17} from TOC noise looking contiguous).
+_MIN_LESSON_COVERAGE_RATIO = 0.55
+# Prefer درس/فصل markers near the top of the page (real chapter openers).
+_LESSON_HEADER_CHARS = 320
+
+
 def get_lesson_bounds(
     grade: int | None, subject: str | None
 ) -> tuple[int, int] | None:
-    """Return (min_lesson, max_lesson) detected in the index, or None."""
+    """Return trustworthy (min_lesson, max_lesson), or None if the map is weak.
+
+    Books without a reliable درس/فصل map must return None so retrieve falls
+    through to lesson_missing (ask for page/photo) instead of a false
+    lesson_out_of_range when only one stray header was OCR'd.
+    """
     if grade is None or not subject:
         return None
     starts = list_lesson_starts(grade, subject)
     if not starts:
         return None
-    numbers = [n for n, _ in starts]
-    return min(numbers), max(numbers)
+    numbers = sorted({n for n, _ in starts})
+    if len(numbers) < _MIN_TRUSTED_LESSON_MARKERS:
+        return None
+    # Incomplete maps that skip درس/فصل ۱ (e.g. only {2,3,4}) are not trusted
+    # for out-of-range — otherwise «درس اول» is wrongly rejected.
+    if numbers[0] != 1:
+        return None
+    max_n = numbers[-1]
+    if max_n < 1:
+        return None
+    coverage = len(numbers) / max_n
+    if coverage < _MIN_LESSON_COVERAGE_RATIO:
+        return None
+    return 1, max_n
 
 
 def find_lesson_containing_page(

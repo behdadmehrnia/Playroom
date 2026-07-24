@@ -284,6 +284,57 @@ def test_lesson_out_of_range_when_beyond_book_lesson_count() -> None:
     assert response.subject_title == "فارسی"
 
 
+def test_get_lesson_bounds_ignores_sparse_ocr_map() -> None:
+    """Single/stray chapter hits must not drive lesson_out_of_range."""
+    from api.textbook.app import store as store_mod
+
+    with patch.object(store_mod, "list_lesson_starts", return_value=[(7, 90)]):
+        assert store_mod.get_lesson_bounds(4, "math") is None
+
+    with patch.object(
+        store_mod, "list_lesson_starts", return_value=[(2, 10), (3, 20), (4, 30)]
+    ):
+        # Missing درس ۱ → incomplete map
+        assert store_mod.get_lesson_bounds(3, "math") is None
+
+    with patch.object(
+        store_mod,
+        "list_lesson_starts",
+        return_value=[(1, 5), (2, 15), (3, 25), (4, 40), (5, 55)],
+    ):
+        assert store_mod.get_lesson_bounds(4, "persian") == (1, 5)
+
+
+def test_sparse_lesson_map_yields_lesson_missing_not_oor() -> None:
+    with (
+        patch(
+            "api.textbook.app.retrieve_service.get_lesson_bounds",
+            return_value=None,
+        ),
+        patch(
+            "api.textbook.app.retrieve_service.get_lesson_pages",
+            return_value=([], None, None, None),
+        ),
+        patch(
+            "api.textbook.app.retrieve_service.lesson_search",
+            return_value=None,
+        ),
+    ):
+        response = retrieve_context(
+            RetrieveRequest(
+                query="",
+                grade=4,
+                subject="math",
+                lesson=3,
+                include_image="never",
+            )
+        )
+
+    assert response.matched is False
+    assert response.failure_reason == "lesson_missing"
+    assert response.max_lesson is None
+
+
 def test_lesson_out_of_range_system_prompt_mentions_max() -> None:
     from api.core.generation import format_lesson_out_of_range_instruction
 
