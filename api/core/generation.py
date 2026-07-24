@@ -15,6 +15,8 @@ from .constants import (
     TEXTBOOK_LOOKUP_FAILED_INSTRUCTION,
     TEXTBOOK_NEED_INFO_INSTRUCTION,
     TEXTBOOK_LESSON_MISSING_INSTRUCTION,
+    TEXTBOOK_LESSON_OUT_OF_RANGE_INSTRUCTION,
+    TEXTBOOK_BOOK_UNAVAILABLE_INSTRUCTION,
     TEXTBOOK_PAGE_OUT_OF_RANGE_INSTRUCTION,
     TEXTBOOK_UNREADABLE_INSTRUCTION,
     WEB_SEARCH_CONTEXT_HEADER,
@@ -58,6 +60,44 @@ def format_page_out_of_range_instruction(context: TextbookContext) -> str:
         bits.append(range_bits)
     if context.grade is not None:
         bits.append(f"پایه: {context.grade}")
+    return "\n".join(bits)
+
+
+def format_lesson_out_of_range_instruction(context: TextbookContext) -> str:
+    """Inject concrete lesson bounds when the requested درس/فصل is too high."""
+    title = context.subject_title or "این کتاب"
+    bits = [
+        TEXTBOOK_LESSON_OUT_OF_RANGE_INSTRUCTION,
+        f"کتاب: {title}",
+    ]
+    if context.lesson is not None:
+        bits.append(f"درس/فصل درخواستی: {context.lesson}")
+    if context.max_lesson is not None:
+        if context.min_lesson is not None and context.min_lesson > 1:
+            bits.append(
+                f"محدودهٔ درس‌های شناخته‌شده در پایگاه: {context.min_lesson} تا {context.max_lesson}"
+            )
+        else:
+            bits.append(f"این کتاب تا درس/فصل {context.max_lesson} دارد")
+    if context.grade is not None:
+        bits.append(f"پایه: {context.grade}")
+    return "\n".join(bits)
+
+
+def format_book_unavailable_instruction(context: TextbookContext) -> str:
+    """Tell the model this subject is not offered for the child's grade."""
+    title = context.subject_title or "این کتاب"
+    bits = [
+        TEXTBOOK_BOOK_UNAVAILABLE_INSTRUCTION,
+        f"کتاب: {title}",
+    ]
+    if context.grade is not None:
+        bits.append(f"پایهٔ درخواستی: {context.grade}")
+    if context.available_grades:
+        grades = "، ".join(str(g) for g in context.available_grades)
+        bits.append(f"پایه‌هایی که این کتاب را دارند: {grades}")
+    else:
+        bits.append("در فهرست فعلی، این کتاب برای هیچ پایه‌ای ثبت نشده است.")
     return "\n".join(bits)
 
 
@@ -130,11 +170,19 @@ def build_system_prompt(
         or textbook_context.failure_reason == "page_out_of_range"
     ):
         sections.append(format_page_out_of_range_instruction(textbook_context))
+    elif textbook_context and textbook_context.failure_reason == "lesson_out_of_range":
+        sections.append(format_lesson_out_of_range_instruction(textbook_context))
+    elif textbook_context and textbook_context.failure_reason == "book_unavailable":
+        sections.append(format_book_unavailable_instruction(textbook_context))
     elif textbook_context and textbook_context.failure_reason == "lesson_missing":
         title = textbook_context.subject_title or "این کتاب"
         bits = [TEXTBOOK_LESSON_MISSING_INSTRUCTION, f"کتاب: {title}"]
         if textbook_context.grade is not None:
             bits.append(f"پایه: {textbook_context.grade}")
+        if textbook_context.lesson is not None:
+            bits.append(f"درس/فصل درخواستی: {textbook_context.lesson}")
+        if textbook_context.max_lesson is not None:
+            bits.append(f"حداکثر درس شناخته‌شده: {textbook_context.max_lesson}")
         sections.append("\n".join(bits))
     elif textbook_context and textbook_context.page_query_failed:
         sections.append(TEXTBOOK_LOOKUP_FAILED_INSTRUCTION)

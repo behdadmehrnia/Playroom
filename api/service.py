@@ -231,7 +231,11 @@ async def _resolve_textbook_context(
                 textbook_context.page_query_failed = True
             elif reason == "need_grade_or_subject":
                 textbook_context.need_info = True
-            elif reason == "lesson_missing":
+            elif reason in {
+                "lesson_missing",
+                "lesson_out_of_range",
+                "book_unavailable",
+            }:
                 textbook_context.page_query_failed = True
             elif looks_like_textbook_page_query(textbook_query) or scope.lesson or scope.page:
                 textbook_context.page_query_failed = True

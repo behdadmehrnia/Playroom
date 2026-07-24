@@ -59,7 +59,10 @@ class TextbookContext(BaseModel):
     failure_reason: str | None = None
     min_page: int | None = None
     max_page: int | None = None
+    min_lesson: int | None = None
+    max_lesson: int | None = None
     lesson: int | None = None
+    available_grades: list[int] | None = None
 
 @dataclass(frozen=True)
 class TextbookScope:

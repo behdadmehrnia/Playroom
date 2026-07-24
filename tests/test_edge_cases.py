@@ -135,7 +135,12 @@ def test_resolve_scope_keeps_math_chapter_across_grade_followup() -> None:
     assert "ریاضی" in scope.compose_query()
 
 
-def test_resolve_scope_lesson_correction_clears_bad_page() -> None:
+def test_extract_lesson_si_o_yekom() -> None:
+    from api.core.textbook import _extract_lesson_number
+
+    assert _extract_lesson_number("درس سی و یکم") == 31
+    assert _extract_lesson_number("درس سی‌ویکم چی") == 31
+
     """Wrong page then «درس پنجم منظورم بود» → lesson lookup, not stuck out-of-range page."""
     messages = [
         ChatMessage(

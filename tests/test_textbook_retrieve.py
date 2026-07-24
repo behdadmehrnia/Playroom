@@ -174,6 +174,64 @@ def test_lesson_number_returns_full_span() -> None:
     assert "ریاضی درس سوم ب" in response.context_text
 
 
+def test_extract_lesson_si_o_yekom() -> None:
+    from api.core.textbook import _extract_lesson_number
+
+    assert _extract_lesson_number("درس سی و یکم") == 31
+    assert _extract_lesson_number("درس سی‌ویکم چی") == 31
+
+
+def test_book_unavailable_for_technology_grade_four() -> None:
+    """کار و فناوری is not offered in grade 4 — do not fall back to another book."""
+    with (
+        patch(
+            "api.textbook.app.retrieve_service.book_exists_for_grade",
+            return_value=False,
+        ),
+        patch(
+            "api.textbook.app.retrieve_service.grades_for_subject",
+            return_value=[6],
+        ),
+        patch("api.textbook.app.retrieve_service.topic_search") as topic_mock,
+        patch("api.textbook.app.retrieve_service.get_page") as page_mock,
+    ):
+        response = retrieve_context(
+            RetrieveRequest(
+                query="تمرین کتاب کار و فناوری کلاس چهارم",
+                include_image="never",
+            )
+        )
+        topic_mock.assert_not_called()
+        page_mock.assert_not_called()
+
+    assert response.matched is False
+    assert response.failure_reason == "book_unavailable"
+    assert response.subject == "technology"
+    assert response.grade == 4
+    assert response.available_grades == [6]
+    assert response.subject_title == "کار و فناوری"
+
+    ctx = TextbookContext(
+        matched=False,
+        failure_reason="book_unavailable",
+        subject="technology",
+        subject_title="کار و فناوری",
+        grade=4,
+        available_grades=[6],
+        page_query_failed=True,
+    )
+    from api.core.generation import format_book_unavailable_instruction
+
+    note = format_book_unavailable_instruction(ctx)
+    assert "کار و فناوری" in note
+    assert "4" in note
+    assert "6" in note
+    prompt = build_system_prompt("homework", textbook_context=ctx)
+    assert "کتاب: کار و فناوری" in prompt
+    assert "پایهٔ درخواستی: 4" in prompt
+    assert "متن کتاب ریاضی" not in prompt
+
+
 def test_out_of_range_instruction_uses_canonical_title() -> None:
     ctx = TextbookContext(
         matched=False,
@@ -195,3 +253,56 @@ def test_out_of_range_instruction_uses_canonical_title() -> None:
     prompt = build_system_prompt("homework", textbook_context=ctx)
     assert "هدیه های آسمان" in prompt
     assert "خارج از محدوده" in prompt or "وجود ندارد" in prompt
+
+
+def test_lesson_out_of_range_when_beyond_book_lesson_count() -> None:
+    with (
+        patch(
+            "api.textbook.app.retrieve_service.get_lesson_bounds",
+            return_value=(1, 17),
+        ),
+        patch("api.textbook.app.retrieve_service.get_lesson_pages") as pages_mock,
+        patch("api.textbook.app.retrieve_service.lesson_search") as search_mock,
+    ):
+        response = retrieve_context(
+            RetrieveRequest(
+                query="",
+                grade=4,
+                subject="persian",
+                lesson=31,
+                include_image="never",
+            )
+        )
+        pages_mock.assert_not_called()
+        search_mock.assert_not_called()
+
+    assert response.matched is False
+    assert response.failure_reason == "lesson_out_of_range"
+    assert response.lesson == 31
+    assert response.min_lesson == 1
+    assert response.max_lesson == 17
+    assert response.subject_title == "فارسی"
+
+
+def test_lesson_out_of_range_system_prompt_mentions_max() -> None:
+    from api.core.generation import format_lesson_out_of_range_instruction
+
+    ctx = TextbookContext(
+        matched=False,
+        failure_reason="lesson_out_of_range",
+        subject="persian",
+        subject_title="فارسی",
+        grade=4,
+        lesson=31,
+        min_lesson=1,
+        max_lesson=17,
+        page_query_failed=True,
+    )
+    note = format_lesson_out_of_range_instruction(ctx)
+    assert "فارسی" in note
+    assert "31" in note
+    assert "17" in note
+    assert "تا درس/فصل 17" in note or "تا درس ۱۷" in note or "17 دارد" in note
+    prompt = build_system_prompt("homework", textbook_context=ctx)
+    assert "وجود ندارد" in prompt or "خارج از محدوده" in prompt
+    assert "صفحهٔ همان درس ناموجود" in note or "درس ناموجود" in note

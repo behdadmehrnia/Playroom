@@ -12,10 +12,13 @@ from api.textbook.app.parser import parse_persian_query
 from api.textbook.app.subjects import canonical_subject_title, topic_label
 from api.textbook.app.store import (
     PageRecord,
+    book_exists_for_grade,
+    get_lesson_bounds,
     get_lesson_pages,
     get_neighbor_pages,
     get_page,
     get_printed_page_bounds,
+    grades_for_subject,
     lesson_search,
     resolve_image_path,
     topic_search,
@@ -89,6 +92,9 @@ def _unmatched(
     failure_reason: FailureReason | None = None,
     min_page: int | None = None,
     max_page: int | None = None,
+    min_lesson: int | None = None,
+    max_lesson: int | None = None,
+    available_grades: list[int] | None = None,
 ) -> RetrieveResponse:
     return RetrieveResponse(
         matched=False,
@@ -102,6 +108,9 @@ def _unmatched(
         failure_reason=failure_reason,
         min_page=min_page,
         max_page=max_page,
+        min_lesson=min_lesson,
+        max_lesson=max_lesson,
+        available_grades=available_grades,
     )
 
 
@@ -543,6 +552,19 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             failure_reason="need_grade_or_subject",
         )
 
+    # Known book+grade that is not offered in the catalog/index
+    # (e.g. کار و فناوری / تفکر و پژوهش فقط پایه ششم).
+    if grade is not None and subject and not book_exists_for_grade(grade, subject):
+        return _unmatched(
+            grade=grade,
+            subject=subject,
+            page=page,
+            lesson=lesson,
+            confidence=max(parsed.confidence, 0.9),
+            failure_reason="book_unavailable",
+            available_grades=grades_for_subject(subject) or None,
+        )
+
     # Whole-lesson span (کل درس / بقیه درس / کلمات سخت کل درس)
     if parsed.wants_whole_lesson and grade and subject and (page or lesson):
         pages, lesson_no, start_page, end_page = get_lesson_pages(
@@ -638,6 +660,20 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
 
     # Lesson / chapter lookup — return the full lesson span (all its pages).
     if grade and subject and lesson:
+        lesson_bounds = get_lesson_bounds(grade, subject)
+        if lesson_bounds is not None:
+            min_lesson, max_lesson = lesson_bounds
+            if lesson < min_lesson or lesson > max_lesson:
+                return _unmatched(
+                    grade=grade,
+                    subject=subject,
+                    lesson=lesson,
+                    confidence=parsed.confidence,
+                    failure_reason="lesson_out_of_range",
+                    min_lesson=min_lesson,
+                    max_lesson=max_lesson,
+                )
+
         pages, lesson_no, start_page, end_page = get_lesson_pages(
             grade,
             subject,
@@ -676,15 +712,22 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 confidence=max(parsed.confidence, 0.8),
                 detected_topic=parsed.topic,
                 detected_topic_label=topic_display,
+                lesson=lesson,
             )
             _attach_image(response, center, needs_image=needs_image)
             return response
+        # In-range (or unknown bounds) but OCR header not found.
+        extra: dict[str, int] = {}
+        if lesson_bounds is not None:
+            extra["min_lesson"] = lesson_bounds[0]
+            extra["max_lesson"] = lesson_bounds[1]
         return _unmatched(
             grade=grade,
             subject=subject,
             lesson=lesson,
             confidence=parsed.confidence,
             failure_reason="lesson_missing",
+            **extra,
         )
 
     # Topic / named-content FTS search — expand to full lesson when possible.

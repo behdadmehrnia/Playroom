@@ -924,6 +924,13 @@ def _textbook_context_from_payload(data: dict[str, Any]) -> TextbookContext:
         failure_reason=failure_reason,
         min_page=int(data["min_page"]) if data.get("min_page") is not None else None,
         max_page=int(data["max_page"]) if data.get("max_page") is not None else None,
+        min_lesson=int(data["min_lesson"]) if data.get("min_lesson") is not None else None,
+        max_lesson=int(data["max_lesson"]) if data.get("max_lesson") is not None else None,
+        available_grades=(
+            [int(g) for g in data["available_grades"]]
+            if isinstance(data.get("available_grades"), list)
+            else None
+        ),
         page_out_of_range=failure_reason == "page_out_of_range",
     )
 
@@ -985,6 +992,13 @@ async def _fetch_textbook_context_local(
                 failure_reason=failure_reason,
                 min_page=int(payload["min_page"]) if payload.get("min_page") is not None else None,
                 max_page=int(payload["max_page"]) if payload.get("max_page") is not None else None,
+                min_lesson=int(payload["min_lesson"]) if payload.get("min_lesson") is not None else None,
+                max_lesson=int(payload["max_lesson"]) if payload.get("max_lesson") is not None else None,
+                available_grades=(
+                    [int(g) for g in payload["available_grades"]]
+                    if isinstance(payload.get("available_grades"), list)
+                    else None
+                ),
                 page_out_of_range=failure_reason == "page_out_of_range",
             )
         return _textbook_context_from_payload(payload)
@@ -1073,6 +1087,13 @@ async def fetch_textbook_context(
             failure_reason=failure_reason,
             min_page=int(data["min_page"]) if data and data.get("min_page") is not None else None,
             max_page=int(data["max_page"]) if data and data.get("max_page") is not None else None,
+            min_lesson=int(data["min_lesson"]) if data and data.get("min_lesson") is not None else None,
+            max_lesson=int(data["max_lesson"]) if data and data.get("max_lesson") is not None else None,
+            available_grades=(
+                [int(g) for g in data["available_grades"]]
+                if data and isinstance(data.get("available_grades"), list)
+                else None
+            ),
             page_out_of_range=failure_reason == "page_out_of_range",
         )
 

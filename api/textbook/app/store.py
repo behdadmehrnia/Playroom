@@ -98,6 +98,41 @@ def load_catalog() -> list[CatalogBook]:
     return books
 
 
+def grades_for_subject(subject: str) -> list[int]:
+    """Grades that have this subject in catalog.json (sorted)."""
+    grades = sorted(
+        {
+            book.grade
+            for book in load_catalog()
+            if book.subject == subject
+        }
+    )
+    return grades
+
+
+def index_has_book(grade: int, subject: str) -> bool:
+    """True when the SQLite index has at least one page for this book."""
+    if not index_exists():
+        return False
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT 1 FROM pages
+            WHERE grade = ? AND subject = ? AND printed_page > 0
+            LIMIT 1
+            """,
+            (grade, subject),
+        ).fetchone()
+    return row is not None
+
+
+def book_exists_for_grade(grade: int, subject: str) -> bool:
+    """True if catalog or index lists this grade+subject textbook."""
+    if any(b.grade == grade and b.subject == subject for b in load_catalog()):
+        return True
+    return index_has_book(grade, subject)
+
+
 def find_book_by_file(filename: str) -> CatalogBook | None:
     for book in load_catalog():
         if book.file == filename:
@@ -243,11 +278,32 @@ _LESSON_ORDINALS: dict[int, str] = {
     18: "هجدهم",
     19: "نوزدهم",
     20: "بیستم",
+    21: "بیست و یکم",
+    22: "بیست و دوم",
+    23: "بیست و سوم",
+    24: "بیست و چهارم",
+    25: "بیست و پنجم",
+    26: "بیست و ششم",
+    27: "بیست و هفتم",
+    28: "بیست و هشتم",
+    29: "بیست و نهم",
+    30: "سی‌ام",
+    31: "سی و یکم",
+    32: "سی و دوم",
+    33: "سی و سوم",
+    34: "سی و چهارم",
+    35: "سی و پنجم",
+    36: "سی و ششم",
+    37: "سی و هفتم",
+    38: "سی و هشتم",
+    39: "سی و نهم",
+    40: "چهلم",
 }
 _LESSON_UNIT_WORDS = ("درس", "فصل")
 # Pages containing this many distinct lesson markers are treated as tables of
 # contents / unit dividers and skipped when locating a lesson's real start page.
 _LESSON_TOC_THRESHOLD = 3
+_MAX_DETECTABLE_LESSONS = 40
 
 
 def _lesson_target_patterns(lesson_number: int):
@@ -286,7 +342,9 @@ def lesson_search(grade: int, subject: str, lesson_number: int) -> PageRecord | 
         return None
 
     target_patterns = _lesson_target_patterns(lesson_number)
-    patterns_by_number = {n: _lesson_target_patterns(n) for n in range(1, 21)}
+    patterns_by_number = {
+        n: _lesson_target_patterns(n) for n in range(1, _MAX_DETECTABLE_LESSONS + 1)
+    }
 
     with _connect() as conn:
         rows = conn.execute(
@@ -326,14 +384,59 @@ _MAX_LESSON_PAGES = 14
 
 
 def list_lesson_starts(grade: int, subject: str) -> list[tuple[int, int]]:
-    """Return [(lesson_number, start_page), ...] sorted by start page."""
-    starts: list[tuple[int, int]] = []
-    for number in range(1, 21):
-        hit = lesson_search(grade, subject, number)
-        if hit:
-            starts.append((number, hit.printed_page))
+    """Return [(lesson_number, start_page), ...] sorted by start page.
+
+    Single pass over the book pages (avoids N full scans).
+    """
+    if not index_exists():
+        return []
+
+    patterns_by_number = {
+        n: _lesson_target_patterns(n) for n in range(1, _MAX_DETECTABLE_LESSONS + 1)
+    }
+    # lesson_number -> best (distinct_count, printed_page)
+    best: dict[int, tuple[int, int]] = {}
+
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT printed_page, text
+            FROM pages
+            WHERE grade = ? AND subject = ? AND printed_page > 0
+            ORDER BY printed_page
+            """,
+            (grade, subject),
+        ).fetchall()
+
+    for row in rows:
+        text = str(row["text"] or "")
+        if not text.strip():
+            continue
+        present = [
+            n
+            for n, patterns in patterns_by_number.items()
+            if any(p.search(text) for p in patterns)
+        ]
+        if not present:
+            continue
+        distinct = len(present)
+        page = int(row["printed_page"])
+        for number in present:
+            prev = best.get(number)
+            # Prefer non-TOC pages, then earlier pages.
+            score = (distinct, page)
+            if prev is None or score < prev:
+                best[number] = score
+
+    starts = [
+        (number, page)
+        for number, (distinct, page) in best.items()
+        if distinct < _LESSON_TOC_THRESHOLD
+    ]
+    if not starts:
+        # Fall back to whatever we saw (including TOC-heavy pages).
+        starts = [(number, page) for number, (_d, page) in best.items()]
     starts.sort(key=lambda item: item[1])
-    # Drop duplicates that resolved to the same page (keep lowest lesson number).
     deduped: list[tuple[int, int]] = []
     seen_pages: set[int] = set()
     for number, page in starts:
@@ -342,6 +445,19 @@ def list_lesson_starts(grade: int, subject: str) -> list[tuple[int, int]]:
         seen_pages.add(page)
         deduped.append((number, page))
     return deduped
+
+
+def get_lesson_bounds(
+    grade: int | None, subject: str | None
+) -> tuple[int, int] | None:
+    """Return (min_lesson, max_lesson) detected in the index, or None."""
+    if grade is None or not subject:
+        return None
+    starts = list_lesson_starts(grade, subject)
+    if not starts:
+        return None
+    numbers = [n for n, _ in starts]
+    return min(numbers), max(numbers)
 
 
 def find_lesson_containing_page(

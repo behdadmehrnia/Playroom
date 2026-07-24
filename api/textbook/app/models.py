@@ -10,6 +10,8 @@ FailureReason = Literal[
     "page_out_of_range",
     "page_missing",
     "lesson_missing",
+    "lesson_out_of_range",
+    "book_unavailable",
     "need_grade_or_subject",
     "none",
 ]
@@ -49,7 +51,10 @@ class RetrieveResponse(BaseModel):
     failure_reason: FailureReason | None = None
     min_page: int | None = None
     max_page: int | None = None
+    min_lesson: int | None = None
+    max_lesson: int | None = None
     lesson: int | None = None
+    available_grades: list[int] | None = None
 
 
 class HealthResponse(BaseModel):

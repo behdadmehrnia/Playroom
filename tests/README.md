@@ -205,6 +205,8 @@ pytest tests/ -q
 | 107 | صفحه پیدا نشد | lookup failed | بگو پیدا نشد؛ عکس صفحه یا متن سوال بخواه | `test_lookup_failed_asks_for_photo_or_question_text` |
 | 108 | فصل ریاضی → ششم → «۳۷» | صفحهٔ تکی بعد از سوال صفحه | scope.page=37 و retrieve exact_page (نه lesson_missing) | `test_resolve_scope_bare_page_after_page_ask` |
 | 109 | صفحه ۲۵۰ هدیه → ششم → «درس پنجم منظورم بود» | تصحیح صفحه به درس | page پاک شود؛ lesson=5 gifts؛ نه page_out_of_range | `test_resolve_scope_lesson_correction_clears_bad_page` |
+| 110 | «درس سی و یکم فارسی پایه چهارم» وقتی کتاب تا ۱۷ درس دارد | lesson_out_of_range | بگوید این کتاب آن درس را ندارد (حداکثر را بگوید) — نه «صفحه بگو» | `test_lesson_out_of_range_when_beyond_book_lesson_count` |
+| 111 | «تمرین کتاب کار و فناوری کلاس چهارم» | book_unavailable | بگوید این کتاب برای پایه چهارم نیست (مثلاً فقط ششم) — نه ریاضی اشتباه | `test_book_unavailable_for_technology_grade_four` |
 
 **API — `/v1/textbook/query`:**
 ```json
