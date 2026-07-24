@@ -146,9 +146,10 @@ async def retrieve_textbook_endpoint(
             elif reason in {
                 "lesson_missing",
                 "lesson_out_of_range",
-                "book_unavailable",
             }:
                 context.page_query_failed = True
+            elif reason == "book_unavailable":
+                pass
             elif looks_like_textbook_page_query(query) or (
                 scope is not None and (scope.page is not None or scope.lesson is not None)
             ):

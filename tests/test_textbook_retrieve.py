@@ -335,6 +335,35 @@ def test_sparse_lesson_map_yields_lesson_missing_not_oor() -> None:
     assert response.max_lesson is None
 
 
+def test_book_unavailable_system_prompt_mentions_available_grades() -> None:
+    from api.core.generation import (
+        compose_textbook_failure_reply,
+        format_book_unavailable_instruction,
+    )
+
+    ctx = TextbookContext(
+        matched=False,
+        failure_reason="book_unavailable",
+        subject="technology",
+        subject_title="کار و فناوری",
+        grade=4,
+        available_grades=[6],
+        page_query_failed=False,
+    )
+    note = format_book_unavailable_instruction(ctx)
+    assert "کار و فناوری" in note
+    assert "4" in note
+    assert "6" in note
+    canned = compose_textbook_failure_reply(ctx)
+    assert canned is not None
+    assert "کار و فناوری" in canned
+    assert "4" in canned
+    assert "6" in canned
+    assert "عکس صفحه ۱۰" not in canned
+    prompt = build_system_prompt("homework", textbook_context=ctx)
+    assert "برای پایه 4 نیست" in prompt or "پایهٔ درخواستی: 4" in prompt
+
+
 def test_lesson_out_of_range_system_prompt_mentions_max() -> None:
     from api.core.generation import format_lesson_out_of_range_instruction
 

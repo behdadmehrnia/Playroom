@@ -234,9 +234,12 @@ async def _resolve_textbook_context(
             elif reason in {
                 "lesson_missing",
                 "lesson_out_of_range",
-                "book_unavailable",
             }:
                 textbook_context.page_query_failed = True
+            elif reason == "book_unavailable":
+                # Do not mark as generic page_query_failed — that steers the
+                # model toward «عکس صفحه بفرست» instead of «این پایه این کتاب را ندارد».
+                pass
             elif looks_like_textbook_page_query(textbook_query) or scope.lesson or scope.page:
                 textbook_context.page_query_failed = True
             else:
@@ -455,6 +458,34 @@ async def run_chat(
         body=body,
         emit=emit,
     )
+
+    from api.core.generation import compose_textbook_failure_reply
+
+    canned_textbook = (
+        compose_textbook_failure_reply(textbook_context) if textbook_context else None
+    )
+    if canned_textbook:
+        response = canned_textbook
+        if resolved_persona and resolved_persona != "none":
+            from api.core import append_persona_marker
+
+            response = append_persona_marker(response, resolved_persona)
+        textbook_diag = build_textbook_diag(
+            query_sent=textbook_query, context=textbook_context
+        )
+        return ChatResult(
+            response=response,
+            persona=resolved_persona,
+            persona_source=persona_source,
+            attempts=0,
+            status_events=status_events,
+            logs=list(status_events),
+            textbook_context=textbook_context,
+            textbook=textbook_diag,
+            reflection=None,
+            revised=False,
+            used_safe_fallback=False,
+        )
 
     web_search_context, web_search_query = await _resolve_web_search_context(
         settings=settings,

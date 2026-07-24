@@ -111,6 +111,40 @@ def format_book_unavailable_instruction(context: TextbookContext) -> str:
     return "\n".join(bits)
 
 
+def compose_textbook_failure_reply(context: TextbookContext) -> str | None:
+    """Deterministic child-facing reply for hard textbook failures (demo-safe).
+
+    LLMs often ignore book_unavailable and ask for a photo of the missing book;
+    for this failure we answer from the structured fields instead.
+    """
+    if context.failure_reason != "book_unavailable":
+        return None
+    title = context.subject_title or "این کتاب"
+    grade = context.grade
+    avail = context.available_grades or []
+    if grade is not None and avail:
+        if len(avail) == 1:
+            avail_bit = f"معمولاً برای پایهٔ {avail[0]} است"
+        else:
+            grades = " و ".join(str(g) for g in avail)
+            avail_bit = f"برای پایه‌های {grades} هست"
+        return (
+            f"کتاب «{title}» برای پایه {grade} توی کتاب‌های مدرسه‌ای که من دارم نیست؛ "
+            f"{avail_bit}. "
+            "اگر پایه را اشتباه گفتی بگو، یا اسم کتاب درست را بگو. "
+            "اگر تمرین از کتاب دیگری است، عکس یا متن همان سوال را بفرست 📚"
+        )
+    if grade is not None:
+        return (
+            f"کتاب «{title}» برای پایه {grade} توی کتاب‌های مدرسه‌ای که من دارم نیست. "
+            "اسم کتاب یا پایه را دوباره بگو، یا عکس/متن سوال را از کتاب درست بفرست 📚"
+        )
+    return (
+        f"کتاب «{title}» را برای پایه‌ای که گفتی پیدا نکردم. "
+        "پایه و نام کتاب را دوباره بگو، یا عکس سوال را بفرست 📚"
+    )
+
+
 def format_need_info_instruction(context: TextbookContext) -> str:
     """Ask only for slots still missing — prefer page, accept chapter/lesson."""
     known: list[str] = []
