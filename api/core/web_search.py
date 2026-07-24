@@ -40,6 +40,17 @@ _WEB_SEARCH_NEED_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Child (or demo) explicitly asks to look something up online — allow even
+# outside the usual creative/gamer/storyteller personas.
+_WEB_SEARCH_EXPLICIT_RE = re.compile(
+    r"(?:"
+    r"از\s*اینترنت|تو\s*اینترنت|روی\s*اینترنت|"
+    r"جستجو\s*کن|سرچ\s*کن|تحقیق\s*کن|"
+    r"از\s*(?:روی\s*)?نت\b|گوگل\s*کن"
+    r")",
+    re.IGNORECASE,
+)
+
 # Named title + version (e.g. «فورزا هورایزن ۶»، «Horizon 5»).
 _WEB_SEARCH_GAME_VERSION_RE = re.compile(
     r"(?:"
@@ -167,6 +178,8 @@ def looks_like_web_search_request(
     cleaned = text.strip()
     if not cleaned:
         return False
+    if _WEB_SEARCH_EXPLICIT_RE.search(cleaned):
+        return True
     if _WEB_SEARCH_NEED_RE.search(cleaned):
         return True
     if _WEB_SEARCH_GAME_VERSION_RE.search(cleaned):
@@ -181,6 +194,11 @@ def looks_like_web_search_request(
     if len(cleaned) < 12:
         return False
     return False
+
+
+def looks_like_explicit_web_search_request(text: str) -> bool:
+    """True when the user explicitly asks to search the internet."""
+    return bool(text and _WEB_SEARCH_EXPLICIT_RE.search(text.strip()))
 
 
 def _strip_web_search_chat_fillers(text: str) -> str:
@@ -977,9 +995,12 @@ async def resolve_web_search_context(
     """Gate + fetch web search for eligible personas."""
     user_message = _get_latest_user_message(messages)
     query = build_web_search_query(messages)
+    persona_ok = persona in WEB_SEARCH_PERSONAS or looks_like_explicit_web_search_request(
+        user_message
+    )
     should_fetch = bool(
         enable_web_search
-        and persona in WEB_SEARCH_PERSONAS
+        and persona_ok
         and query
         and looks_like_web_search_request(user_message, persona=persona)
     )

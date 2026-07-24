@@ -32,6 +32,16 @@ def test_looks_like_web_search_respects_persona_gate() -> None:
     assert looks_like_web_search_request("داستان یه ربات فضایی بگو") is False
 
 
+def test_explicit_internet_ask_is_web_search() -> None:
+    from api.core.web_search import looks_like_explicit_web_search_request
+
+    text = "الان رئیس جمهور ایران کیه؟ از اینترنت بگو"
+    assert looks_like_explicit_web_search_request(text) is True
+    assert looks_like_web_search_request(text, persona="homework") is True
+    assert looks_like_explicit_web_search_request("سلام خوبی") is False
+    assert looks_like_web_search_request("یه تمرین ریاضی حل کنیم", persona="homework") is False
+
+
 def test_build_web_search_query() -> None:
     messages = [
         ChatMessage(role="user", content="ماینکرفت چطور الماس پیدا کنم؟"),

@@ -60,6 +60,26 @@ def test_extract_grade_ignores_lesson_number() -> None:
     assert _extract_grade_token("پایه ششم") is not None
 
 
+def test_extract_grade_prefers_class_over_chapter_ordinal() -> None:
+    """«فصل سوم ریاضی کلاس چهارم» must yield grade 4, not get stuck on فصل سوم."""
+    assert _extract_grade_token("فصل سوم ریاضی کلاس چهارم رو توضیح بده") == "چهارم"
+    from api.core.types import ChatMessage
+    from api.core.textbook import resolve_textbook_scope
+
+    scope = resolve_textbook_scope(
+        [
+            ChatMessage(
+                role="user",
+                content="فصل سوم ریاضی کلاس چهارم رو توضیح بده",
+            )
+        ]
+    )
+    assert scope.grade == 4
+    assert scope.subject_id == "math"
+    assert scope.lesson == 3
+    assert scope.can_retrieve() is True
+
+
 def test_build_textbook_query_carries_grade_past_lesson_number() -> None:
     """«درس سوم» is lesson 3, not grade 3 — grade comes from earlier «کلاس چهارم»."""
     messages = [

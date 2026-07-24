@@ -407,18 +407,30 @@ def _extract_grade_token(text: str) -> str | None:
     if (exercise_context or lesson_context) and not has_grade_keyword:
         return None
 
-    match = _TEXTBOOK_GRADE_TOKEN_RE.search(text)
-    if match:
+    # Prefer پایه/کلاس/دبستان anchors so «فصل سوم … کلاس چهارم» → چهارم, not None.
+    anchored = re.search(
+        r"(?:پایه|کلاس|دبستان)\s*([3-6۳-۶٣-٦]|سوم|چهارم|پنجم|ششم)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if anchored:
+        return anchored.group(1)
+
+    for match in _TEXTBOOK_GRADE_TOKEN_RE.finditer(text):
         token = match.group(0).strip()
         # Bare ordinals (سوم، چهارم، …) must not follow درس/فصل.
         if re.fullmatch(r"سوم|چهارم|پنجم|ششم", token, flags=re.IGNORECASE):
             if re.search(
-                rf"(?:درس|فصل)\s*{token}|{token}\s*(?:درس|فصل)",
+                rf"(?:درس|فصل)\s*{re.escape(token)}|{re.escape(token)}\s*(?:درس|فصل)",
                 text,
                 flags=re.IGNORECASE,
             ):
-                return None
-        return token
+                continue
+        # Normalize «کلاس ۴» / «پایه 6» matches down to the digit/ordinal.
+        stripped = re.sub(
+            r"^(?:پایه|کلاس)\s*", "", token, flags=re.IGNORECASE
+        ).strip()
+        return stripped or token
     casual = _TEXTBOOK_GRADE_CASUAL_RE.search(text)
     if casual and (has_grade_keyword or casual.group(1)):
         # Normalize «چهارمم» → «چهارم»

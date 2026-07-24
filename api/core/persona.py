@@ -618,12 +618,12 @@ async def resolve_active_persona(
 
     # Concrete textbook asks leave sticky play modes immediately (no confirmation),
     # so the child gets real page lookup instead of invented homework.
-    if (
-        latest_user_msg
-        and looks_like_textbook_session_switch(latest_user_msg)
-        and current_persona not in {"teacher", "homework"}
-    ):
-        return PersonaResolution(persona="homework")
+    # «برای تدریس …» is a teacher-prep ask → teacher (not homework).
+    if latest_user_msg and looks_like_textbook_session_switch(latest_user_msg):
+        if re.search(r"برای\s*تدریس|طرح\s*درس|ایده\s*(?:ی\s*)?تدریس", latest_user_msg):
+            return PersonaResolution(persona="teacher")
+        if current_persona not in {"teacher", "homework"}:
+            return PersonaResolution(persona="homework")
 
     # Answer a pending switch confirmation from the previous assistant turn.
     pending = _extract_pending_switch_from_history(messages)
