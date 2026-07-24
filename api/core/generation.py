@@ -96,6 +96,16 @@ def format_book_unavailable_instruction(context: TextbookContext) -> str:
     if context.available_grades:
         grades = "، ".join(str(g) for g in context.available_grades)
         bits.append(f"پایه‌هایی که این کتاب را دارند: {grades}")
+        if context.grade is not None:
+            must = (
+                f"پاسخ اجباری (با لحن کودکانه بازنویسی کن): "
+                f"{title} برای پایه {context.grade} نیست"
+            )
+            if len(context.available_grades) == 1:
+                must += f"؛ معمولاً برای پایهٔ {grades} است."
+            else:
+                must += f"؛ در کتاب‌های ما برای پایه‌های {grades} هست."
+            bits.append(must)
     else:
         bits.append("در فهرست فعلی، این کتاب برای هیچ پایه‌ای ثبت نشده است.")
     return "\n".join(bits)
