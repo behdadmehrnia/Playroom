@@ -13,6 +13,7 @@ from api.textbook.app.subjects import canonical_subject_title, topic_label
 from api.textbook.app.store import (
     PageRecord,
     book_exists_for_grade,
+    find_lesson_containing_page,
     get_lesson_bounds,
     get_lesson_pages,
     get_neighbor_pages,
@@ -244,6 +245,12 @@ def _build_lesson_span_response(
         "برای درخواست‌هایی مثل کلمات سختِ کل درس یا بقیهٔ درس، از همهٔ این صفحات استفاده کن؛ "
         "از کودک نخواه صفحهٔ بعد را خودش باز کند."
     )
+    if prefer_page is not None:
+        header += (
+            f" کودک صفحه {prefer_page} را مشخص کرده؛ "
+            f"اگر پرسید «این صفحه / محتویات صفحه»، فقط بلوک «صفحه {prefer_page}» را توصیف کن "
+            "و محتوای صفحات دیگر را به آن صفحه نسبت نده."
+        )
     blocks: list[str] = [header]
     all_usable = True
     for page in pages:
@@ -585,7 +592,10 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 topic=topic_display,
             )
 
-    # Exact page lookup — prefer full lesson/chapter context when boundaries exist.
+    # Exact page lookup — stay on that page (+ neighbors). Do NOT expand to the
+    # whole lesson span: weak OCR chapter maps often glue several دروس together
+    # (e.g. pages 30–43) and the model then attributes later-lesson text to the
+    # child's page («صفحه ۳۴ چیه؟» → محتوای «ارزش علم» از صفحه ۳۶).
     if grade and subject and page:
         bounds = _resolve_page_bounds(grade, subject)
         if bounds is not None:
@@ -602,33 +612,23 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
 
         center = get_page(grade, subject, page)
         if center:
-            pages, lesson_no, start_page, end_page = get_lesson_pages(
-                grade,
-                subject,
-                page=page,
-            )
-            if (
-                len(pages) >= 2
-                and start_page is not None
-                and end_page is not None
-                and end_page > start_page
-            ):
-                return _build_lesson_span_response(
-                    pages,
-                    lesson_number=lesson_no,
-                    start_page=start_page,
-                    end_page=end_page,
-                    include_image=request.include_image,
-                    confidence=max(parsed.confidence, 0.9),
-                    prefer_page=page,
-                    topic=topic_display,
-                )
-
             neighbors = get_neighbor_pages(grade, subject, page, request.include_neighbors)
             needs_image = _needs_image(center, request.include_image)
             context_text, text_usable = _build_context_text(
                 center, neighbors, topic=topic_display
             )
+            # Soft lesson hint (no full dump) so the model knows the chapter name
+            # without inventing that neighboring pages are «this page».
+            lesson_hit = find_lesson_containing_page(grade, subject, page)
+            if lesson_hit is not None:
+                lesson_no, start_page, end_page = lesson_hit
+                hint = (
+                    f"توجه: صفحه {page} داخل درس/فصل {lesson_no} "
+                    f"(تقریباً صفحات {start_page} تا {end_page}) است. "
+                    f"کودک همین صفحه {page} را خواسته — فقط همین صفحه (+همسایه‌های کوتاه زیر) را "
+                    f"محتوای «این صفحه» بدان؛ متن صفحات دیگر درس را به این صفحه نسبت نده.\n\n"
+                )
+                context_text = hint + (context_text or "")
             response = RetrieveResponse(
                 matched=True,
                 match_type="exact_page",
@@ -636,6 +636,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 subject=subject,
                 subject_title=_book_title(center),
                 page=page,
+                lesson=lesson_hit[0] if lesson_hit else None,
                 context_text=context_text,
                 text_usable=text_usable,
                 confidence=max(parsed.confidence, 0.9),

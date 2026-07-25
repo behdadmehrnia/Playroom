@@ -528,6 +528,42 @@ def find_lesson_containing_page(
     return number, start, end
 
 
+def _lesson_marker_count(text: str) -> int:
+    """How many distinct درس/فصل numbers appear on a page (TOC pages score high)."""
+    if not text.strip():
+        return 0
+    patterns_by_number = {
+        n: _lesson_target_patterns(n) for n in range(1, _MAX_DETECTABLE_LESSONS + 1)
+    }
+    return sum(
+        1
+        for patterns in patterns_by_number.values()
+        if any(p.search(text) for p in patterns)
+    )
+
+
+def _refine_lesson_start_past_toc(
+    grade: int,
+    subject: str,
+    lesson_number: int,
+    *,
+    after_page: int,
+    scan_ahead: int = 40,
+) -> int | None:
+    """Find a non-TOC page for this lesson after a contents-list hit."""
+    target_patterns = _lesson_target_patterns(lesson_number)
+    for printed in range(after_page + 1, after_page + scan_ahead + 1):
+        record = get_page(grade, subject, printed)
+        if not record:
+            continue
+        text = record.text or ""
+        if not any(p.search(text) for p in target_patterns):
+            continue
+        if _lesson_marker_count(text) < _LESSON_TOC_THRESHOLD:
+            return printed
+    return None
+
+
 def get_lesson_pages(
     grade: int,
     subject: str,
@@ -553,11 +589,21 @@ def get_lesson_pages(
         if not center:
             return [], None, None, None
         start = center.printed_page
+        # TOC pages list many دروس (e.g. page 29: درس چهارم + درس پنجم). Prefer a
+        # later page that opens this lesson alone; otherwise treat as missing so
+        # we ask for a real page instead of inventing from the contents list.
+        if _lesson_marker_count(center.text or "") >= _LESSON_TOC_THRESHOLD:
+            refined = _refine_lesson_start_past_toc(
+                grade, subject, lesson_number, after_page=start
+            )
+            if refined is None:
+                return [], None, None, None
+            start = refined
         starts = list_lesson_starts(grade, subject)
         end = start + max_pages - 1
-        for number, other_start in starts:
+        for _number, other_start in starts:
             if other_start > start:
-                end = other_start - 1
+                end = min(end, other_start - 1)
                 break
     elif page is not None:
         found = find_lesson_containing_page(grade, subject, page)

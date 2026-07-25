@@ -121,35 +121,42 @@ def test_page_missing_inside_range_is_not_out_of_range() -> None:
     assert response.subject_title == "هدیه های آسمان"
 
 
-def test_exact_page_expands_to_lesson_span() -> None:
-    center = _page(grade=4, subject="persian", printed_page=33, text="شروع درس")
+def test_exact_page_stays_exact_not_full_lesson_span() -> None:
+    """Page asks must not dump a whole (often wrong) lesson span into context."""
+    center = _page(grade=4, subject="persian", printed_page=34, text="روباه و زاغ")
+    neighbor = _page(grade=4, subject="persian", printed_page=35, text="ادامه")
     lesson_pages = [
-        _page(grade=4, subject="persian", printed_page=33, text="صفحه اول درس"),
-        _page(grade=4, subject="persian", printed_page=34, text="صفحه دوم درس"),
-        _page(grade=4, subject="persian", printed_page=35, text="صفحه سوم درس"),
+        _page(grade=4, subject="persian", printed_page=30, text="درس سوم"),
+        center,
+        _page(grade=4, subject="persian", printed_page=36, text="ارزش علم — نباید به صفحه ۳۴ بچسبد"),
     ]
     with (
         patch("api.textbook.app.retrieve_service.get_printed_page_bounds", return_value=(1, 150)),
         patch("api.textbook.app.retrieve_service.get_page", return_value=center),
         patch(
+            "api.textbook.app.retrieve_service.get_neighbor_pages",
+            return_value=[center, neighbor],
+        ),
+        patch(
             "api.textbook.app.retrieve_service.get_lesson_pages",
-            return_value=(lesson_pages, 3, 33, 35),
+            return_value=(lesson_pages, 3, 30, 43),
+        ),
+        patch(
+            "api.textbook.app.retrieve_service.find_lesson_containing_page",
+            return_value=(3, 30, 43),
         ),
     ):
         response = retrieve_context(
-            RetrieveRequest(query="صفحه ۳۳ فارسی پایه چهارم", include_image="never")
+            RetrieveRequest(query="صفحه ۳۴ فارسی پایه چهارم", include_image="never")
         )
 
     assert response.matched is True
-    assert response.match_type == "lesson_span"
-    assert response.page == 33
-    assert response.subject_title == "فارسی"
+    assert response.match_type == "exact_page"
+    assert response.page == 34
     assert response.context_text is not None
-    assert "صفحه اول درس" in response.context_text
-    assert "صفحه سوم درس" in response.context_text
-    assert response.detected_topic_label is not None
-    assert "درس 3" in response.detected_topic_label
-    assert "33" in response.detected_topic_label and "35" in response.detected_topic_label
+    assert "روباه و زاغ" in response.context_text
+    assert "ارزش علم — نباید به صفحه ۳۴ بچسبد" not in response.context_text
+    assert "صفحه 34" in response.context_text or "۳۴" in (response.context_text or "")
 
 
 def test_lesson_number_returns_full_span() -> None:
