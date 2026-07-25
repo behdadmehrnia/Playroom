@@ -14,6 +14,7 @@ from api.textbook.app.store import (
     TocEntry,
     clear_toc_entries,
     find_toc_candidate_pages,
+    get_toc_job_status,
     resolve_image_path,
     resolve_page_from_toc,
     save_toc_entries,
@@ -28,6 +29,12 @@ _TOC_PROMPT_PATH = _PROMPTS_DIR / "toc_extract.md"
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
+# Keep TOC vision payloads small — raw MinerU PNGs can OOM the chat worker.
+_TOC_MAX_IMAGES = 2
+_TOC_IMAGE_MAX_SIDE = 1024
+_TOC_IMAGE_JPEG_QUALITY = 55
+_TOC_IMAGE_MAX_BYTES = 350_000
+
 
 def _load_toc_system_prompt() -> str:
     if _TOC_PROMPT_PATH.is_file():
@@ -39,10 +46,28 @@ def _load_toc_system_prompt() -> str:
 
 
 def _page_image_b64(page: PageRecord) -> str | None:
+    """Encode a page image for TOC vision — resized JPEG to avoid OOM on chat."""
     path = resolve_image_path(page.image_path)
     if not path or not path.is_file():
         return None
-    return base64.b64encode(path.read_bytes()).decode("ascii")
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        with Image.open(path) as img:
+            img = img.convert("RGB")
+            # Textbook page PNGs are often multi-MB; shrink hard for TOC parse.
+            img.thumbnail((_TOC_IMAGE_MAX_SIDE, _TOC_IMAGE_MAX_SIDE), Image.Resampling.LANCZOS)
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=_TOC_IMAGE_JPEG_QUALITY, optimize=True)
+            raw = buf.getvalue()
+        if len(raw) > _TOC_IMAGE_MAX_BYTES:
+            return None
+        return base64.b64encode(raw).decode("ascii")
+    except Exception:  # noqa: BLE001 — vision is optional; text-only TOC still works
+        logger.warning("TOC image encode failed for page %s", page.printed_page)
+        return None
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
@@ -170,16 +195,21 @@ def _build_user_content(pages: list[PageRecord]) -> list[dict[str, Any]]:
             ),
         }
     )
+    # At most two compressed images — full-resolution PNGs OOM the chat worker.
+    attached = 0
     for page in pages:
+        if attached >= _TOC_MAX_IMAGES:
+            break
         encoded = _page_image_b64(page)
         if not encoded:
             continue
         parts.append(
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
             }
         )
+        attached += 1
     return parts
 
 
@@ -195,7 +225,11 @@ async def build_toc_map(
     if not force and toc_map_ready(grade, subject):
         return True
 
-    pages = find_toc_candidate_pages(grade, subject)
+    # Avoid stacking parallel TOC builds (each loads page images).
+    if not force and get_toc_job_status(grade, subject) == "running":
+        return False
+
+    pages = find_toc_candidate_pages(grade, subject, max_pages=_TOC_MAX_IMAGES)
     if not pages:
         set_toc_job_status(grade, subject, "error", "no TOC candidate pages")
         return False

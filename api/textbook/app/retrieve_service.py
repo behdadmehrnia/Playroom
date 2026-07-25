@@ -225,6 +225,35 @@ def _needs_image(page: PageRecord, include_image: IncludeImageMode) -> bool:
     return False
 
 
+_MAX_LESSON_IMAGES = 2
+_LLM_IMAGE_MAX_SIDE = 1280
+_LLM_IMAGE_JPEG_QUALITY = 60
+_LLM_IMAGE_MAX_BYTES = 450_000
+
+
+def _encode_page_image_b64(page: PageRecord) -> str | None:
+    """Compress page PNG to a small JPEG for LLM context (avoids OOM)."""
+    image_file = resolve_image_path(page.image_path)
+    if not image_file or not image_file.is_file():
+        return None
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        with Image.open(image_file) as img:
+            img = img.convert("RGB")
+            img.thumbnail((_LLM_IMAGE_MAX_SIDE, _LLM_IMAGE_MAX_SIDE), Image.Resampling.LANCZOS)
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=_LLM_IMAGE_JPEG_QUALITY, optimize=True)
+            raw = buf.getvalue()
+        if len(raw) > _LLM_IMAGE_MAX_BYTES:
+            return None
+        return base64.b64encode(raw).decode("ascii")
+    except Exception:  # noqa: BLE001 — image is optional
+        return None
+
+
 def _attach_image(
     response: RetrieveResponse,
     page: PageRecord,
@@ -238,13 +267,9 @@ def _attach_image(
         response.image_url = (
             f"/v1/page-image?grade={page.grade}&subject={page.subject}&page={page.printed_page}"
         )
-    image_file = resolve_image_path(page.image_path)
-    if image_file and image_file.is_file():
-        encoded = base64.b64encode(image_file.read_bytes()).decode("ascii")
+    encoded = _encode_page_image_b64(page)
+    if encoded:
         response.image_base64 = encoded
-
-
-_MAX_LESSON_IMAGES = 4
 
 
 def _attach_lesson_images(
@@ -269,10 +294,10 @@ def _attach_lesson_images(
     for page in ranked:
         if include_image != "always" and not _needs_image(page, include_image):
             continue
-        image_file = resolve_image_path(page.image_path)
-        if not image_file or not image_file.is_file():
+        encoded = _encode_page_image_b64(page)
+        if not encoded:
             continue
-        encoded_images.append(base64.b64encode(image_file.read_bytes()).decode("ascii"))
+        encoded_images.append(encoded)
         if len(encoded_images) >= _MAX_LESSON_IMAGES:
             break
     if not encoded_images:

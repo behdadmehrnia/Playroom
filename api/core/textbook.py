@@ -1039,28 +1039,6 @@ async def _fetch_textbook_context_local(
     if mode not in {"never", "auto", "always"}:
         mode = "auto"
 
-    # Build TOC cache before lesson/chapter retrieve when OCR headers may miss.
-    if (
-        grade is not None
-        and subject
-        and page is None
-        and (lesson is not None or chapter is not None)
-        and llm_client is not None
-        and backend_model
-    ):
-        try:
-            await asyncio.wait_for(
-                ensure_toc_map(
-                    grade,
-                    subject,
-                    llm_client=llm_client,
-                    model=backend_model,
-                ),
-                timeout=toc_timeout_sec,
-            )
-        except Exception:  # noqa: BLE001 — TOC is best-effort fallback
-            pass
-
     def _retrieve() -> TextbookContext:
         try:
             response = retrieve_context(
@@ -1110,7 +1088,37 @@ async def _fetch_textbook_context_local(
             )
         return _textbook_context_from_payload(payload)
 
-    return await asyncio.to_thread(_retrieve)
+    # Prefer OCR/index retrieve first. Only build TOC when lesson/chapter misses —
+    # eager TOC vision with full page PNGs was OOM-killing the chat worker.
+    context = await asyncio.to_thread(_retrieve)
+    needs_toc = bool(
+        context
+        and not context.matched
+        and context.failure_reason == "lesson_missing"
+        and grade is not None
+        and subject
+        and page is None
+        and (lesson is not None or chapter is not None)
+        and llm_client is not None
+        and backend_model
+    )
+    if needs_toc:
+        try:
+            built = await asyncio.wait_for(
+                ensure_toc_map(
+                    grade,
+                    subject,
+                    llm_client=llm_client,
+                    model=backend_model,
+                ),
+                timeout=toc_timeout_sec,
+            )
+        except Exception:  # noqa: BLE001 — TOC is best-effort fallback
+            built = False
+        if built:
+            context = await asyncio.to_thread(_retrieve)
+
+    return context
 
 
 async def fetch_textbook_context(
