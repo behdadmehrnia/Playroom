@@ -86,6 +86,7 @@ from .prompts import (
     get_intent_detection_prompt,
     get_persona_prompt,
     get_reflection_prompt,
+    get_web_search_query_prompt,
 )
 from .chat_title import (
     CHAT_TITLE_METADATA_KEY,
@@ -143,6 +144,8 @@ from .web_search import (
     fetch_web_search_context,
     looks_like_web_search_request,
     resolve_web_search_context,
+    rewrite_web_search_query,
+    sanitize_web_search_query,
 )
 
 __all__ = [
@@ -214,9 +217,11 @@ __all__ = [
     "detect_intent",
     "generate_chat_title",
     "get_chat_title_prompt",
+    "get_web_search_query_prompt",
     "is_generic_chat_title",
     "looks_like_title_generation_request",
     "sanitize_chat_title",
+    "sanitize_web_search_query",
     "should_emit_chat_title",
     "extract_math_expressions",
     "extract_message_content",
@@ -250,6 +255,7 @@ __all__ = [
     "resolve_manual_persona",
     "resolve_textbook_scope",
     "resolve_web_search_context",
+    "rewrite_web_search_query",
     "run_math_tool_for_message",
     "run_response_loop",
     "status_calculating_math",

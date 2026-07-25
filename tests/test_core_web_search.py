@@ -50,6 +50,67 @@ def test_build_web_search_query() -> None:
     assert "ماینکرفت" in query or "الماس" in query
 
 
+def test_sanitize_web_search_query() -> None:
+    from api.core.web_search import sanitize_web_search_query
+
+    assert sanitize_web_search_query('  "God of War new release"  ') == "God of War new release"
+    assert sanitize_web_search_query("Query: Minecraft diamonds") == "Minecraft diamonds"
+    assert sanitize_web_search_query("```\nForza Horizon 6\n```") == "Forza Horizon 6"
+
+
+@pytest.mark.asyncio
+async def test_rewrite_web_search_query_uses_llm() -> None:
+    from api.core.web_search import rewrite_web_search_query
+
+    class _FakeLLM:
+        async def complete(self, request):  # noqa: ANN001
+            assert "گاد آو وار" in request.messages[-1]["content"]
+            return "God of War new release"
+
+    messages = [
+        ChatMessage(role="user", content="بازی کنیم"),
+        ChatMessage(
+            role="user",
+            content="جدیدترین بازی گاد آو واری که میخواد بیاد چیه",
+        ),
+    ]
+    query = await rewrite_web_search_query(
+        _FakeLLM(),  # type: ignore[arg-type]
+        backend_model="test-model",
+        messages=messages,
+    )
+    assert query == "God of War new release"
+    assert "گاد" not in query
+
+
+@pytest.mark.asyncio
+async def test_rewrite_web_search_query_falls_back_on_error() -> None:
+    from api.core.web_search import rewrite_web_search_query
+
+    class _BrokenLLM:
+        async def complete(self, request):  # noqa: ANN001
+            raise RuntimeError("boom")
+
+    messages = [
+        ChatMessage(
+            role="user",
+            content="جدیدترین بازی گاد آو واری که میخواد بیاد چیه",
+        ),
+    ]
+    query = await rewrite_web_search_query(
+        _BrokenLLM(),  # type: ignore[arg-type]
+        backend_model="test-model",
+        messages=messages,
+        draft="گاد آو وار جدید",
+    )
+    assert query == "گاد آو وار جدید"
+
+
+def test_god_of_war_ask_triggers_search_gate() -> None:
+    text = "جدیدترین بازی گاد آو واری که میخواد بیاد چیه"
+    assert looks_like_web_search_request(text, persona="gamer") is True
+
+
 def test_web_search_query_variants() -> None:
     variants = _web_search_query_variants("minecraft diamond")
     assert variants[0] == "minecraft diamond"

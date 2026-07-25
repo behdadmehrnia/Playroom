@@ -34,7 +34,6 @@ from api.core import (
     build_textbook_diag,
     build_textbook_query,
     build_web_search_diag,
-    build_web_search_query,
     detect_intent,
     fetch_textbook_context,
     generate_response,
@@ -314,12 +313,13 @@ async def _resolve_web_search_context(
     persona: PersonaId,
     enable_web_search: bool | None,
     emit: Callable[[str], Awaitable[None]],
+    llm_client: LLMClient | None = None,
+    backend_model: str | None = None,
 ) -> tuple[WebSearchContext | None, str | None]:
     """Delegate to ``api.core.resolve_web_search_context``."""
     search_enabled = (
         enable_web_search if enable_web_search is not None else settings.enable_web_search
     )
-    query = build_web_search_query(messages)
     context = await resolve_web_search_context(
         messages=messages,
         persona=persona,
@@ -332,10 +332,12 @@ async def _resolve_web_search_context(
         timeout_sec=settings.web_search_request_timeout_sec,
         debug=settings.web_search_debug,
         on_status=emit,
+        llm_client=llm_client,
+        backend_model=backend_model or settings.backend_model,
     )
-    if context is None and not query:
+    if context is None:
         return None, None
-    return context, query or (context.query if context else None)
+    return context, context.query or None
 
 
 async def _run_response_loop(
@@ -502,6 +504,8 @@ async def run_chat(
         persona=resolved_persona,
         enable_web_search=enable_web_search,
         emit=emit,
+        llm_client=llm_client,
+        backend_model=backend_model,
     )
 
     user_message = _get_latest_user_message(messages)

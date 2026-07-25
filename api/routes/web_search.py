@@ -12,7 +12,9 @@ from api.core import (
     build_web_search_query,
     fetch_web_search_context,
     looks_like_web_search_request,
+    rewrite_web_search_query,
 )
+from api.core.types import LLMClient
 from api.models import (
     WebSearchQueryRequest,
     WebSearchQueryResponse,
@@ -20,17 +22,28 @@ from api.models import (
     WebSearchRetrieveResponse,
 )
 
-from .deps import get_settings
+from .deps import get_llm_client, get_settings
 from .helpers import to_chat_messages
 
 router = APIRouter()
 
+
 @router.post("/v1/web-search/query", response_model=WebSearchQueryResponse, tags=["Web Search"])
 async def web_search_query_endpoint(
     req: WebSearchQueryRequest,
+    settings: Settings = Depends(get_settings),
+    llm_client: LLMClient = Depends(get_llm_client),
 ) -> WebSearchQueryResponse:
     messages = to_chat_messages(req.messages)
-    query = build_web_search_query(messages)
+    draft = build_web_search_query(messages)
+    query = draft
+    if draft and settings.backend_model:
+        query = await rewrite_web_search_query(
+            llm_client,
+            backend_model=settings.backend_model,
+            messages=messages,
+            draft=draft,
+        )
     latest = _get_latest_user_message(messages)
     return WebSearchQueryResponse(
         query=query,
@@ -46,13 +59,22 @@ async def web_search_query_endpoint(
 async def retrieve_web_search_endpoint(
     req: WebSearchRetrieveRequest,
     settings: Settings = Depends(get_settings),
+    llm_client: LLMClient = Depends(get_llm_client),
 ) -> WebSearchRetrieveResponse:
     messages = to_chat_messages(req.messages) if req.messages else []
 
     if req.query is not None:
         query = req.query.strip()
     elif messages:
-        query = build_web_search_query(messages)
+        draft = build_web_search_query(messages)
+        query = draft
+        if draft and settings.backend_model:
+            query = await rewrite_web_search_query(
+                llm_client,
+                backend_model=settings.backend_model,
+                messages=messages,
+                draft=draft,
+            )
     else:
         query = ""
 

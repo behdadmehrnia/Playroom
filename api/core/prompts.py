@@ -41,3 +41,7 @@ def get_reflection_prompt() -> str:
 
 def get_chat_title_prompt() -> str:
     return _load_prompt("chat_title.md")
+
+
+def get_web_search_query_prompt() -> str:
+    return _load_prompt("web_search_query.md")

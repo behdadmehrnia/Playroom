@@ -23,8 +23,16 @@ from .messages import (
     _http_post_json,
     _normalize_api_base_url,
 )
+from .prompts import get_web_search_query_prompt
 from .status import status_fetching_web_search, status_web_search_unavailable
-from .types import ChatMessage, WebSearchContext, WebSearchQueryDiag, WebSearchResult
+from .types import (
+    ChatMessage,
+    LLMClient,
+    LLMCompletionRequest,
+    WebSearchContext,
+    WebSearchQueryDiag,
+    WebSearchResult,
+)
 
 _WEB_SEARCH_NEED_RE = re.compile(
     r"(?:"
@@ -222,7 +230,7 @@ def _topic_from_user_text(text: str) -> str:
 
 
 def build_web_search_query(messages: list[ChatMessage], *, max_len: int = 200) -> str:
-    """Build a search query the way a person would type it into Google.
+    """Heuristic draft from the child's words (fallback when LLM rewrite is unavailable).
 
     Uses the child's own words (minus chat fluff). If they say «تحقیق کن دربارش»,
     pulls the topic from earlier turns — no name dictionaries / aliases.
@@ -254,14 +262,102 @@ def build_web_search_query(messages: list[ChatMessage], *, max_len: int = 200) -
     return core[: max_len - 1].rstrip() + "…"
 
 
+def sanitize_web_search_query(raw: str, *, max_len: int = 120) -> str:
+    """Keep a single search-query line from an LLM rewrite."""
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    fence = re.search(r"```(?:\w+)?\s*(.*?)```", text, flags=re.DOTALL)
+    if fence:
+        text = fence.group(1).strip()
+    # First non-empty line only.
+    for line in text.splitlines():
+        line = line.strip().strip("\"'`").strip()
+        if line:
+            text = line
+            break
+    text = re.sub(r"\s+", " ", text).strip(" .،!")
+    # Drop common wrapper phrases the model might still emit.
+    text = re.sub(
+        r"^(?:query|search|کوئری|جستجو)\s*[:：\-]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not text or len(text) < 2:
+        return ""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1].rstrip() + "…"
+
+
+def _recent_user_transcript(messages: list[ChatMessage], *, limit: int = 6) -> str:
+    lines: list[str] = []
+    for message in messages:
+        if message.role != "user" or not message.content.strip():
+            continue
+        lines.append(message.content.strip())
+    return "\n".join(lines[-limit:])
+
+
+async def rewrite_web_search_query(
+    llm_client: LLMClient,
+    *,
+    backend_model: str,
+    messages: list[ChatMessage],
+    draft: str | None = None,
+    timeout_sec: float = 6.0,
+) -> str:
+    """Rewrite the child's ask into a search-engine-friendly query via LLM.
+
+    Falls back to ``draft`` / heuristic ``build_web_search_query`` on any failure.
+    """
+    fallback = (draft or "").strip() or build_web_search_query(messages)
+    if not fallback or not backend_model:
+        return fallback
+
+    transcript = _recent_user_transcript(messages)
+    request = LLMCompletionRequest(
+        model=backend_model,
+        temperature=0.0,
+        messages=[
+            {"role": "system", "content": get_web_search_query_prompt()},
+            {
+                "role": "user",
+                "content": (
+                    "از این حرف‌های کودک یک کوئری جستجو بساز.\n\n"
+                    f"پیش‌نویس خام (fallback):\n{fallback}\n\n"
+                    f"پیام‌های اخیر کاربر:\n{transcript or fallback}"
+                ),
+            },
+        ],
+    )
+    try:
+        raw = await asyncio.wait_for(
+            llm_client.complete(request),
+            timeout=timeout_sec,
+        )
+    except Exception:  # noqa: BLE001 — search rewrite must never break chat
+        return fallback
+    rewritten = sanitize_web_search_query(raw)
+    return rewritten or fallback
+
+
 def _web_search_query_variants(query: str) -> list[str]:
-    """Light natural refinements only (same words + optional «بازی»)."""
+    """Light natural refinements only (same words + optional game cue)."""
     cleaned = query.strip()
     if not cleaned:
         return []
     variants = [cleaned]
-    if "بازی" not in cleaned and "game" not in cleaned.lower():
-        variants.append(f"{cleaned} بازی")
+    lower = cleaned.lower()
+    if "بازی" not in cleaned and "game" not in lower:
+        # Prefer Latin cue when the query is already mostly English.
+        if re.search(r"[A-Za-z]{3,}", cleaned) and not re.search(
+            r"[\u0600-\u06FF]{3,}", cleaned
+        ):
+            variants.append(f"{cleaned} game")
+        else:
+            variants.append(f"{cleaned} بازی")
     return variants
 
 
@@ -991,21 +1087,33 @@ async def resolve_web_search_context(
     timeout_sec: float = DEFAULT_WEB_SEARCH_TIMEOUT_SEC,
     debug: bool = False,
     on_status: Callable[[str], Awaitable[None]] | None = None,
+    llm_client: LLMClient | None = None,
+    backend_model: str | None = None,
 ) -> WebSearchContext | None:
     """Gate + fetch web search for eligible personas."""
     user_message = _get_latest_user_message(messages)
-    query = build_web_search_query(messages)
+    draft = build_web_search_query(messages)
     persona_ok = persona in WEB_SEARCH_PERSONAS or looks_like_explicit_web_search_request(
         user_message
     )
     should_fetch = bool(
         enable_web_search
         and persona_ok
-        and query
+        and draft
         and looks_like_web_search_request(user_message, persona=persona)
     )
     if not should_fetch:
         return None
+
+    query = draft
+    if llm_client is not None and backend_model:
+        query = await rewrite_web_search_query(
+            llm_client,
+            backend_model=backend_model,
+            messages=messages,
+            draft=draft,
+            timeout_sec=min(6.0, max(3.0, timeout_sec)),
+        )
 
     if on_status:
         await on_status(status_fetching_web_search())
