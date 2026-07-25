@@ -91,6 +91,7 @@ def _unmatched(
     subject: str | None = None,
     page: int | None = None,
     lesson: int | None = None,
+    chapter: int | None = None,
     confidence: float = 0.0,
     failure_reason: FailureReason | None = None,
     min_page: int | None = None,
@@ -107,6 +108,7 @@ def _unmatched(
         subject_title=_title_for(subject),
         page=page,
         lesson=lesson,
+        chapter=chapter,
         confidence=confidence,
         failure_reason=failure_reason,
         min_page=min_page,
@@ -115,6 +117,70 @@ def _unmatched(
         max_lesson=max_lesson,
         available_grades=available_grades,
     )
+
+
+def _build_exact_page_response(
+    *,
+    grade: int,
+    subject: str,
+    page: int,
+    include_neighbors: int,
+    include_image: IncludeImageMode,
+    confidence: float,
+    topic: str | None = None,
+    detected_topic: str | None = None,
+    chapter: int | None = None,
+    lesson: int | None = None,
+) -> RetrieveResponse | None:
+    """Exact page (+ tiny neighbors). Returns None if the page is not in the index."""
+    center = get_page(grade, subject, page)
+    if not center:
+        return None
+    neighbor_n = min(include_neighbors, 1)
+    neighbors = get_neighbor_pages(grade, subject, page, neighbor_n)
+    needs_image = _needs_image(center, include_image)
+    context_text, text_usable = _build_context_text(
+        center, neighbors, topic=topic
+    )
+    lesson_hit = find_lesson_containing_page(grade, subject, page)
+    response_lesson = lesson
+    if lesson_hit is not None:
+        lesson_no, start_page, end_page = lesson_hit
+        span = (end_page - start_page) if end_page and start_page else 99
+        if span <= 8:
+            hint = (
+                f"توجه: صفحه {page} داخل درس/فصل {lesson_no} "
+                f"(صفحات {start_page} تا {end_page}) است. "
+                f"کودک همین صفحه {page} را خواسته — فقط همین صفحه را "
+                f"محتوای «این صفحه» بدان.\n\n"
+            )
+            context_text = hint + (context_text or "")
+            if response_lesson is None:
+                response_lesson = lesson_no
+        else:
+            hint = (
+                f"توجه: کودک صفحه {page} را خواسته. "
+                f"فقط همین صفحه (+همسایهٔ کوتاه) را توصیف کن؛ "
+                f"از روی صفحات دیگر داستان نساز.\n\n"
+            )
+            context_text = hint + (context_text or "")
+    response = RetrieveResponse(
+        matched=True,
+        match_type="exact_page",
+        grade=grade,
+        subject=subject,
+        subject_title=_book_title(center),
+        page=page,
+        lesson=response_lesson,
+        chapter=chapter,
+        context_text=context_text,
+        text_usable=text_usable,
+        confidence=confidence,
+        detected_topic=detected_topic,
+        detected_topic_label=topic,
+    )
+    _attach_image(response, center, needs_image=needs_image)
+    return response
 
 
 def _resolve_page_bounds(
@@ -515,6 +581,8 @@ def _build_topic_search_response(
 
 def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
     # Structured fields from chat scope win; query is only for topic / legacy NL.
+    from api.textbook.app.toc_agent import lookup_toc_start_page
+
     parsed = (
         parse_persian_query(request.query)
         if (request.query or "").strip()
@@ -524,6 +592,9 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
     subject = request.subject or parsed.subject
     page = request.page if request.page is not None else parsed.page
     lesson = request.lesson if request.lesson is not None else parsed.lesson
+    chapter = (
+        request.chapter if request.chapter is not None else getattr(parsed, "chapter", None)
+    )
     topic_display = topic_label(parsed.topic) if parsed.topic else parsed.topic_alias
 
     # Page + book without grade: still catch impossible page numbers against
@@ -546,17 +617,19 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             subject=subject,
             page=page,
             lesson=lesson,
+            chapter=chapter,
             confidence=parsed.confidence,
             failure_reason="need_grade_or_subject",
         )
 
-    # A page/lesson is only meaningful together with a specific book + grade.
-    if (page or lesson) and not (grade and subject):
+    # A page/lesson/chapter is only meaningful together with a specific book + grade.
+    if (page or lesson or chapter) and not (grade and subject):
         return _unmatched(
             grade=grade,
             subject=subject,
             page=page,
             lesson=lesson,
+            chapter=chapter,
             confidence=parsed.confidence,
             failure_reason="need_grade_or_subject",
         )
@@ -569,6 +642,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             subject=subject,
             page=page,
             lesson=lesson,
+            chapter=chapter,
             confidence=max(parsed.confidence, 0.9),
             failure_reason="book_unavailable",
             available_grades=grades_for_subject(subject) or None,
@@ -594,6 +668,20 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 topic=topic_display,
             )
 
+    # Chapter via TOC map (فصل ≠ درس; OCR header maps conflate them).
+    if grade and subject and chapter is not None and page is None:
+        toc_page = lookup_toc_start_page(grade, subject, chapter=chapter)
+        if toc_page is not None:
+            page = toc_page
+        elif lesson is None:
+            return _unmatched(
+                grade=grade,
+                subject=subject,
+                chapter=chapter,
+                confidence=parsed.confidence,
+                failure_reason="lesson_missing",
+            )
+
     # Exact page lookup — stay on that page (+ neighbors). Do NOT expand to the
     # whole lesson span: weak OCR chapter maps often glue several دروس together
     # (e.g. pages 30–43) and the model then attributes later-lesson text to the
@@ -612,54 +700,20 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                     confidence=parsed.confidence,
                 )
 
-        center = get_page(grade, subject, page)
-        if center:
-            # Keep neighbors tiny for exact-page asks so a bad lesson map
-            # (or the next درس) does not leak into «این صفحه چیه؟».
-            neighbor_n = min(request.include_neighbors, 1)
-            neighbors = get_neighbor_pages(grade, subject, page, neighbor_n)
-            needs_image = _needs_image(center, request.include_image)
-            context_text, text_usable = _build_context_text(
-                center, neighbors, topic=topic_display
-            )
-            # Optional soft lesson label — omit huge/untrusted spans (bad OCR maps
-            # like 30–52) so we do not nudge the model to mix later دروس in.
-            lesson_hit = find_lesson_containing_page(grade, subject, page)
-            if lesson_hit is not None:
-                lesson_no, start_page, end_page = lesson_hit
-                span = (end_page - start_page) if end_page and start_page else 99
-                if span <= 8:
-                    hint = (
-                        f"توجه: صفحه {page} داخل درس/فصل {lesson_no} "
-                        f"(صفحات {start_page} تا {end_page}) است. "
-                        f"کودک همین صفحه {page} را خواسته — فقط همین صفحه را "
-                        f"محتوای «این صفحه» بدان.\n\n"
-                    )
-                    context_text = hint + (context_text or "")
-                else:
-                    hint = (
-                        f"توجه: کودک صفحه {page} را خواسته. "
-                        f"فقط همین صفحه (+همسایهٔ کوتاه) را توصیف کن؛ "
-                        f"از روی صفحات دیگر داستان نساز.\n\n"
-                    )
-                    context_text = hint + (context_text or "")
-                    lesson_hit = None  # do not trust lesson no. on huge spans
-            response = RetrieveResponse(
-                matched=True,
-                match_type="exact_page",
-                grade=grade,
-                subject=subject,
-                subject_title=_book_title(center),
-                page=page,
-                lesson=lesson_hit[0] if lesson_hit else None,
-                context_text=context_text,
-                text_usable=text_usable,
-                confidence=max(parsed.confidence, 0.9),
-                detected_topic=parsed.topic,
-                detected_topic_label=topic_display,
-            )
-            _attach_image(response, center, needs_image=needs_image)
-            return response
+        exact = _build_exact_page_response(
+            grade=grade,
+            subject=subject,
+            page=page,
+            include_neighbors=request.include_neighbors,
+            include_image=request.include_image,
+            confidence=max(parsed.confidence, 0.9),
+            topic=topic_display,
+            detected_topic=parsed.topic,
+            chapter=chapter,
+            lesson=lesson,
+        )
+        if exact is not None:
+            return exact
 
         # Inside printed range but missing from index — do not guess content.
         min_page = bounds[0] if bounds else None
@@ -668,13 +722,15 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             grade=grade,
             subject=subject,
             page=page,
+            chapter=chapter,
+            lesson=lesson,
             confidence=parsed.confidence,
             failure_reason="page_missing",
             min_page=min_page,
             max_page=max_page,
         )
 
-    # Lesson / chapter lookup — return the full lesson span (all its pages).
+    # Lesson lookup — OCR header map first, then TOC fallback.
     if grade and subject and lesson:
         lesson_bounds = get_lesson_bounds(grade, subject)
         if lesson_bounds is not None:
@@ -733,6 +789,24 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             )
             _attach_image(response, center, needs_image=needs_image)
             return response
+
+        # OCR header miss / TOC-only hit → resolve via cached فهرست map.
+        toc_page = lookup_toc_start_page(grade, subject, lesson=lesson)
+        if toc_page is not None:
+            exact = _build_exact_page_response(
+                grade=grade,
+                subject=subject,
+                page=toc_page,
+                include_neighbors=request.include_neighbors,
+                include_image=request.include_image,
+                confidence=max(parsed.confidence, 0.85),
+                topic=topic_display,
+                detected_topic=parsed.topic,
+                lesson=lesson,
+            )
+            if exact is not None:
+                return exact
+
         # In-range (or unknown bounds) but OCR header not found / only TOC hit.
         extra: dict[str, int] = {}
         if lesson_bounds is not None:

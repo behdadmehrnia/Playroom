@@ -62,6 +62,7 @@ class TextbookContext(BaseModel):
     min_lesson: int | None = None
     max_lesson: int | None = None
     lesson: int | None = None
+    chapter: int | None = None
     available_grades: list[int] | None = None
 
 @dataclass(frozen=True)
@@ -72,7 +73,8 @@ class TextbookScope:
     subject: str | None = None  # Persian keyword, e.g. «فارسی»
     subject_id: str | None = None  # catalog id, e.g. «persian»
     page: int | None = None
-    lesson: int | None = None
+    lesson: int | None = None  # درس N only
+    chapter: int | None = None  # فصل N only (distinct from lesson)
     # Free-text leftover for topic search only (names, «میرزا کوچک خان», …).
     topic_query: str | None = None
 
@@ -90,13 +92,24 @@ class TextbookScope:
             and self.lesson is not None
         )
 
+    def has_chapter_lookup(self) -> bool:
+        return (
+            self.grade is not None
+            and self.subject_id is not None
+            and self.chapter is not None
+        )
+
     def can_retrieve(self) -> bool:
         """True when structured fields (or a topic query) can hit the index.
 
         Page lookup is preferred (most precise). Lesson/chapter is also enough
         to attempt retrieve when the child gave a chapter instead of a page.
         """
-        if self.has_page_lookup() or self.has_lesson_lookup():
+        if (
+            self.has_page_lookup()
+            or self.has_lesson_lookup()
+            or self.has_chapter_lookup()
+        ):
             return True
         if self.topic_query and self.topic_query.strip():
             return True
@@ -105,8 +118,10 @@ class TextbookScope:
     def debug_label(self) -> str:
         """Human-readable scope for logs/debug — not used as a parser input."""
         parts: list[str] = []
+        if self.chapter is not None:
+            parts.append(f"فصل {self.chapter}")
         if self.lesson is not None:
-            parts.append(f"درس/فصل {self.lesson}")
+            parts.append(f"درس {self.lesson}")
         if self.page is not None:
             parts.append(f"صفحه {self.page}")
         label = (
@@ -136,6 +151,8 @@ class TextbookScope:
         parts: list[str] = []
         if user_message and user_message.strip():
             parts.append(user_message.strip())
+        if self.chapter is not None:
+            parts.append(f"فصل {self.chapter}")
         if self.lesson is not None:
             parts.append(f"درس {self.lesson}")
         if self.page is not None:
@@ -170,6 +187,8 @@ class TextbookScope:
             payload["page"] = self.page
         if self.lesson is not None:
             payload["lesson"] = self.lesson
+        if self.chapter is not None:
+            payload["chapter"] = self.chapter
         return payload
 
 

@@ -167,6 +167,8 @@ async def _resolve_textbook_context(
     enable_textbook_context: bool | None,
     body: dict[str, Any] | None = None,
     emit: Callable[[str], Awaitable[None]],
+    llm_client: LLMClient | None = None,
+    backend_model: str | None = None,
 ) -> tuple[TextbookContext | None, str | None]:
     """Fetch textbook context using the same gate and heuristics as chat."""
     ctx_enabled = (
@@ -209,8 +211,11 @@ async def _resolve_textbook_context(
             grade=scope.grade,
             subject=scope.subject_id,
             page=scope.page,
-            # Prefer exact page; only fall back to lesson when page is unknown.
+            # Prefer exact page; only fall back to lesson/chapter when page unknown.
             lesson=scope.lesson if scope.page is None else None,
+            chapter=scope.chapter if scope.page is None else None,
+            llm_client=llm_client,
+            backend_model=backend_model,
         )
         if settings.textbook_debug and textbook_context:
             await emit(
@@ -260,6 +265,7 @@ async def _resolve_textbook_context(
                 "subject": textbook_context.subject,
                 "page": textbook_context.page,
                 "lesson": textbook_context.lesson or scope.lesson,
+                "chapter": textbook_context.chapter or scope.chapter,
             }
         return textbook_context, textbook_query or None
 
@@ -294,6 +300,7 @@ async def _resolve_textbook_context(
                 ),
                 page=scope.page,
                 lesson=scope.lesson,
+                chapter=scope.chapter,
             )
             return partial, textbook_query or None
 
@@ -457,6 +464,8 @@ async def run_chat(
         enable_textbook_context=enable_textbook_context,
         body=body,
         emit=emit,
+        llm_client=llm_client,
+        backend_model=backend_model,
     )
 
     from api.core.generation import compose_textbook_failure_reply

@@ -184,6 +184,7 @@ class ParsedQuery:
     topic_alias: str | None = None
     page: int | None = None
     lesson: int | None = None
+    chapter: int | None = None
     search_text: str | None = None
     wants_topic_search: bool = False
     wants_whole_lesson: bool = False
@@ -327,15 +328,15 @@ def parse_persian_query(text: str) -> ParsedQuery:
             if parsed_page is not None:
                 result.page = parsed_page
 
-    # Lesson / chapter (درس دوازدهم، فصل سوم، درس ۱۲، ۳ فصل)
+    # Lesson (درس …) and chapter (فصل …) are distinct numbering schemes.
     lesson_match = re.search(
-        r"(?:درس|فصل)\s*(\d{1,2})",
+        r"درس\s*(\d{1,2})",
         normalized,
         flags=re.IGNORECASE,
     )
     if not lesson_match:
         lesson_match = re.search(
-            r"(?<!\d)(\d{1,2})\s*(?:درس|فصل)",
+            r"(?<!\d)(\d{1,2})\s*درس",
             normalized,
             flags=re.IGNORECASE,
         )
@@ -343,18 +344,46 @@ def parse_persian_query(text: str) -> ParsedQuery:
         result.lesson = int(lesson_match.group(1))
     else:
         lesson_word_match = re.search(
-            rf"(?:درس|فصل)\s+({_LESSON_ORDINAL_ALT})",
+            rf"درس\s+({_LESSON_ORDINAL_ALT})",
             text,
             flags=re.IGNORECASE,
         )
         if not lesson_word_match:
             lesson_word_match = re.search(
-                rf"({_LESSON_ORDINAL_ALT})\s*(?:درس|فصل)",
+                rf"({_LESSON_ORDINAL_ALT})\s*درس",
                 text,
                 flags=re.IGNORECASE,
             )
         if lesson_word_match:
             result.lesson = LESSON_ORDINAL_WORDS.get(lesson_word_match.group(1))
+
+    chapter_match = re.search(
+        r"فصل\s*(\d{1,2})",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not chapter_match:
+        chapter_match = re.search(
+            r"(?<!\d)(\d{1,2})\s*فصل",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    if chapter_match:
+        result.chapter = int(chapter_match.group(1))
+    else:
+        chapter_word_match = re.search(
+            rf"فصل\s+({_LESSON_ORDINAL_ALT})",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not chapter_word_match:
+            chapter_word_match = re.search(
+                rf"({_LESSON_ORDINAL_ALT})\s*فصل",
+                text,
+                flags=re.IGNORECASE,
+            )
+        if chapter_word_match:
+            result.chapter = LESSON_ORDINAL_WORDS.get(chapter_word_match.group(1))
 
     # 1) Book-level subject (prefer subject nearest to «صفحه», else last mention)
     book_subject, book_alias = _find_subject_near_page(text, lower, BOOK_SUBJECT_SYNONYMS)
@@ -378,7 +407,9 @@ def parse_persian_query(text: str) -> ParsedQuery:
     # Standalone grade ordinal fallback (e.g. "ششم" without پایه/کلاس).
     # Only applied when a subject or page is present, to avoid confusing
     # lesson ordinals ("درس سوم") with grade in generic chat.
-    if result.grade is None and (result.subject or result.page or result.lesson):
+    if result.grade is None and (
+        result.subject or result.page or result.lesson or result.chapter
+    ):
         for word in ("ششم", "پنجم", "چهارم", "سوم"):
             # Skip when the ordinal is actually a lesson/chapter reference
             # («درس ششم» / «فصل سوم»)، not the student's grade.
@@ -403,7 +434,7 @@ def parse_persian_query(text: str) -> ParsedQuery:
         score += 0.05
     if result.page:
         score += 0.35
-    elif result.lesson:
+    elif result.lesson or result.chapter:
         score += 0.25
     elif result.search_text:
         score += 0.2

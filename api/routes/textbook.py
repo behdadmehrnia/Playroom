@@ -16,14 +16,17 @@ from api.core import (
     looks_like_textbook_page_query,
     resolve_textbook_scope,
 )
+from api.core.types import LLMClient
 from api.models import (
+    RebuildTocRequest,
+    RebuildTocResponse,
     TextbookQueryRequest,
     TextbookQueryResponse,
     TextbookRetrieveRequest,
     TextbookRetrieveResponse,
 )
 
-from .deps import get_settings
+from .deps import get_llm_client, get_settings
 from .helpers import to_chat_messages
 
 router = APIRouter()
@@ -44,7 +47,8 @@ async def textbook_query_endpoint(
         query=query,
         looks_like_page_query=looks_like_textbook_page_query(query)
         or scope.page is not None
-        or scope.lesson is not None,
+        or scope.lesson is not None
+        or scope.chapter is not None,
         looks_like_help_request=looks_like_textbook_help_request(latest),
         latest_user_message=latest,
     )
@@ -54,6 +58,7 @@ async def textbook_query_endpoint(
 async def retrieve_textbook_endpoint(
     req: TextbookRetrieveRequest,
     settings: Settings = Depends(get_settings),
+    llm_client: LLMClient = Depends(get_llm_client),
 ) -> TextbookRetrieveResponse:
     messages = to_chat_messages(req.messages) if req.messages else []
     scope = resolve_textbook_scope(messages) if messages else None
@@ -97,6 +102,7 @@ async def retrieve_textbook_endpoint(
     context: TextbookContext | None = None
     fetched = False
     debug: str | None = None
+    backend_model = settings.backend_model
 
     if should_fetch:
         include_image = (req.include_image or settings.textbook_include_image)
@@ -125,6 +131,9 @@ async def retrieve_textbook_endpoint(
                 subject=scope.subject_id,
                 page=scope.page,
                 lesson=scope.lesson if scope.page is None else None,
+                chapter=scope.chapter if scope.page is None else None,
+                llm_client=llm_client,
+                backend_model=backend_model,
             )
         else:
             context = await fetch_textbook_context(
@@ -134,6 +143,8 @@ async def retrieve_textbook_endpoint(
                 include_neighbors=neighbors,
                 include_image=include_image,  # type: ignore[arg-type]
                 timeout_sec=timeout,
+                llm_client=llm_client,
+                backend_model=backend_model,
             )
         fetched = True
         if context and not context.matched:
@@ -151,7 +162,12 @@ async def retrieve_textbook_endpoint(
             elif reason == "book_unavailable":
                 pass
             elif looks_like_textbook_page_query(query) or (
-                scope is not None and (scope.page is not None or scope.lesson is not None)
+                scope is not None
+                and (
+                    scope.page is not None
+                    or scope.lesson is not None
+                    or scope.chapter is not None
+                )
             ):
                 context.page_query_failed = True
             else:
@@ -179,4 +195,31 @@ async def retrieve_textbook_endpoint(
         gate_reason=gate_reason,
         textbook_context=context,
         debug=debug,
+    )
+
+
+@router.post("/v1/rebuild-toc", response_model=RebuildTocResponse, tags=["Textbook"])
+async def rebuild_toc_endpoint(
+    req: RebuildTocRequest,
+    settings: Settings = Depends(get_settings),
+    llm_client: LLMClient = Depends(get_llm_client),
+) -> RebuildTocResponse:
+    """Force-rebuild TOC map for one book from indexed فهرست pages."""
+    from api.textbook.app.store import list_toc_entries
+    from api.textbook.app.toc_agent import build_toc_map
+
+    ok = await build_toc_map(
+        req.grade,
+        req.subject.strip(),
+        llm_client=llm_client,
+        model=settings.backend_model,
+        force=req.force,
+    )
+    entries = list_toc_entries(req.grade, req.subject.strip()) if ok else []
+    return RebuildTocResponse(
+        ok=ok,
+        grade=req.grade,
+        subject=req.subject.strip(),
+        entry_count=len(entries),
+        error=None if ok else "TOC build failed",
     )

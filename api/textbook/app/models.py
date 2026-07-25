@@ -29,7 +29,8 @@ class RetrieveRequest(BaseModel):
     grade: int | None = Field(default=None, ge=3, le=6)
     subject: str | None = Field(default=None, description="شناسه درس مثل math")
     page: int | None = Field(default=None, ge=1)
-    lesson: int | None = Field(default=None, ge=1, description="شماره درس/فصل")
+    lesson: int | None = Field(default=None, ge=1, description="شماره درس")
+    chapter: int | None = Field(default=None, ge=1, description="شماره فصل")
 
 
 class RetrieveResponse(BaseModel):
@@ -54,6 +55,7 @@ class RetrieveResponse(BaseModel):
     min_lesson: int | None = None
     max_lesson: int | None = None
     lesson: int | None = None
+    chapter: int | None = None
     available_grades: list[int] | None = None
 
 

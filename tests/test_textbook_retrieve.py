@@ -393,3 +393,146 @@ def test_lesson_out_of_range_system_prompt_mentions_max() -> None:
     prompt = build_system_prompt("homework", textbook_context=ctx)
     assert "وجود ندارد" in prompt or "خارج از محدوده" in prompt
     assert "صفحهٔ همان درس ناموجود" in note or "درس ناموجود" in note
+
+
+def test_parse_toc_payload_normalizes_chapter_and_lesson() -> None:
+    from api.textbook.app.toc_agent import parse_toc_payload
+
+    entries = parse_toc_payload(
+        {
+            "chapters": [{"number": "۴", "title": "فرهنگ بومی", "start_page": "۷۳"}],
+            "lessons": [
+                {
+                    "number": 4,
+                    "title": "ارزش علم",
+                    "start_page": 36,
+                    "chapter": 2,
+                }
+            ],
+            "sections": [
+                {
+                    "title": "روباه و زاغ",
+                    "start_page": 34,
+                    "kind": "بخوان و حفظ کن",
+                }
+            ],
+        },
+        grade=4,
+        subject="persian",
+        source_pages=[3, 4],
+    )
+    by_kind = {(e.kind, e.number): e for e in entries if e.number is not None}
+    assert by_kind[("chapter", 4)].start_page == 73
+    assert by_kind[("lesson", 4)].start_page == 36
+    sections = [e for e in entries if e.kind == "section"]
+    assert sections and sections[0].start_page == 34
+    assert "روباه" in sections[0].title
+
+
+def test_toc_resolve_and_retrieve_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from api.textbook.app.store import TocEntry
+
+    entries = [
+        TocEntry(
+            grade=4,
+            subject="persian",
+            kind="chapter",
+            number=4,
+            title="فرهنگ بومی",
+            start_page=73,
+            source_pages=[3],
+        ),
+        TocEntry(
+            grade=4,
+            subject="persian",
+            kind="lesson",
+            number=4,
+            title="ارزش علم",
+            start_page=36,
+            source_pages=[3],
+        ),
+    ]
+
+    monkeypatch.setattr(
+        "api.textbook.app.store.list_toc_entries",
+        lambda grade, subject: entries if grade == 4 and subject == "persian" else [],
+    )
+    from api.textbook.app.toc_agent import lookup_toc_start_page
+
+    assert lookup_toc_start_page(4, "persian", chapter=4) == 73
+    assert lookup_toc_start_page(4, "persian", lesson=4) == 36
+
+    page36 = _page(
+        grade=4,
+        subject="persian",
+        printed_page=36,
+        text="ارزش علم — متن درس چهارم",
+        title="فارسی",
+    )
+    page73 = _page(
+        grade=4,
+        subject="persian",
+        printed_page=73,
+        text="فصل چهارم فرهنگ بومی",
+        title="فارسی",
+    )
+
+    def fake_get_page(grade: int, subject: str, printed_page: int):
+        if grade != 4 or subject != "persian":
+            return None
+        if printed_page == 36:
+            return page36
+        if printed_page == 73:
+            return page73
+        return None
+
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.book_exists_for_grade", lambda g, s: True
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_printed_page_bounds",
+        lambda g, s: (1, 160),
+    )
+    monkeypatch.setattr("api.textbook.app.retrieve_service.get_page", fake_get_page)
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_neighbor_pages",
+        lambda *a, **k: [],
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.find_lesson_containing_page",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_lesson_bounds",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_lesson_pages",
+        lambda *a, **k: ([], None, None, None),
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.lesson_search",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.toc_agent.lookup_toc_start_page",
+        lambda grade, subject, chapter=None, lesson=None: (
+            73 if chapter == 4 else (36 if lesson == 4 else None)
+        ),
+    )
+
+    chapter_resp = retrieve_context(
+        RetrieveRequest(grade=4, subject="persian", chapter=4, include_image="never")
+    )
+    assert chapter_resp.matched is True
+    assert chapter_resp.page == 73
+    assert chapter_resp.chapter == 4
+    assert chapter_resp.match_type == "exact_page"
+
+    lesson_resp = retrieve_context(
+        RetrieveRequest(grade=4, subject="persian", lesson=4, include_image="never")
+    )
+    assert lesson_resp.matched is True
+    assert lesson_resp.page == 36
+    assert lesson_resp.lesson == 4
+    assert lesson_resp.match_type == "exact_page"

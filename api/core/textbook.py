@@ -26,7 +26,21 @@ _TEXTBOOK_PAGE_QUERY_RE = re.compile(
 # Anchor detection for Persian number-words like «بیست و یکم»:
 # we only need to detect the presence of the page marker keyword.
 _TEXTBOOK_PAGE_MARKER_RE = re.compile(r"(?:صفحه|صفحهٔ|ص\.?)", re.IGNORECASE)
-# Lesson / chapter reference (درس دوازدهم، فصل سوم، فصل یک، درس ۱۲).
+# Lesson reference only (درس دوازدهم، درس ۱۲) — not فصل.
+_TEXTBOOK_LESSON_ONLY_RE = re.compile(
+    r"درس\s*(?:[\d۰-۹٠-٩]+|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش|"
+    r"هفتم|هفت|هشتم|هشت|نهم|نه|دهم|ده|"
+    r"یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم)",
+    re.IGNORECASE,
+)
+# Chapter reference only (فصل سوم، فصل ۱۲).
+_TEXTBOOK_CHAPTER_ONLY_RE = re.compile(
+    r"فصل\s*(?:[\d۰-۹٠-٩]+|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش|"
+    r"هفتم|هفت|هشتم|هشت|نهم|نه|دهم|ده|"
+    r"یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم)",
+    re.IGNORECASE,
+)
+# Either درس or فصل (session-switch / help heuristics).
 _TEXTBOOK_LESSON_RE = re.compile(
     r"(?:درس|فصل)\s*(?:[\d۰-۹٠-٩]+|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش|"
     r"هفتم|هفت|هشتم|هشت|نهم|نه|دهم|ده|"
@@ -564,7 +578,9 @@ def _extract_page_word_phrase(text: str) -> str | None:
 
 
 def _extract_lesson_phrase(text: str) -> str | None:
-    match = _TEXTBOOK_LESSON_RE.search(text)
+    match = _TEXTBOOK_LESSON_ONLY_RE.search(text) or _TEXTBOOK_CHAPTER_ONLY_RE.search(
+        text
+    )
     return match.group(0).strip() if match else None
 
 
@@ -630,26 +646,35 @@ def _resolve_relative_page(recent_user_texts: list[str]) -> int | None:
     return current
 
 
-def _extract_lesson_number(text: str) -> int | None:
-    """Parse «درس سوم» / «فصل 3» into an int (None if absent)."""
+def _extract_unit_number(text: str, *, unit: str) -> int | None:
+    """Parse «{unit} سوم» / «{unit} 3» into an int (None if absent)."""
     from api.textbook.app.parser import LESSON_ORDINAL_WORDS, normalize_digits
 
     normalized = normalize_digits(text)
-    digit_match = re.search(r"(?:درس|فصل)\s*(\d{1,2})\b", normalized)
+    digit_match = re.search(rf"{unit}\s*(\d{{1,2}})\b", normalized)
     if not digit_match:
-        digit_match = re.search(r"(?<!\d)(\d{1,2})\s*(?:درس|فصل)", normalized)
+        digit_match = re.search(rf"(?<!\d)(\d{{1,2}})\s*{unit}", normalized)
     if digit_match:
         value = int(digit_match.group(1))
         return value if value >= 1 else None
-    # Longer ordinals first so «سوم» wins over «سه».
     ordinals = sorted(LESSON_ORDINAL_WORDS.keys(), key=len, reverse=True)
     alt = "|".join(map(re.escape, ordinals))
-    word_match = re.search(rf"(?:درس|فصل)\s+({alt})", text)
+    word_match = re.search(rf"{unit}\s+({alt})", text)
     if not word_match:
-        word_match = re.search(rf"({alt})\s*(?:درس|فصل)", text)
+        word_match = re.search(rf"({alt})\s*{unit}", text)
     if word_match:
         return LESSON_ORDINAL_WORDS.get(word_match.group(1))
     return None
+
+
+def _extract_lesson_number(text: str) -> int | None:
+    """Parse «درس سوم» into an int (ignores فصل)."""
+    return _extract_unit_number(text, unit="درس")
+
+
+def _extract_chapter_number(text: str) -> int | None:
+    """Parse «فصل سوم» into an int (ignores درس)."""
+    return _extract_unit_number(text, unit="فصل")
 
 
 def resolve_textbook_scope(
@@ -661,7 +686,7 @@ def resolve_textbook_scope(
     """
     Walk recent turns and resolve the current textbook position.
 
-    Returns structured fields (grade/subject/page/lesson) for direct retrieve —
+    Returns structured fields (grade/subject/page/lesson/chapter) for direct retrieve —
     callers should NOT re-serialize this into Persian and re-parse it.
     """
     if not messages:
@@ -675,6 +700,7 @@ def resolve_textbook_scope(
     subject_id: str | None = None
     current_page: int | None = None
     lesson: int | None = None
+    chapter: int | None = None
 
     if sticky:
         raw_grade = sticky.get("grade")
@@ -693,6 +719,9 @@ def resolve_textbook_scope(
         raw_lesson = sticky.get("lesson")
         if isinstance(raw_lesson, int) and raw_lesson >= 1:
             lesson = raw_lesson
+        raw_chapter = sticky.get("chapter")
+        if isinstance(raw_chapter, int) and raw_chapter >= 1:
+            chapter = raw_chapter
 
     last_assistant: str | None = None
     user_texts: list[str] = []
@@ -717,6 +746,16 @@ def resolve_textbook_scope(
         if subject_token:
             subject_kw = subject_token
             subject_id = _subject_keyword_to_id(subject_token)
+
+        chapter_no = _extract_chapter_number(text)
+        if chapter_no is not None:
+            chapter = chapter_no
+            if (
+                _extract_page_number(text) is None
+                and _extract_bare_page_number(text) is None
+                and _extract_page_word_phrase(text) is None
+            ):
+                current_page = None
 
         lesson_no = _extract_lesson_number(text)
         if lesson_no is not None:
@@ -749,7 +788,10 @@ def resolve_textbook_scope(
             if (
                 _assistant_asked_for_page(last_assistant)
                 or grade is not None
-                or (subject_id is not None and lesson is not None)
+                or (
+                    subject_id is not None
+                    and (lesson is not None or chapter is not None)
+                )
             ):
                 current_page = bare_page
                 continue
@@ -770,7 +812,7 @@ def resolve_textbook_scope(
     topic_query: str | None = None
     latest = user_texts[-1] if user_texts else ""
     # Topic/named-content search only when we don't already have a page/lesson target.
-    if latest and not current_page and not lesson and (
+    if latest and not current_page and not lesson and not chapter and (
         _textbook_has_topic_intent(latest)
         or (
             subject_id
@@ -786,6 +828,7 @@ def resolve_textbook_scope(
         subject_id=subject_id,
         page=current_page,
         lesson=lesson,
+        chapter=chapter,
         topic_query=topic_query,
     )
 
@@ -948,6 +991,7 @@ def _textbook_context_from_payload(data: dict[str, Any]) -> TextbookContext:
         subject_title=str(data["subject_title"]) if data.get("subject_title") else None,
         page=int(data["page"]) if data.get("page") is not None else None,
         lesson=int(data["lesson"]) if data.get("lesson") is not None else None,
+        chapter=int(data["chapter"]) if data.get("chapter") is not None else None,
         context_text=str(data["context_text"]) if data.get("context_text") else None,
         needs_image=bool(data.get("needs_image")),
         image_base64=images[0] if images else None,
@@ -982,13 +1026,40 @@ async def _fetch_textbook_context_local(
     subject: str | None = None,
     page: int | None = None,
     lesson: int | None = None,
+    chapter: int | None = None,
+    llm_client: Any | None = None,
+    backend_model: str | None = None,
+    toc_timeout_sec: float = 12.0,
 ) -> TextbookContext | None:
     from api.textbook.app.models import RetrieveRequest
     from api.textbook.app.retrieve_service import retrieve_context
+    from api.textbook.app.toc_agent import ensure_toc_map
 
     mode = include_image.strip().lower()
     if mode not in {"never", "auto", "always"}:
         mode = "auto"
+
+    # Build TOC cache before lesson/chapter retrieve when OCR headers may miss.
+    if (
+        grade is not None
+        and subject
+        and page is None
+        and (lesson is not None or chapter is not None)
+        and llm_client is not None
+        and backend_model
+    ):
+        try:
+            await asyncio.wait_for(
+                ensure_toc_map(
+                    grade,
+                    subject,
+                    llm_client=llm_client,
+                    model=backend_model,
+                ),
+                timeout=toc_timeout_sec,
+            )
+        except Exception:  # noqa: BLE001 — TOC is best-effort fallback
+            pass
 
     def _retrieve() -> TextbookContext:
         try:
@@ -1001,6 +1072,7 @@ async def _fetch_textbook_context_local(
                     subject=subject,
                     page=page,
                     lesson=lesson,
+                    chapter=chapter,
                 )
             )
         except Exception as exc:  # noqa: BLE001 — graceful degrade
@@ -1021,6 +1093,9 @@ async def _fetch_textbook_context_local(
                 ),
                 page=int(payload["page"]) if payload.get("page") is not None else None,
                 lesson=int(payload["lesson"]) if payload.get("lesson") is not None else None,
+                chapter=(
+                    int(payload["chapter"]) if payload.get("chapter") is not None else None
+                ),
                 failure_reason=failure_reason,
                 min_page=int(payload["min_page"]) if payload.get("min_page") is not None else None,
                 max_page=int(payload["max_page"]) if payload.get("max_page") is not None else None,
@@ -1050,6 +1125,9 @@ async def fetch_textbook_context(
     subject: str | None = None,
     page: int | None = None,
     lesson: int | None = None,
+    chapter: int | None = None,
+    llm_client: Any | None = None,
+    backend_model: str | None = None,
 ) -> TextbookContext | None:
     """Retrieve via structured scope fields; ``query`` is optional (topic search)."""
     if _use_embedded_textbook(api_url):
@@ -1061,6 +1139,10 @@ async def fetch_textbook_context(
             subject=subject,
             page=page,
             lesson=lesson,
+            chapter=chapter,
+            llm_client=llm_client,
+            backend_model=backend_model,
+            toc_timeout_sec=min(12.0, max(4.0, timeout_sec)),
         )
 
     base = _normalize_api_base_url(api_url)
@@ -1084,6 +1166,8 @@ async def fetch_textbook_context(
         payload["page"] = page
     if lesson is not None:
         payload["lesson"] = lesson
+    if chapter is not None:
+        payload["chapter"] = chapter
 
     def _retrieve() -> tuple[dict[str, Any] | None, str | None]:
         try:
@@ -1116,6 +1200,7 @@ async def fetch_textbook_context(
             ),
             page=int(data["page"]) if data and data.get("page") is not None else None,
             lesson=int(data["lesson"]) if data and data.get("lesson") is not None else None,
+            chapter=int(data["chapter"]) if data and data.get("chapter") is not None else None,
             failure_reason=failure_reason,
             min_page=int(data["min_page"]) if data and data.get("min_page") is not None else None,
             max_page=int(data["max_page"]) if data and data.get("max_page") is not None else None,

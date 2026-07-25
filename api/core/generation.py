@@ -157,11 +157,13 @@ def format_need_info_instruction(context: TextbookContext) -> str:
         known.append(f"پایه/کلاس: {context.grade}")
     else:
         missing.append("کلاس چندمی؟")
+    if context.chapter is not None:
+        known.append(f"فصل: {context.chapter}")
     if context.lesson is not None:
-        known.append(f"درس/فصل: {context.lesson}")
+        known.append(f"درس: {context.lesson}")
     if context.page is not None:
         known.append(f"صفحه: {context.page}")
-    elif context.lesson is None and (
+    elif context.lesson is None and context.chapter is None and (
         context.subject_title or context.subject or context.grade is not None
     ):
         # Prefer page (precise); chapter/lesson is an acceptable alternative.

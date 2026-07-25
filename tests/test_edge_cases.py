@@ -94,7 +94,8 @@ def test_resolve_scope_bare_page_after_page_ask() -> None:
     assert scope.subject_id == "math"
     assert scope.grade == 6
     assert scope.page == 37
-    assert scope.lesson == 3
+    assert scope.chapter == 3
+    assert scope.lesson is None
     assert scope.has_page_lookup() is True
     query = build_textbook_query(messages)
     assert "37" in query or "۳۷" in query
@@ -110,10 +111,11 @@ def test_bare_digit_after_grade_ask_is_grade_not_page() -> None:
     scope = resolve_textbook_scope(messages)
     assert scope.grade == 6
     assert scope.page is None
+    assert scope.chapter == 2
 
 
 def test_resolve_scope_keeps_math_chapter_across_grade_followup() -> None:
-    """«فصل سوم ریاضی» سپس «پایه ششم» → structured scope with lesson retrieve."""
+    """«فصل سوم ریاضی» سپس «پایه ششم» → structured scope with chapter retrieve."""
     messages = [
         ChatMessage(
             role="user",
@@ -124,15 +126,19 @@ def test_resolve_scope_keeps_math_chapter_across_grade_followup() -> None:
     ]
     scope = resolve_textbook_scope(messages)
     assert scope.subject_id == "math"
-    assert scope.lesson == 3
+    assert scope.chapter == 3
+    assert scope.lesson is None
     assert scope.grade == 6
     # Chapter is enough to retrieve; page remains the preferred locator.
     assert scope.can_retrieve() is True
-    assert scope.has_lesson_lookup() is True
+    assert scope.has_chapter_lookup() is True
+    assert scope.has_lesson_lookup() is False
     assert "ریاضی" in scope.debug_label()
+    assert "فصل" in scope.debug_label()
     assert "3" in scope.debug_label()
     assert scope.compose_query()
     assert "ریاضی" in scope.compose_query()
+    assert "فصل" in scope.compose_query()
 
 
 def test_extract_lesson_si_o_yekom() -> None:
@@ -213,12 +219,12 @@ def test_need_info_asks_only_missing_grade_when_chapter_known() -> None:
         failure_reason="need_grade_or_subject",
         subject="math",
         subject_title="ریاضی",
-        lesson=3,
+        chapter=3,
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
     assert "کلاس چندمی" in prompt or "کلاس چندم" in prompt
     assert "ریاضی" in prompt
-    assert "درس/فصل: 3" in prompt or "فصل: 3" in prompt
+    assert "فصل: 3" in prompt
     assert "هنوز لازم است بپرسی" in prompt
     # Chapter already known — only ask for missing grade, not page/chapter again.
     assert "شمارهٔ صفحه؟ (ترجیح) یا شمارهٔ فصل/درس؟" not in prompt
@@ -248,7 +254,7 @@ def test_need_info_does_not_reask_locator_when_lesson_known() -> None:
         lesson=3,
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "درس/فصل: 3" in prompt or "فصل: 3" in prompt
+    assert "درس: 3" in prompt
     assert "شمارهٔ صفحه؟ (ترجیح) یا شمارهٔ فصل/درس؟" not in prompt
 
 

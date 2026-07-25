@@ -76,12 +76,13 @@ def test_extract_grade_prefers_class_over_chapter_ordinal() -> None:
     )
     assert scope.grade == 4
     assert scope.subject_id == "math"
-    assert scope.lesson == 3
+    assert scope.chapter == 3
+    assert scope.lesson is None
     assert scope.can_retrieve() is True
 
 
 def test_extract_grade_from_subject_plus_ordinal_with_chapter() -> None:
-    """«فصل هشتم فارسی چهارم» — چهارم is grade, هشتم is lesson."""
+    """«فصل هشتم فارسی چهارم» — چهارم is grade, هشتم is chapter (not درس)."""
     assert _extract_grade_token("فصل هشتم فارسی چهارم") == "چهارم"
     from api.core.types import ChatMessage
     from api.core.textbook import resolve_textbook_scope
@@ -91,8 +92,11 @@ def test_extract_grade_from_subject_plus_ordinal_with_chapter() -> None:
     )
     assert scope.grade == 4
     assert scope.subject_id == "persian"
-    assert scope.lesson == 8
+    assert scope.chapter == 8
+    assert scope.lesson is None
     assert scope.can_retrieve() is True
+    assert scope.has_chapter_lookup() is True
+    assert scope.has_lesson_lookup() is False
 
     scoped = resolve_textbook_scope(
         [
@@ -215,3 +219,36 @@ def test_build_textbook_query_lesson_reference() -> None:
 def test_looks_like_page_query_gifts_out_of_range_style() -> None:
     assert looks_like_textbook_page_query("صفحه ۲۵۱ هدیه های آسمان") is True
     assert looks_like_textbook_page_query("صفحه 251 هدایای آسمان پایه سوم") is True
+
+
+def test_chapter_and_lesson_numbers_are_separate() -> None:
+    from api.core.textbook import _extract_chapter_number, _extract_lesson_number
+    from api.core.types import ChatMessage
+    from api.core.textbook import resolve_textbook_scope
+    from api.textbook.app.parser import parse_persian_query
+
+    assert _extract_chapter_number("فصل چهارم فارسی چهارم") == 4
+    assert _extract_lesson_number("فصل چهارم فارسی چهارم") is None
+    assert _extract_lesson_number("درس چهارم ارزش علم") == 4
+    assert _extract_chapter_number("درس چهارم ارزش علم") is None
+
+    chapter_scope = resolve_textbook_scope(
+        [ChatMessage(role="user", content="فصل چهارم فارسی چهارم")]
+    )
+    assert chapter_scope.chapter == 4
+    assert chapter_scope.lesson is None
+    assert chapter_scope.grade == 4
+    assert chapter_scope.subject_id == "persian"
+
+    lesson_scope = resolve_textbook_scope(
+        [ChatMessage(role="user", content="درس چهارم فارسی کلاس چهارم")]
+    )
+    assert lesson_scope.lesson == 4
+    assert lesson_scope.chapter is None
+
+    parsed_chapter = parse_persian_query("فصل چهارم فارسی پایه چهارم")
+    assert parsed_chapter.chapter == 4
+    assert parsed_chapter.lesson is None
+    parsed_lesson = parse_persian_query("درس چهارم فارسی پایه چهارم")
+    assert parsed_lesson.lesson == 4
+    assert parsed_lesson.chapter is None

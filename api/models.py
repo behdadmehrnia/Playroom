@@ -122,6 +122,20 @@ class TextbookRetrieveResponse(BaseModel):
     debug: str | None = None
 
 
+class RebuildTocRequest(BaseModel):
+    grade: int = Field(ge=3, le=6)
+    subject: str = Field(min_length=1, description="شناسه درس مثل persian")
+    force: bool = True
+
+
+class RebuildTocResponse(BaseModel):
+    ok: bool
+    grade: int
+    subject: str
+    entry_count: int = 0
+    error: str | None = None
+
+
 class WebSearchQueryRequest(BaseModel):
     messages: list[MessageIn]
     persona: str | None = None

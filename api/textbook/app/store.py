@@ -797,3 +797,258 @@ def resolve_image_path(image_path: str | None) -> Path | None:
     if candidate.is_file():
         return candidate
     return None
+
+
+# --- TOC map (فصل / درس structure parsed from فهرست pages) -----------------
+
+TocKind = str  # "chapter" | "lesson" | "section"
+
+
+@dataclass
+class TocEntry:
+    grade: int
+    subject: str
+    kind: TocKind
+    number: int | None
+    title: str
+    start_page: int
+    source_pages: list[int]
+
+
+def ensure_toc_tables(conn: sqlite3.Connection | None = None) -> None:
+    """Create toc_entries / toc_jobs if missing (safe on existing indexes)."""
+    owns = conn is None
+    if owns:
+        if not INDEX_PATH.is_file():
+            return
+        conn = _connect()
+    assert conn is not None
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS toc_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                grade INTEGER NOT NULL,
+                subject TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                number INTEGER,
+                title TEXT NOT NULL DEFAULT '',
+                start_page INTEGER NOT NULL,
+                source_pages TEXT NOT NULL DEFAULT '[]',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(grade, subject, kind, number, title, start_page)
+            );
+            CREATE INDEX IF NOT EXISTS idx_toc_lookup
+                ON toc_entries(grade, subject, kind, number);
+
+            CREATE TABLE IF NOT EXISTS toc_jobs (
+                grade INTEGER NOT NULL,
+                subject TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (grade, subject)
+            );
+            """
+        )
+        if owns:
+            conn.commit()
+    finally:
+        if owns:
+            conn.close()
+
+
+def find_toc_candidate_pages(
+    grade: int,
+    subject: str,
+    *,
+    max_pages: int = 4,
+) -> list[PageRecord]:
+    """Pick فهرست / TOC-like pages from the existing index for LLM parsing."""
+    if not index_exists():
+        return []
+    ensure_toc_tables()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT grade, subject, subject_title, printed_page, text,
+                   image_path, is_scanned, text_usable
+            FROM pages
+            WHERE grade = ? AND subject = ? AND printed_page > 0
+            ORDER BY printed_page
+            LIMIT 80
+            """,
+            (grade, subject),
+        ).fetchall()
+
+    scored: list[tuple[tuple[int, int, int], PageRecord]] = []
+    for row in rows:
+        page = _row_to_page(row)
+        text = page.text or ""
+        markers = _lesson_marker_count(text)
+        has_fehrest = "فهرست" in text
+        # Prefer early pages that look like a contents list.
+        if not has_fehrest and markers < _LESSON_TOC_THRESHOLD:
+            continue
+        # Lower score is better: fehrest first, then denser markers, then earlier page.
+        score = (0 if has_fehrest else 1, -markers, page.printed_page)
+        scored.append((score, page))
+
+    if not scored:
+        # Fallback: first few pages often hold decorative TOC with weak OCR.
+        early = [_row_to_page(r) for r in rows[:6]]
+        return [p for p in early if p.image_path][:max_pages]
+
+    scored.sort(key=lambda item: item[0])
+    # Keep a contiguous cluster around the best hit when possible.
+    best_pages = [item[1] for item in scored[: max_pages * 2]]
+    best_pages.sort(key=lambda p: p.printed_page)
+    if not best_pages:
+        return []
+    # Prefer consecutive pages starting at the earliest strong hit.
+    start = best_pages[0].printed_page
+    cluster = [p for p in best_pages if start <= p.printed_page <= start + max_pages]
+    if len(cluster) < 2:
+        cluster = best_pages[:max_pages]
+    return cluster[:max_pages]
+
+
+def get_toc_job_status(grade: int, subject: str) -> str | None:
+    if not index_exists():
+        return None
+    ensure_toc_tables()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT status FROM toc_jobs WHERE grade = ? AND subject = ?",
+            (grade, subject),
+        ).fetchone()
+    return str(row["status"]) if row else None
+
+
+def set_toc_job_status(
+    grade: int,
+    subject: str,
+    status: str,
+    error: str | None = None,
+) -> None:
+    if not index_exists():
+        return
+    ensure_toc_tables()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO toc_jobs(grade, subject, status, error, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(grade, subject) DO UPDATE SET
+                status = excluded.status,
+                error = excluded.error,
+                updated_at = datetime('now')
+            """,
+            (grade, subject, status, error),
+        )
+        conn.commit()
+
+
+def clear_toc_entries(grade: int, subject: str) -> None:
+    if not index_exists():
+        return
+    ensure_toc_tables()
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM toc_entries WHERE grade = ? AND subject = ?",
+            (grade, subject),
+        )
+        conn.commit()
+
+
+def save_toc_entries(grade: int, subject: str, entries: list[TocEntry]) -> None:
+    if not index_exists():
+        return
+    ensure_toc_tables()
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM toc_entries WHERE grade = ? AND subject = ?",
+            (grade, subject),
+        )
+        for entry in entries:
+            conn.execute(
+                """
+                INSERT INTO toc_entries(
+                    grade, subject, kind, number, title, start_page,
+                    source_pages, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                """,
+                (
+                    grade,
+                    subject,
+                    entry.kind,
+                    entry.number,
+                    entry.title,
+                    entry.start_page,
+                    json.dumps(entry.source_pages, ensure_ascii=False),
+                ),
+            )
+        conn.commit()
+
+
+def list_toc_entries(grade: int, subject: str) -> list[TocEntry]:
+    if not index_exists():
+        return []
+    ensure_toc_tables()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT grade, subject, kind, number, title, start_page, source_pages
+            FROM toc_entries
+            WHERE grade = ? AND subject = ?
+            ORDER BY kind, number, start_page
+            """,
+            (grade, subject),
+        ).fetchall()
+    out: list[TocEntry] = []
+    for row in rows:
+        raw_pages = row["source_pages"] or "[]"
+        try:
+            pages = [int(p) for p in json.loads(raw_pages)]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pages = []
+        out.append(
+            TocEntry(
+                grade=int(row["grade"]),
+                subject=str(row["subject"]),
+                kind=str(row["kind"]),
+                number=int(row["number"]) if row["number"] is not None else None,
+                title=str(row["title"] or ""),
+                start_page=int(row["start_page"]),
+                source_pages=pages,
+            )
+        )
+    return out
+
+
+def toc_map_ready(grade: int, subject: str) -> bool:
+    return get_toc_job_status(grade, subject) == "ok" and bool(
+        list_toc_entries(grade, subject)
+    )
+
+
+def resolve_page_from_toc(
+    grade: int,
+    subject: str,
+    *,
+    chapter: int | None = None,
+    lesson: int | None = None,
+) -> int | None:
+    """Return start_page from cached TOC for chapter and/or lesson number."""
+    entries = list_toc_entries(grade, subject)
+    if not entries:
+        return None
+    if chapter is not None:
+        for entry in entries:
+            if entry.kind == "chapter" and entry.number == chapter:
+                return entry.start_page
+    if lesson is not None:
+        for entry in entries:
+            if entry.kind == "lesson" and entry.number == lesson:
+                return entry.start_page
+    return None
