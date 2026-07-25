@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import re
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -236,18 +237,29 @@ async def build_toc_map(
     llm_client: Any,
     model: str,
     force: bool = False,
+    llm_timeout_sec: float = 8.0,
 ) -> bool:
     """Parse فهرست for one book and persist toc_entries. Returns True on success."""
     if not force and toc_map_ready(grade, subject):
         return True
 
-    # Avoid stacking parallel TOC builds (each loads page images).
+    # Avoid stacking parallel TOC builds.
     if not force and get_toc_job_status(grade, subject) == "running":
         return False
 
-    pages = find_toc_candidate_pages(grade, subject, max_pages=_TOC_MAX_IMAGES)
+    pages = await asyncio.to_thread(
+        lambda: find_toc_candidate_pages(grade, subject, max_pages=_TOC_MAX_IMAGES)
+    )
     if not pages:
         set_toc_job_status(grade, subject, "error", "no TOC candidate pages")
+        return False
+
+    # Require at least some OCR text — empty vision-only TOC hangs/crashes easily.
+    usable_chars = sum(
+        len((p.text or "").strip()) for p in pages if p.text_usable and (p.text or "").strip()
+    )
+    if usable_chars < 40:
+        set_toc_job_status(grade, subject, "error", "TOC pages have no usable OCR text")
         return False
 
     set_toc_job_status(grade, subject, "running")
@@ -258,9 +270,13 @@ async def build_toc_map(
         request = LLMCompletionRequest(
             model=model,
             temperature=0.0,
+            timeout_sec=llm_timeout_sec,
             messages=[
                 {"role": "system", "content": _load_toc_system_prompt()},
-                {"role": "user", "content": _build_user_content(pages)},
+                {
+                    "role": "user",
+                    "content": _build_user_content(pages, include_images=False),
+                },
             ],
         )
         raw = await llm_client.complete(request)
@@ -275,6 +291,9 @@ async def build_toc_map(
         save_toc_entries(grade, subject, entries)
         set_toc_job_status(grade, subject, "ok")
         return True
+    except asyncio.CancelledError:
+        set_toc_job_status(grade, subject, "error", "cancelled")
+        raise
     except Exception as exc:  # noqa: BLE001 — cache failure must not crash chat
         logger.warning("TOC build failed for g%s %s: %s", grade, subject, exc)
         set_toc_job_status(grade, subject, "error", f"{type(exc).__name__}: {exc}")
@@ -288,6 +307,7 @@ async def ensure_toc_map(
     llm_client: Any | None,
     model: str | None,
     force: bool = False,
+    llm_timeout_sec: float = 8.0,
 ) -> bool:
     """Ensure toc cache exists; no-op without an LLM client."""
     if toc_map_ready(grade, subject) and not force:
@@ -295,8 +315,49 @@ async def ensure_toc_map(
     if llm_client is None or not model:
         return toc_map_ready(grade, subject)
     return await build_toc_map(
-        grade, subject, llm_client=llm_client, model=model, force=force
+        grade,
+        subject,
+        llm_client=llm_client,
+        model=model,
+        force=force,
+        llm_timeout_sec=llm_timeout_sec,
     )
+
+
+def schedule_toc_map_build(
+    grade: int,
+    subject: str,
+    *,
+    llm_client: Any | None,
+    model: str | None,
+    force: bool = False,
+) -> None:
+    """Start TOC build in the background — never blocks the HTTP request."""
+    if llm_client is None or not model:
+        return
+    if toc_map_ready(grade, subject) and not force:
+        return
+    if get_toc_job_status(grade, subject) == "running":
+        return
+
+    async def _run() -> None:
+        try:
+            await build_toc_map(
+                grade,
+                subject,
+                llm_client=llm_client,
+                model=model,
+                force=force,
+                llm_timeout_sec=8.0,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("background TOC build failed g%s %s", grade, subject)
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_run())
+    except RuntimeError:
+        logger.warning("no running loop for background TOC build")
 
 
 def lookup_toc_start_page(

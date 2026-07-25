@@ -38,6 +38,8 @@ class LLMCompletionRequest(BaseModel):
     messages: list[dict[str, Any]]
     stream: bool = False
     temperature: float | None = None
+    # Optional per-call HTTP timeout (seconds). None → client default.
+    timeout_sec: float | None = None
 
 
 class TextbookContext(BaseModel):

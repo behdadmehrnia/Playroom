@@ -919,10 +919,30 @@ def get_toc_job_status(grade: int, subject: str) -> str | None:
     ensure_toc_tables()
     with _connect() as conn:
         row = conn.execute(
-            "SELECT status FROM toc_jobs WHERE grade = ? AND subject = ?",
+            "SELECT status, updated_at FROM toc_jobs WHERE grade = ? AND subject = ?",
             (grade, subject),
         ).fetchone()
-    return str(row["status"]) if row else None
+    if not row:
+        return None
+    status = str(row["status"])
+    # Stale "running" after crash/timeout would permanently block TOC rebuild.
+    if status == "running":
+        updated = str(row["updated_at"] or "")
+        try:
+            # SQLite datetime('now') is UTC naive "YYYY-MM-DD HH:MM:SS"
+            from datetime import datetime, timezone
+
+            started = datetime.strptime(updated, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
+            age = (datetime.now(timezone.utc) - started).total_seconds()
+            if age > 45:
+                set_toc_job_status(grade, subject, "error", "stale running job cleared")
+                return "error"
+        except ValueError:
+            set_toc_job_status(grade, subject, "error", "invalid running timestamp")
+            return "error"
+    return status
 
 
 def set_toc_job_status(

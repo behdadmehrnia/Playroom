@@ -43,7 +43,12 @@ class OpenAICompatibleLLMClient:
 
         url = f"{self._base_url}/chat/completions"
         try:
-            response = await self._client.post(url, json=payload, headers=headers)
+            response = await self._client.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=request.timeout_sec,
+            )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise LLMError(

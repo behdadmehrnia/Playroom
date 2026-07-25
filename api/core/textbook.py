@@ -1033,7 +1033,6 @@ async def _fetch_textbook_context_local(
 ) -> TextbookContext | None:
     from api.textbook.app.models import RetrieveRequest
     from api.textbook.app.retrieve_service import retrieve_context
-    from api.textbook.app.toc_agent import ensure_toc_map
 
     mode = include_image.strip().lower()
     if mode not in {"never", "auto", "always"}:
@@ -1088,8 +1087,9 @@ async def _fetch_textbook_context_local(
             )
         return _textbook_context_from_payload(payload)
 
-    # Prefer OCR/index retrieve first. Only build TOC when lesson/chapter misses —
-    # eager TOC vision with full page PNGs was OOM-killing the chat worker.
+    # Prefer OCR/index retrieve first. Never await TOC LLM inline — a hung
+    # provider call (or stuck toc_jobs=running) was taking down the whole pod
+    # even with spare RAM. Build TOC in the background; next ask can use cache.
     context = await asyncio.to_thread(_retrieve)
     needs_toc = bool(
         context
@@ -1103,20 +1103,14 @@ async def _fetch_textbook_context_local(
         and backend_model
     )
     if needs_toc:
-        try:
-            built = await asyncio.wait_for(
-                ensure_toc_map(
-                    grade,
-                    subject,
-                    llm_client=llm_client,
-                    model=backend_model,
-                ),
-                timeout=toc_timeout_sec,
-            )
-        except Exception:  # noqa: BLE001 — TOC is best-effort fallback
-            built = False
-        if built:
-            context = await asyncio.to_thread(_retrieve)
+        from api.textbook.app.toc_agent import schedule_toc_map_build
+
+        schedule_toc_map_build(
+            grade,
+            subject,
+            llm_client=llm_client,
+            model=backend_model,
+        )
 
     return context
 
