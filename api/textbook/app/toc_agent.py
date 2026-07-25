@@ -31,9 +31,11 @@ _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECAS
 
 # Keep TOC vision payloads small — raw MinerU PNGs can OOM the chat worker.
 _TOC_MAX_IMAGES = 2
-_TOC_IMAGE_MAX_SIDE = 1024
-_TOC_IMAGE_JPEG_QUALITY = 55
-_TOC_IMAGE_MAX_BYTES = 350_000
+_TOC_IMAGE_MAX_SIDE = 896
+_TOC_IMAGE_JPEG_QUALITY = 45
+_TOC_IMAGE_MAX_BYTES = 220_000
+# Skip opening huge source files entirely (PIL still decompresses full PNG in RAM).
+_TOC_SOURCE_MAX_FILE_BYTES = 1_200_000
 
 
 def _load_toc_system_prompt() -> str:
@@ -51,13 +53,20 @@ def _page_image_b64(page: PageRecord) -> str | None:
     if not path or not path.is_file():
         return None
     try:
+        # MinerU page PNGs are often multi-MB; opening them in PIL alone can OOM.
+        if path.stat().st_size > _TOC_SOURCE_MAX_FILE_BYTES:
+            logger.info(
+                "TOC skip large image page=%s size=%s",
+                page.printed_page,
+                path.stat().st_size,
+            )
+            return None
         from io import BytesIO
 
         from PIL import Image
 
         with Image.open(path) as img:
             img = img.convert("RGB")
-            # Textbook page PNGs are often multi-MB; shrink hard for TOC parse.
             img.thumbnail((_TOC_IMAGE_MAX_SIDE, _TOC_IMAGE_MAX_SIDE), Image.Resampling.LANCZOS)
             buf = BytesIO()
             img.save(buf, format="JPEG", quality=_TOC_IMAGE_JPEG_QUALITY, optimize=True)
@@ -174,7 +183,12 @@ def parse_toc_payload(
     return entries
 
 
-def _build_user_content(pages: list[PageRecord]) -> list[dict[str, Any]]:
+def _build_user_content(
+    pages: list[PageRecord],
+    *,
+    include_images: bool = False,
+) -> list[dict[str, Any]]:
+    """Build multimodal user content. Images off by default — prod OOM risk."""
     parts: list[dict[str, Any]] = []
     text_blocks: list[str] = []
     for page in pages:
@@ -184,7 +198,7 @@ def _build_user_content(pages: list[PageRecord]) -> list[dict[str, Any]]:
             text_blocks.append(f"--- صفحه چاپی {page.printed_page} (متن OCR) ---\n{snippet}")
         else:
             text_blocks.append(
-                f"--- صفحه چاپی {page.printed_page} (متن OCR ضعیف/خالی؛ به تصویر تکیه کن) ---"
+                f"--- صفحه چاپی {page.printed_page} (متن OCR ضعیف/خالی) ---"
             )
     parts.append(
         {
@@ -195,7 +209,9 @@ def _build_user_content(pages: list[PageRecord]) -> list[dict[str, Any]]:
             ),
         }
     )
-    # At most two compressed images — full-resolution PNGs OOM the chat worker.
+    if not include_images:
+        return parts
+    # Optional compressed images — full-resolution PNGs OOM the chat worker.
     attached = 0
     for page in pages:
         if attached >= _TOC_MAX_IMAGES:
