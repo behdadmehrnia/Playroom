@@ -189,8 +189,10 @@ async def _resolve_textbook_context(
     textbook_query = scope.debug_label() if scope.can_retrieve() else build_textbook_query(
         messages, sticky=sticky_scope
     )
-    # Topic-only path still needs free text.
+    # Topic-only path still needs free text. When the child named a lesson
+    # title, prefer that over chapter-start lookup (فصل ۳ ≠ درس «ارزش علم»).
     retrieve_query = scope.topic_query or ""
+    prefer_named_topic = bool(retrieve_query.strip())
 
     should_fetch = bool(
         ctx_enabled
@@ -211,8 +213,13 @@ async def _resolve_textbook_context(
             subject=scope.subject_id,
             page=scope.page,
             # Prefer exact page; only fall back to lesson/chapter when page unknown.
+            # Named titles skip chapter so TOC/FTS can find the real lesson.
             lesson=scope.lesson if scope.page is None else None,
-            chapter=scope.chapter if scope.page is None else None,
+            chapter=(
+                None
+                if prefer_named_topic
+                else (scope.chapter if scope.page is None else None)
+            ),
             llm_client=llm_client,
             backend_model=backend_model,
         )

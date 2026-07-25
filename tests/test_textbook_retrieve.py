@@ -536,3 +536,71 @@ def test_toc_resolve_and_retrieve_fallback(monkeypatch: pytest.MonkeyPatch) -> N
     assert lesson_resp.page == 36
     assert lesson_resp.lesson == 4
     assert lesson_resp.match_type == "exact_page"
+
+
+def test_retrieve_by_lesson_title_via_toc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Named title in query should open the lesson page, not chapter start."""
+    from api.textbook.app.models import RetrieveRequest
+    from api.textbook.app.retrieve_service import retrieve_context
+    from api.textbook.app.store import TocEntry
+
+    entries = [
+        TocEntry(
+            grade=6,
+            subject="persian",
+            kind="chapter",
+            number=3,
+            title="فصل سه",
+            start_page=40,
+            source_pages=[3],
+        ),
+        TocEntry(
+            grade=6,
+            subject="persian",
+            kind="lesson",
+            number=5,
+            title="ارزش علم",
+            start_page=52,
+            source_pages=[3],
+        ),
+    ]
+    monkeypatch.setattr(
+        "api.textbook.app.store.list_toc_entries",
+        lambda grade, subject: entries if grade == 6 and subject == "persian" else [],
+    )
+    page52 = _page(
+        grade=6,
+        subject="persian",
+        printed_page=52,
+        text="ارزش علم — متن درس برای توضیح",
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_page",
+        lambda grade, subject, printed_page: (
+            page52 if printed_page == 52 else None
+        ),
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_neighbor_pages",
+        lambda *a, **k: [],
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.book_exists_for_grade",
+        lambda grade, subject: True,
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service._resolve_page_bounds",
+        lambda *a, **k: (1, 200),
+    )
+
+    resp = retrieve_context(
+        RetrieveRequest(
+            query="ارزش علم",
+            grade=6,
+            subject="persian",
+            include_image="never",
+        )
+    )
+    assert resp.matched is True
+    assert resp.page == 52
+    assert "ارزش علم" in (resp.context_text or "")

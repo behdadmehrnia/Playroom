@@ -304,8 +304,8 @@ LANDING_PAGE_HTML = """
         <div class="footer">
             <p>بخشی از اکوسیستم هوش مصنوعی  یار</p>
             <p style="font-size: 0.65rem;">شرکت یار، از پیشگامان ایرانی هوش مصنوعی، با تمرکز بر توسعه فناوری‌های نوآورانه و بومی‌سازی مدل‌ها، راهکارهای تخصصی برای کسب‌وکارها و مردم ارائه می‌دهد. تیم ما متشکل از نخبگان دانشگاهی و متخصصان فناوری است که با رویکرد علمی و مسئولیت‌پذیر، دستیارهای هوشمند در حوزه‌هایی چون پزشکی، حقوقی، آموزشی، سلامت روان، پژوهش و کودکان طراحی کرده و نقشی مؤثر در تحول دیجیتال کشور ایفا می‌کند.</p>
-            <p style="margin-top: 0.6rem;">تمامی حقوق برای شرکت یار محفوظ می باشد</p>
-            <p style="margin-top: 0.7rem; font-size: 0.65rem;">Built with ❤️ by <a href="https://t.me/BMDarkLight" target="_blank">Behdad</a>  |  <a href="/docs">API Documentation</a></p>
+            <p style="margin-top: 0.6rem; font-size: 1rem;">© تمامی حقوق برای شرکت یار محفوظ می باشد</p>
+            <p style="margin-top: 0.7rem; font-size: 0.65rem;">Built with ❤️ by <a href="https://github.com/BMdarkLight/" target="_blank">Behdad</a>  |  <a href="/docs">API Documentation</a></p>
         </div>
     </div>
 </body>

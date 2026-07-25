@@ -370,3 +370,9 @@ def lookup_toc_start_page(
     return resolve_page_from_toc(
         grade, subject, chapter=chapter, lesson=lesson
     )
+
+
+def lookup_toc_by_title(grade: int, subject: str, title: str) -> int | None:
+    from api.textbook.app.store import resolve_page_from_toc_title
+
+    return resolve_page_from_toc_title(grade, subject, title)

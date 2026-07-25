@@ -175,6 +175,12 @@ def format_need_info_instruction(context: TextbookContext) -> str:
         bits.append("همین الان می‌دانیم: " + "؛ ".join(known))
     if missing:
         bits.append("هنوز لازم است بپرسی: " + "؛ ".join(missing))
+    elif context.chapter is not None or context.lesson is not None:
+        bits.append(
+            "پایه و کتاب و فصل/درس مشخص است. "
+            "اگر متن کتاب در پرامپت نیست، فقط یک‌بار شمارهٔ صفحه یا عکس صفحه را بخواه — "
+            "سوال کلی و سقراطی نپرس و محتوای درس را از خودت نساز."
+        )
     else:
         bits.append("اگر هنوز مطمئن نیستی، یک سوال کوتاه بپرس — چیز تکراری نپرس.")
     return "\n".join(bits)
@@ -239,6 +245,8 @@ def build_system_prompt(
             bits.append(f"پایه: {textbook_context.grade}")
         if textbook_context.lesson is not None:
             bits.append(f"درس/فصل درخواستی: {textbook_context.lesson}")
+        if textbook_context.chapter is not None:
+            bits.append(f"فصل درخواستی: {textbook_context.chapter}")
         if textbook_context.max_lesson is not None:
             bits.append(f"حداکثر درس شناخته‌شده: {textbook_context.max_lesson}")
         sections.append("\n".join(bits))

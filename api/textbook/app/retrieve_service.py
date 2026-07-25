@@ -414,6 +414,8 @@ def _is_topic_search_query(
         "مربوط",
         "کجا",
         "درباره",
+        "در مورد",
+        "درمورد",
         "فعالیت",
         "داستان",
     )
@@ -606,7 +608,7 @@ def _build_topic_search_response(
 
 def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
     # Structured fields from chat scope win; query is only for topic / legacy NL.
-    from api.textbook.app.toc_agent import lookup_toc_start_page
+    from api.textbook.app.toc_agent import lookup_toc_by_title, lookup_toc_start_page
 
     parsed = (
         parse_persian_query(request.query)
@@ -621,6 +623,27 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
         request.chapter if request.chapter is not None else getattr(parsed, "chapter", None)
     )
     topic_display = topic_label(parsed.topic) if parsed.topic else parsed.topic_alias
+
+    # Named lesson title in query (e.g. «ارزش علم») — resolve via TOC before
+    # chapter-start lookup so we open the real درس, not the first page of فصل.
+    title_needle = (parsed.search_text or request.query or "").strip()
+    if (
+        grade
+        and subject
+        and page is None
+        and title_needle
+        and _is_topic_search_query(
+            request.query,
+            parsed_topic=parsed.topic,
+            wants_topic_search=parsed.wants_topic_search,
+            search_text=parsed.search_text or title_needle,
+        )
+    ):
+        title_page = lookup_toc_by_title(grade, subject, title_needle)
+        if title_page is not None:
+            page = title_page
+            if not topic_display:
+                topic_display = title_needle
 
     # Page + book without grade: still catch impossible page numbers against
     # the subject's printed-page range across grades (existing MinerU index).
@@ -699,13 +722,21 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
         if toc_page is not None:
             page = toc_page
         elif lesson is None:
-            return _unmatched(
-                grade=grade,
-                subject=subject,
-                chapter=chapter,
-                confidence=parsed.confidence,
-                failure_reason="lesson_missing",
-            )
+            # Fall through to topic/title search when the query has usable text
+            # (e.g. «ارزش علم») instead of hard-failing lesson_missing.
+            if not _is_topic_search_query(
+                request.query,
+                parsed_topic=parsed.topic,
+                wants_topic_search=parsed.wants_topic_search,
+                search_text=parsed.search_text or (request.query or "").strip() or None,
+            ):
+                return _unmatched(
+                    grade=grade,
+                    subject=subject,
+                    chapter=chapter,
+                    confidence=parsed.confidence,
+                    failure_reason="lesson_missing",
+                )
 
     # Exact page lookup — stay on that page (+ neighbors). Do NOT expand to the
     # whole lesson span: weak OCR chapter maps often glue several دروس together

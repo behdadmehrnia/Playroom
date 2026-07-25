@@ -252,3 +252,51 @@ def test_chapter_and_lesson_numbers_are_separate() -> None:
     parsed_lesson = parse_persian_query("درس چهارم فارسی پایه چهارم")
     assert parsed_lesson.lesson == 4
     assert parsed_lesson.chapter is None
+
+
+def test_named_lesson_title_sets_topic_even_with_chapter() -> None:
+    """«فصل سوم → کلاس ششم → ارزش علم» must not ignore the lesson title."""
+    from api.core.textbook import _extract_named_lesson_title
+
+    assert _extract_named_lesson_title("ارزش علم") == "ارزش علم"
+    assert _extract_named_lesson_title("درس ارزش علم") == "ارزش علم"
+    assert _extract_named_lesson_title("درس چهارم ارزش علم") == "ارزش علم"
+    assert _extract_named_lesson_title("کلاس ششم") is None
+    assert _extract_named_lesson_title("فصل سوم کتاب فارسی رو توضیح بده") is None
+
+    messages = [
+        ChatMessage(
+            role="user",
+            content="نه میخوام بهم فصل سوم کتاب فارسی رو توضیح بدی",
+        ),
+        ChatMessage(
+            role="assistant",
+            content="چه عالی! تو کلاس چندمی؟",
+        ),
+        ChatMessage(role="user", content="کلاس ششم"),
+        ChatMessage(
+            role="assistant",
+            content="می‌شه شماره صفحه یا اسم درس رو در فصل سوم بگی؟",
+        ),
+        ChatMessage(role="user", content="ارزش علم"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.grade == 6
+    assert scope.subject_id == "persian"
+    assert scope.chapter == 3
+    assert scope.topic_query == "ارزش علم"
+    assert scope.can_retrieve() is True
+
+
+def test_followup_about_named_lesson_keeps_topic() -> None:
+    messages = [
+        ChatMessage(role="user", content="فصل سوم فارسی کلاس ششم"),
+        ChatMessage(role="assistant", content="اسم درس رو بگو"),
+        ChatMessage(role="user", content="ارزش علم"),
+        ChatMessage(role="assistant", content="به نظرت علم چه ارزشی داره؟"),
+        ChatMessage(role="user", content="مگه درباره ی درس ارزش علم صحبت نمیکردیم ؟"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.grade == 6
+    assert scope.subject_id == "persian"
+    assert scope.topic_query == "ارزش علم"

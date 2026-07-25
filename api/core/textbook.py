@@ -65,6 +65,14 @@ _ASSISTANT_ASKED_PAGE_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_ASSISTANT_ASKED_LESSON_RE = re.compile(
+    r"(?:"
+    r"اسم[\s\u200c]*(?:درس|فصل)|عنوان[\s\u200c]*درس|کدام[\s\u200c]*درس|"
+    r"چه[\s\u200c]*درسی|کدام[\s\u200c]*قسمت|اسم[\s\u200c]*درس[\s\u200c]*رو|"
+    r"شماره[\s\u200c]*(?:درس|فصل)|درس[\s\u200c]*چند"
+    r")",
+    re.IGNORECASE,
+)
 _ASSISTANT_ASKED_GRADE_RE = re.compile(
     r"(?:"
     r"کلاس[\s\u200c]*چندم|پایه[\s\u200c]*چندم|چندمی[\s\u200c]*هست|"
@@ -310,6 +318,8 @@ _TEXTBOOK_TOPIC_INTENT_MARKERS: tuple[str, ...] = (
     "کجاى کتاب",
     "کجا در کتاب",
     "درباره",
+    "در مورد",
+    "درمورد",
     "معنی",
     "شعر",
     "داستان",
@@ -550,8 +560,117 @@ def _assistant_asked_for_page(text: str | None) -> bool:
     return bool(text and _ASSISTANT_ASKED_PAGE_RE.search(text))
 
 
+def _assistant_asked_for_lesson(text: str | None) -> bool:
+    return bool(text and _ASSISTANT_ASKED_LESSON_RE.search(text))
+
+
 def _assistant_asked_for_grade(text: str | None) -> bool:
     return bool(text and _ASSISTANT_ASKED_GRADE_RE.search(text))
+
+
+_NAMED_LESSON_CONVERSATIONAL: tuple[str, ...] = (
+    "میخوام",
+    "می خواهم",
+    "می‌خوام",
+    "توضیح",
+    "کمک کن",
+    "سلام",
+    "ممنون",
+    "چطور",
+    "مگه",
+    "یعنی چی",
+    "نمیفهمم",
+    "نمی‌فهمم",
+    "بله برو",
+    "نه همین",
+)
+
+
+def _extract_named_lesson_title(text: str) -> str | None:
+    """Return a bare lesson/section title like «ارزش علم» when the turn is that title.
+
+    Numeric «درس سوم» / «فصل سوم» are handled separately; this catches the common
+    case where the child answers with the lesson *name* after we asked for it.
+    """
+    raw = (text or "").strip()
+    if not raw or len(raw) > 48:
+        return None
+    if not any("\u0600" <= ch <= "\u06FF" for ch in raw):
+        return None
+    if _extract_page_number(raw) is not None or _extract_bare_page_number(raw) is not None:
+        return None
+    if _relative_page_delta(raw) != 0:
+        return None
+
+    # «درس چهارم ارزش علم» → keep the title after the numeric درس.
+    lesson_no = _extract_lesson_number(raw)
+    if lesson_no is not None:
+        from api.textbook.app.parser import normalize_digits
+
+        stripped = normalize_digits(raw)
+        stripped = re.sub(
+            r"درس\s*(?:\d{1,2}|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|"
+            r"ششم|شش|هفتم|هفت|هشتم|هشت|نهم|نه|دهم|ده|"
+            r"یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم)"
+            r"\s*",
+            "",
+            stripped,
+            count=1,
+            flags=re.IGNORECASE,
+        ).strip(" ،,")
+        if stripped and 1 <= len(stripped.split()) <= 6:
+            if not any(n in stripped for n in _NAMED_LESSON_CONVERSATIONAL):
+                return stripped
+        return None
+
+    # Pure chapter locator («فصل سوم») is not a title.
+    if _extract_chapter_number(raw) is not None and len(raw.split()) <= 4:
+        return None
+
+    # Strip a leading bare «درس » when there is no number («درس ارزش علم»).
+    candidate = re.sub(r"^درس\s+", "", raw, count=1, flags=re.IGNORECASE).strip()
+    if not candidate:
+        return None
+    if any(n in candidate for n in _NAMED_LESSON_CONVERSATIONAL):
+        return None
+
+    words = candidate.split()
+    if not (1 <= len(words) <= 6):
+        return None
+
+    # Grade-only / subject-only replies.
+    grade_token = _extract_grade_token(candidate)
+    subject_token = _extract_subject_token(candidate)
+    if grade_token and len(words) <= 3 and not subject_token:
+        # «کلاس ششم» / «ششم»
+        if re.fullmatch(
+            rf"(?:کلاس|پایه)?\s*{re.escape(grade_token)}م?",
+            candidate.replace("\u200c", ""),
+            flags=re.IGNORECASE,
+        ):
+            return None
+    if subject_token and len(words) <= 2 and not grade_token:
+        return None
+
+    banned_alone = {
+        "کتاب",
+        "تمرین",
+        "درس",
+        "فصل",
+        "صفحه",
+        "سوال",
+        "سؤال",
+        "تکلیف",
+        "مسئله",
+        "مسأله",
+        "فارسی",
+        "ریاضی",
+        "علوم",
+        "نگارش",
+    }
+    if candidate in banned_alone:
+        return None
+    return candidate
 
 
 def _extract_page_word_phrase(text: str) -> str | None:
@@ -811,13 +930,43 @@ def resolve_textbook_scope(
 
     topic_query: str | None = None
     latest = user_texts[-1] if user_texts else ""
-    # Topic/named-content search only when we don't already have a page/lesson target.
-    if latest and not current_page and not lesson and not chapter and (
-        _textbook_has_topic_intent(latest)
-        or (
-            subject_id
-            and grade is not None
-            and any(m in latest for m in ("تمرین", "شعر", "داستان", "معنی", "متن", "فعالیت"))
+    asked_for_locator = _assistant_asked_for_page(
+        last_assistant
+    ) or _assistant_asked_for_lesson(last_assistant)
+
+    # Named lesson title (e.g. «ارزش علم») — even when فصل is already sticky.
+    # Keep the most recent title across follow-ups until a page/lesson number wins.
+    if not current_page and not lesson:
+        for idx, text in enumerate(reversed(user_texts)):
+            is_latest = idx == 0
+            title = _extract_named_lesson_title(text)
+            if not title:
+                continue
+            if (
+                (grade is not None and subject_id)
+                or chapter is not None
+                or (is_latest and asked_for_locator)
+                or _textbook_has_topic_intent(text)
+            ):
+                topic_query = title
+                break
+
+    if (
+        not topic_query
+        and latest
+        and not current_page
+        and not lesson
+        and not chapter
+        and (
+            _textbook_has_topic_intent(latest)
+            or (
+                subject_id
+                and grade is not None
+                and any(
+                    m in latest
+                    for m in ("تمرین", "شعر", "داستان", "معنی", "متن", "فعالیت")
+                )
+            )
         )
     ):
         topic_query = latest

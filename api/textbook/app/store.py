@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -1072,3 +1073,51 @@ def resolve_page_from_toc(
             if entry.kind == "lesson" and entry.number == lesson:
                 return entry.start_page
     return None
+
+
+def _normalize_toc_title(text: str) -> str:
+    cleaned = (text or "").replace("\u200c", " ").strip().lower()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"^[«»\"'`]+|[«»\"'`]+$", "", cleaned)
+    return cleaned
+
+
+def resolve_page_from_toc_title(
+    grade: int,
+    subject: str,
+    title: str,
+) -> int | None:
+    """Match a lesson/section/chapter title in cached TOC (e.g. «ارزش علم»)."""
+    needle = _normalize_toc_title(title)
+    if not needle or len(needle) < 2:
+        return None
+    entries = list_toc_entries(grade, subject)
+    if not entries:
+        return None
+
+    best_page: int | None = None
+    best_score = 0
+    best_kind_rank = -1
+    kind_rank = {"lesson": 3, "section": 2, "chapter": 1}
+    for entry in entries:
+        if entry.kind not in kind_rank:
+            continue
+        etitle = _normalize_toc_title(entry.title)
+        if not etitle:
+            continue
+        score = 0
+        if needle == etitle:
+            score = 100
+        elif needle in etitle or etitle in needle:
+            score = 70
+        else:
+            n_tokens = {t for t in needle.split() if len(t) >= 2}
+            e_tokens = {t for t in etitle.split() if len(t) >= 2}
+            if n_tokens and n_tokens <= e_tokens:
+                score = 55
+        rank = kind_rank[entry.kind]
+        if score > best_score or (score == best_score and rank > best_kind_rank):
+            best_score = score
+            best_kind_rank = rank
+            best_page = entry.start_page
+    return best_page if best_score >= 55 else None
