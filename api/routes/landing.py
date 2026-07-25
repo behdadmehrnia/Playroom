@@ -723,13 +723,12 @@ CHAT_PAGE_HTML = """
     </div>
 
     <script>
+        const STORAGE_KEY = 'yarkids_chat_v1';
         const COOKIE_PREFIX = 'ykc_';
         const COOKIE_META = 'ykc_n';
-        // Encoded chunk size must stay under ~4KB cookie limit (name + attrs).
-        const ENCODED_CHUNK = 2800;
-        const MAX_SESSIONS = 10;
-        const MAX_MESSAGES = 24;
-        const MAX_CONTENT = 2000;
+        const MAX_SESSIONS = 30;
+        const MAX_MESSAGES = 80;
+        const MAX_CONTENT = 12000;
 
         const messagesEl = document.getElementById('messages');
         const form = document.getElementById('form');
@@ -782,36 +781,19 @@ CHAT_PAGE_HTML = """
                 if (eq === -1) continue;
                 if (row.slice(0, eq) === name) return row.slice(eq + 1);
             }
-            return null; // keep encoded; decodeURIComponent in readCookies
-        }
-        function setCookieEncoded(name, encodedValue) {
-            // encodedValue must already be encodeURIComponent'd (or a slice of it)
-            document.cookie = name + '=' + encodedValue + '; path=/; max-age=31536000; SameSite=Lax';
+            return null;
         }
         function delCookie(name) {
             document.cookie = name + '=; path=/; max-age=0; SameSite=Lax';
         }
-
-        function clearCookieChunks() {
-            const n = parseInt(decodeURIComponent(getCookie(COOKIE_META) || '0'), 10) || 0;
+        function clearLegacyCookies() {
+            const nRaw = getCookie(COOKIE_META);
+            const n = nRaw ? parseInt(decodeURIComponent(nRaw), 10) || 0 : 0;
             for (let i = 0; i < Math.max(n, 40); i++) delCookie(COOKIE_PREFIX + i);
             delCookie(COOKIE_META);
             delCookie('yarkids_chat');
         }
-
-        function writeCookies(raw) {
-            clearCookieChunks();
-            const encoded = encodeURIComponent(raw);
-            const parts = [];
-            for (let i = 0; i < encoded.length; i += ENCODED_CHUNK) {
-                parts.push(encoded.slice(i, i + ENCODED_CHUNK));
-            }
-            if (!parts.length) parts.push(encodeURIComponent('{}'));
-            setCookieEncoded(COOKIE_META, encodeURIComponent(String(parts.length)));
-            parts.forEach((p, idx) => setCookieEncoded(COOKIE_PREFIX + idx, p));
-        }
-
-        function readCookies() {
+        function readLegacyCookies() {
             const nRaw = getCookie(COOKIE_META);
             const n = nRaw ? parseInt(decodeURIComponent(nRaw), 10) || 0 : 0;
             if (!n) {
@@ -821,25 +803,24 @@ CHAT_PAGE_HTML = """
             let encoded = '';
             for (let i = 0; i < n; i++) {
                 const part = getCookie(COOKIE_PREFIX + i);
-                if (part == null) return ''; // incomplete — treat as missing
+                if (part == null) return '';
                 encoded += part;
             }
-            try {
-                return decodeURIComponent(encoded);
-            } catch (_) {
-                return '';
-            }
+            try { return decodeURIComponent(encoded); } catch (_) { return ''; }
         }
 
         function sessionById(id) {
             return store.sessions.find((s) => s.id === id) || null;
         }
-
         function getCurrentSession() {
             return sessionById(store.activeId);
         }
 
-        function touchSession(session, messages, persona, actPersona) {
+        function isDefaultTitle(title) {
+            return !title || title === 'گفتگوی جدید';
+        }
+
+        function touchSession(session, messages, persona, actPersona, titleHint) {
             if (!session) return;
             session.messages = (messages || []).map((m) => ({
                 role: m.role,
@@ -848,145 +829,115 @@ CHAT_PAGE_HTML = """
             session.persona = persona || 'auto';
             session.activePersona = actPersona || null;
             session.updatedAt = Date.now();
-            const firstUser = session.messages.find((m) => m.role === 'user');
-            if (firstUser) {
-                session.title = firstUser.content.trim().slice(0, 40) || 'گفتگوی جدید';
-            } else if (!session.title) {
-                session.title = 'گفتگوی جدید';
+            if (titleHint && String(titleHint).trim()) {
+                session.title = String(titleHint).trim().slice(0, 60);
+            } else if (isDefaultTitle(session.title)) {
+                const firstUser = session.messages.find((m) => m.role === 'user');
+                if (firstUser) {
+                    session.title = firstUser.content.trim().slice(0, 40) || 'گفتگوی جدید';
+                } else {
+                    session.title = 'گفتگوی جدید';
+                }
             }
         }
 
-        function buildPersistable() {
-            // newest first
-            const sessions = store.sessions
-                .slice()
-                .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-                .slice(0, MAX_SESSIONS)
-                .map((s) => ({
-                    id: s.id,
-                    title: String(s.title || 'گفتگوی جدید').slice(0, 60),
-                    updatedAt: s.updatedAt || 0,
-                    persona: s.persona || 'auto',
-                    activePersona: s.activePersona || null,
-                    messages: (s.messages || []).slice(-MAX_MESSAGES).map((m) => ({
-                        role: m.role,
-                        content: String(m.content || '').slice(0, MAX_CONTENT),
-                    })),
-                }));
-
-            // keep active session even if it would fall outside top N
-            if (store.activeId && !sessions.some((s) => s.id === store.activeId)) {
-                const active = store.sessions.find((s) => s.id === store.activeId);
-                if (active) {
-                    sessions.pop();
-                    sessions.unshift({
-                        id: active.id,
-                        title: String(active.title || 'گفتگوی جدید').slice(0, 60),
-                        updatedAt: active.updatedAt || Date.now(),
-                        persona: active.persona || 'auto',
-                        activePersona: active.activePersona || null,
-                        messages: (active.messages || []).slice(-MAX_MESSAGES).map((m) => ({
+        function cloneStoreForPersist(state) {
+            return {
+                activeId: state.activeId,
+                selectedPersona: state.selectedPersona || 'auto',
+                sessions: (state.sessions || [])
+                    .slice()
+                    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+                    .slice(0, MAX_SESSIONS)
+                    .map((s) => ({
+                        id: s.id,
+                        title: String(s.title || 'گفتگوی جدید').slice(0, 60),
+                        updatedAt: s.updatedAt || 0,
+                        persona: s.persona || 'auto',
+                        activePersona: s.activePersona || null,
+                        messages: (s.messages || []).slice(-MAX_MESSAGES).map((m) => ({
                             role: m.role,
                             content: String(m.content || '').slice(0, MAX_CONTENT),
                         })),
-                    });
-                }
-            }
-
-            let payload = {
-                activeId: store.activeId,
-                selectedPersona: store.selectedPersona || 'auto',
-                sessions: sessions,
+                    })),
             };
-
-            // shrink until encoded cookie set is reasonable (~8 chunks max)
-            let raw = JSON.stringify(payload);
-            let guard = 0;
-            while (encodeURIComponent(raw).length > ENCODED_CHUNK * 10 && guard < 40) {
-                guard += 1;
-                let shrunk = false;
-                for (const s of payload.sessions) {
-                    if (s.messages.length > 2) {
-                        s.messages.shift();
-                        shrunk = true;
-                    }
-                }
-                if (!shrunk) {
-                    for (const s of payload.sessions) {
-                        for (const m of s.messages) {
-                            if (m.content.length > 120) {
-                                m.content = m.content.slice(0, Math.floor(m.content.length * 0.7));
-                                shrunk = true;
-                            }
-                        }
-                    }
-                }
-                if (!shrunk && payload.sessions.length > 1) {
-                    // drop oldest non-active
-                    const idx = payload.sessions.map((s) => s.id).lastIndexOf(
-                        payload.sessions.filter((s) => s.id !== payload.activeId).slice(-1)[0]?.id
-                    );
-                    const dropId = payload.sessions.filter((s) => s.id !== payload.activeId).pop()?.id;
-                    if (dropId) {
-                        payload.sessions = payload.sessions.filter((s) => s.id !== dropId);
-                        shrunk = true;
-                    }
-                }
-                if (!shrunk) break;
-                raw = JSON.stringify(payload);
-            }
-            return payload;
         }
 
         function saveStore() {
-            // flush active UI state into its session object first
             const current = getCurrentSession();
             if (current) {
                 touchSession(current, history, selectedPersona, activePersona);
             }
             store.selectedPersona = selectedPersona;
-            const persistable = buildPersistable();
-            // sync in-memory store to what we persist (same ids/messages)
-            const byId = new Map(store.sessions.map((s) => [s.id, s]));
-            persistable.sessions.forEach((ps) => {
-                const live = byId.get(ps.id);
-                if (live) {
-                    live.title = ps.title;
-                    live.updatedAt = ps.updatedAt;
-                    live.persona = ps.persona;
-                    live.activePersona = ps.activePersona;
-                    live.messages = ps.messages.slice();
+            const persistable = cloneStoreForPersist(store);
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
+            } catch (err) {
+                // Quota exceeded: drop oldest non-active sessions and retry.
+                let sessions = persistable.sessions.slice();
+                while (sessions.length > 1) {
+                    const drop = sessions.filter((s) => s.id !== persistable.activeId).pop();
+                    if (!drop) break;
+                    sessions = sessions.filter((s) => s.id !== drop.id);
+                    try {
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                            ...persistable,
+                            sessions,
+                        }));
+                        store.sessions = sessions.map((ps) => {
+                            const live = sessionById(ps.id);
+                            return live || ps;
+                        });
+                        renderSessionList();
+                        return;
+                    } catch (_) { /* continue shrinking */ }
                 }
-            });
-            store.sessions = persistable.sessions.map((ps) => {
-                const live = byId.get(ps.id);
-                return live || ps;
-            });
-            store.activeId = persistable.activeId;
-            store.selectedPersona = persistable.selectedPersona;
-            writeCookies(JSON.stringify(persistable));
+                console.warn('yarkids chat storage full', err);
+            }
             renderSessionList();
+        }
+
+        function normalizeLoaded(data) {
+            if (!data || !Array.isArray(data.sessions)) return null;
+            return {
+                activeId: data.activeId || (data.sessions[0] && data.sessions[0].id) || null,
+                selectedPersona: data.selectedPersona || 'auto',
+                sessions: data.sessions.map((s) => ({
+                    id: s.id,
+                    title: s.title || 'گفتگوی جدید',
+                    updatedAt: s.updatedAt || 0,
+                    persona: s.persona || 'auto',
+                    activePersona: s.activePersona || null,
+                    messages: Array.isArray(s.messages) ? s.messages.slice() : [],
+                })),
+            };
         }
 
         function loadStore() {
             try {
-                const raw = readCookies();
-                if (!raw) return;
-                const data = JSON.parse(raw);
-                if (!data || !Array.isArray(data.sessions)) return;
-                store = {
-                    activeId: data.activeId || (data.sessions[0] && data.sessions[0].id) || null,
-                    selectedPersona: data.selectedPersona || 'auto',
-                    sessions: data.sessions.map((s) => ({
-                        id: s.id,
-                        title: s.title || 'گفتگوی جدید',
-                        updatedAt: s.updatedAt || 0,
-                        persona: s.persona || 'auto',
-                        activePersona: s.activePersona || null,
-                        messages: Array.isArray(s.messages) ? s.messages.slice() : [],
-                    })),
-                };
-            } catch (_) { /* ignore corrupt cookie */ }
+                const rawLs = localStorage.getItem(STORAGE_KEY);
+                if (rawLs) {
+                    const parsed = normalizeLoaded(JSON.parse(rawLs));
+                    if (parsed) {
+                        store = parsed;
+                        return;
+                    }
+                }
+            } catch (_) {}
+
+            // Migrate older cookie-based store once, then clear cookies.
+            try {
+                const rawCookie = readLegacyCookies();
+                if (rawCookie) {
+                    const parsed = normalizeLoaded(JSON.parse(rawCookie));
+                    if (parsed) {
+                        store = parsed;
+                        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cloneStoreForPersist(store))); } catch (_) {}
+                        clearLegacyCookies();
+                        return;
+                    }
+                }
+            } catch (_) {}
         }
 
         function ensureSession() {
@@ -1005,10 +956,31 @@ CHAT_PAGE_HTML = """
             return s;
         }
 
+        function effectivePersona() {
+            if (activePersona && activePersona !== 'none') return activePersona;
+            if (selectedPersona && selectedPersona !== 'auto') return selectedPersona;
+            return null;
+        }
+
+        function applyResolvedPersona(resolved) {
+            if (!resolved || resolved === 'none') return;
+            activePersona = resolved;
+            // Keep chip + future requests in sync with the live chat persona,
+            // even if the user had manually picked something earlier.
+            selectedPersona = resolved;
+            store.selectedPersona = resolved;
+            updatePersonaChip();
+            renderPersonaMenu();
+        }
+
         function loadSessionIntoUi(session) {
             history = (session && session.messages) ? session.messages.slice() : [];
             selectedPersona = (session && session.persona) || 'auto';
             activePersona = (session && session.activePersona) || null;
+            // Prefer showing the last known active persona for this session.
+            if ((!activePersona || activePersona === 'none') && selectedPersona !== 'auto') {
+                activePersona = selectedPersona;
+            }
             store.selectedPersona = selectedPersona;
             renderMessages();
             updatePersonaChip();
@@ -1017,7 +989,6 @@ CHAT_PAGE_HTML = """
 
         function createSession() {
             if (isBusy) return;
-            // save current chat BEFORE switching
             const prev = getCurrentSession();
             if (prev) touchSession(prev, history, selectedPersona, activePersona);
 
@@ -1155,9 +1126,7 @@ CHAT_PAGE_HTML = """
             return parts.length > 1 ? parts.slice(1).join(' ') : full;
         }
         function updatePersonaChip() {
-            const showValue = selectedPersona !== 'auto'
-                ? selectedPersona
-                : (activePersona && activePersona !== 'none' ? activePersona : null);
+            const showValue = effectivePersona();
             if (showValue) {
                 personaWrap.classList.add('visible');
                 personaHint.hidden = true;
@@ -1169,10 +1138,11 @@ CHAT_PAGE_HTML = """
         }
         function renderPersonaMenu() {
             personaMenu.innerHTML = '';
+            const current = effectivePersona() || selectedPersona || 'auto';
             personas.forEach((p) => {
                 const btn = document.createElement('button');
                 btn.type = 'button';
-                btn.className = 'persona-option' + (p.value === selectedPersona ? ' active' : '');
+                btn.className = 'persona-option' + (p.value === current ? ' active' : '');
                 btn.textContent = p.label;
                 btn.setAttribute('role', 'option');
                 btn.addEventListener('click', () => {
@@ -1190,7 +1160,8 @@ CHAT_PAGE_HTML = """
             if (!personaWrap.classList.contains('visible')) {
                 personaWrap.classList.add('visible');
                 personaHint.hidden = true;
-                personaBtn.textContent = shortLabel(selectedPersona !== 'auto' ? selectedPersona : 'auto');
+                const show = effectivePersona() || selectedPersona || 'auto';
+                personaBtn.textContent = shortLabel(show);
             }
             personaMenu.classList.add('open');
             personaBtn.classList.add('open');
@@ -1298,9 +1269,9 @@ CHAT_PAGE_HTML = """
             setBusy(true);
             const typing = addBubble('assistant', 'در حال فکر کردن...', 'typing');
 
-            // snapshot messages for THIS session only (avoid using UI history after switch)
             const messagesForRequest = history.slice();
             const personaForRequest = selectedPersona;
+            const stickyPersona = activePersona;
 
             const payload = { messages: messagesForRequest };
             if (personaForRequest && personaForRequest !== 'auto') {
@@ -1309,9 +1280,8 @@ CHAT_PAGE_HTML = """
                     yarkids_persona: personaForRequest,
                     yarkids_active_persona: personaForRequest,
                 };
-            } else if (activePersona && activePersona !== 'none') {
-                // Keep sticky persona across turns even in auto mode.
-                payload.metadata = { yarkids_active_persona: activePersona };
+            } else if (stickyPersona && stickyPersona !== 'none') {
+                payload.metadata = { yarkids_active_persona: stickyPersona };
             }
 
             try {
@@ -1322,7 +1292,6 @@ CHAT_PAGE_HTML = """
                 });
                 const data = await res.json().catch(() => ({}));
 
-                // Always attach reply to the originating session, never the currently open one.
                 const target = sessionById(sessionId);
                 if (!target) {
                     if (typing && typing.parentNode) typing.remove();
@@ -1331,7 +1300,6 @@ CHAT_PAGE_HTML = """
 
                 if (!res.ok) {
                     const detail = (data && (data.detail || data.error || data.message)) || ('خطا ' + res.status);
-                    // roll back the user message only if still last in THAT session
                     const msgs = (target.messages || []).slice();
                     if (msgs.length && msgs[msgs.length - 1].role === 'user' && msgs[msgs.length - 1].content === text) {
                         msgs.pop();
@@ -1352,22 +1320,19 @@ CHAT_PAGE_HTML = """
                     || data?.response
                     || 'پاسخی دریافت نشد.';
                 const resolved = data?.yarkids?.persona || data?.persona || null;
+                const chatTitle = data?.yarkids?.chat_title || data?.chat_title || null;
 
                 const msgs = (target.messages || []).slice();
-                // ensure user message is present (already saved), then append assistant
                 msgs.push({ role: 'assistant', content: reply });
                 let nextActive = target.activePersona;
                 if (resolved && resolved !== 'none') nextActive = resolved;
-                touchSession(target, msgs, target.persona, nextActive);
+                const nextPersona = (resolved && resolved !== 'none') ? resolved : target.persona;
+                touchSession(target, msgs, nextPersona, nextActive, chatTitle);
 
                 if (token === requestToken && store.activeId === sessionId) {
                     if (typing && typing.parentNode) typing.remove();
                     history = msgs.slice();
-                    if (resolved && resolved !== 'none') {
-                        activePersona = resolved;
-                        updatePersonaChip();
-                        renderPersonaMenu();
-                    }
+                    if (resolved && resolved !== 'none') applyResolvedPersona(resolved);
                     addBubble('assistant', reply, null, true);
                 } else if (typing && typing.parentNode) {
                     typing.remove();
@@ -1403,8 +1368,7 @@ CHAT_PAGE_HTML = """
         // boot
         loadStore();
         ensureSession();
-        const current = getCurrentSession();
-        loadSessionIntoUi(current);
+        loadSessionIntoUi(getCurrentSession());
         saveStore();
         loadPersonas();
     </script>
