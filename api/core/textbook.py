@@ -1087,9 +1087,9 @@ async def _fetch_textbook_context_local(
             )
         return _textbook_context_from_payload(payload)
 
-    # Prefer OCR/index retrieve first. Never await TOC LLM inline — a hung
-    # provider call (or stuck toc_jobs=running) was taking down the whole pod
-    # even with spare RAM. Build TOC in the background; next ask can use cache.
+    # Prefer OCR/index first. On lesson/chapter miss, try TOC inline with a hard
+    # timeout (text-only LLM). Safe on ~1GB: no page PNGs, capped HTTP timeout.
+    # If TOC is slow/fails, return miss quickly and optionally continue in background.
     context = await asyncio.to_thread(_retrieve)
     needs_toc = bool(
         context
@@ -1103,14 +1103,32 @@ async def _fetch_textbook_context_local(
         and backend_model
     )
     if needs_toc:
-        from api.textbook.app.toc_agent import schedule_toc_map_build
+        from api.textbook.app.toc_agent import ensure_toc_map, schedule_toc_map_build
 
-        schedule_toc_map_build(
-            grade,
-            subject,
-            llm_client=llm_client,
-            model=backend_model,
-        )
+        built = False
+        inline_budget = min(12.0, max(6.0, toc_timeout_sec))
+        llm_budget = min(8.0, inline_budget - 1.0)
+        try:
+            built = await asyncio.wait_for(
+                ensure_toc_map(
+                    grade,
+                    subject,
+                    llm_client=llm_client,
+                    model=backend_model,
+                    llm_timeout_sec=llm_budget,
+                ),
+                timeout=inline_budget,
+            )
+        except Exception:  # noqa: BLE001 — never block/crash chat on TOC
+            built = False
+            schedule_toc_map_build(
+                grade,
+                subject,
+                llm_client=llm_client,
+                model=backend_model,
+            )
+        if built:
+            context = await asyncio.to_thread(_retrieve)
 
     return context
 
