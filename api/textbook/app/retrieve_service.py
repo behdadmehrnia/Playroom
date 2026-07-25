@@ -614,23 +614,36 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
 
         center = get_page(grade, subject, page)
         if center:
-            neighbors = get_neighbor_pages(grade, subject, page, request.include_neighbors)
+            # Keep neighbors tiny for exact-page asks so a bad lesson map
+            # (or the next درس) does not leak into «این صفحه چیه؟».
+            neighbor_n = min(request.include_neighbors, 1)
+            neighbors = get_neighbor_pages(grade, subject, page, neighbor_n)
             needs_image = _needs_image(center, request.include_image)
             context_text, text_usable = _build_context_text(
                 center, neighbors, topic=topic_display
             )
-            # Soft lesson hint (no full dump) so the model knows the chapter name
-            # without inventing that neighboring pages are «this page».
+            # Optional soft lesson label — omit huge/untrusted spans (bad OCR maps
+            # like 30–52) so we do not nudge the model to mix later دروس in.
             lesson_hit = find_lesson_containing_page(grade, subject, page)
             if lesson_hit is not None:
                 lesson_no, start_page, end_page = lesson_hit
-                hint = (
-                    f"توجه: صفحه {page} داخل درس/فصل {lesson_no} "
-                    f"(تقریباً صفحات {start_page} تا {end_page}) است. "
-                    f"کودک همین صفحه {page} را خواسته — فقط همین صفحه (+همسایه‌های کوتاه زیر) را "
-                    f"محتوای «این صفحه» بدان؛ متن صفحات دیگر درس را به این صفحه نسبت نده.\n\n"
-                )
-                context_text = hint + (context_text or "")
+                span = (end_page - start_page) if end_page and start_page else 99
+                if span <= 8:
+                    hint = (
+                        f"توجه: صفحه {page} داخل درس/فصل {lesson_no} "
+                        f"(صفحات {start_page} تا {end_page}) است. "
+                        f"کودک همین صفحه {page} را خواسته — فقط همین صفحه را "
+                        f"محتوای «این صفحه» بدان.\n\n"
+                    )
+                    context_text = hint + (context_text or "")
+                else:
+                    hint = (
+                        f"توجه: کودک صفحه {page} را خواسته. "
+                        f"فقط همین صفحه (+همسایهٔ کوتاه) را توصیف کن؛ "
+                        f"از روی صفحات دیگر داستان نساز.\n\n"
+                    )
+                    context_text = hint + (context_text or "")
+                    lesson_hit = None  # do not trust lesson no. on huge spans
             response = RetrieveResponse(
                 matched=True,
                 match_type="exact_page",
