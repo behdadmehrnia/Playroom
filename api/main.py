@@ -58,48 +58,35 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Yar Kids API",
-        description=(
-            "دستیار کودک‌دوست — API مستقل با معماری Persona، Intent Detection و Reflection. "
-            "منطق چت و بازیابی کتاب درسی به‌صورت کامل داخل همین سرویس قرار دارد."
-        ),
         version=__version__,
         lifespan=lifespan,
         openapi_tags=[
             {
                 "name": "Health",
-                "description": "وضعیت سرویس، مدل و قابلیت‌های فعال",
             },
             {
                 "name": "Chat",
-                "description": "چت اصلی Yar Kids (JSON یا SSE)",
             },
             {
-                "name": "OpenAI Compatible",
-                "description": "اندپوینت‌های سازگار با OpenAI Chat Completions و Responses",
+                "name": "OpenAI Compatibility",
             },
             {
                 "name": "Personas",
-                "description": "لیست شخصیت‌ها و انتخاب/تشخیص persona",
             },
             {
                 "name": "Intent",
-                "description": "تشخیص نیت پیام کاربر",
             },
             {
                 "name": "Textbook",
-                "description": "بازیابی، تصویر صفحه و مدیریت ایندکس کتاب‌های درسی",
             },
             {
                 "name": "Web Search",
-                "description": "جستجوی وب برای پرسونای‌هایی که به اطلاعات به‌روز نیاز دارند",
             },
             {
                 "name": "Generation",
-                "description": "تولید پاسخ بدون اجرای کامل پایپ‌لاین چت",
             },
             {
                 "name": "Reflection",
-                "description": "بازبینی و بازنویسی پاسخ مدل",
             },
         ],
     )

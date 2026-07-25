@@ -588,6 +588,16 @@ CHAT_PAGE_HTML = """
             white-space: pre-wrap;
         }
         .bubble.typing { color: #888; font-style: italic; white-space: pre-wrap; }
+        .bubble.assistant.streaming .stream-cursor {
+            display: inline-block;
+            width: 0.42em;
+            height: 1em;
+            margin-right: 2px;
+            background: #f9d423;
+            vertical-align: text-bottom;
+            animation: stream-blink 1s step-end infinite;
+        }
+        @keyframes stream-blink { 50% { opacity: 0; } }
         .bubble.assistant.md p { margin: 0 0 0.65em; }
         .bubble.assistant.md p:last-child { margin-bottom: 0; }
         .bubble.assistant.md ul,
@@ -1286,7 +1296,7 @@ CHAT_PAGE_HTML = """
             const personaForRequest = selectedPersona;
             const stickyPersona = activePersona;
 
-            const payload = { messages: messagesForRequest };
+            const payload = { messages: messagesForRequest, stream: true };
             if (personaForRequest && personaForRequest !== 'auto') {
                 payload.persona = personaForRequest;
                 payload.metadata = {
@@ -1297,43 +1307,175 @@ CHAT_PAGE_HTML = """
                 payload.metadata = { yarkids_active_persona: stickyPersona };
             }
 
+            const failRequest = (detail) => {
+                const target = sessionById(sessionId);
+                if (!target) {
+                    if (typing && typing.parentNode) typing.remove();
+                    return;
+                }
+                const msgs = (target.messages || []).slice();
+                if (msgs.length && msgs[msgs.length - 1].role === 'user' && msgs[msgs.length - 1].content === text) {
+                    msgs.pop();
+                }
+                touchSession(target, msgs, target.persona, target.activePersona);
+                if (token === requestToken && store.activeId === sessionId) {
+                    if (typing && typing.parentNode) typing.remove();
+                    history = msgs.slice();
+                    addBubble('assistant', String(detail), 'error');
+                } else if (typing && typing.parentNode) {
+                    typing.remove();
+                }
+                saveStore();
+            };
+
             try {
                 const res = await fetch('/v1/chat/completions', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'text/event-stream',
+                    },
                     body: JSON.stringify(payload),
                 });
-                const data = await res.json().catch(() => ({}));
+
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    const detail = (data && (data.detail || data.error || data.message)) || ('خطا ' + res.status);
+                    failRequest(detail);
+                    return;
+                }
+
+                if (!res.body) {
+                    failRequest('پاسخ جریانی از سرور دریافت نشد.');
+                    return;
+                }
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let reply = '';
+                let shown = '';
+                let resolved = null;
+                let chatTitle = null;
+                let streamBubble = null;
+                let revealTimer = null;
+                const STREAM_TICK_MS = 16;
+
+                const isActiveView = () =>
+                    token === requestToken && store.activeId === sessionId;
+
+                const ensureStreamBubble = () => {
+                    if (!isActiveView()) return null;
+                    if (streamBubble && streamBubble.parentNode) return streamBubble;
+                    if (typing && typing.parentNode) {
+                        typing.classList.remove('typing');
+                        typing.classList.add('md', 'streaming');
+                        typing.textContent = '';
+                        streamBubble = typing;
+                    } else {
+                        streamBubble = addBubble('assistant', '', 'streaming', true, false);
+                    }
+                    return streamBubble;
+                };
+
+                const paintShown = () => {
+                    const el = ensureStreamBubble();
+                    if (!el) return;
+                    el.innerHTML = renderMarkdown(shown) + '<span class="stream-cursor" aria-hidden="true"></span>';
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                };
+
+                const stopReveal = () => {
+                    if (revealTimer) {
+                        window.clearInterval(revealTimer);
+                        revealTimer = null;
+                    }
+                };
+
+                // Advance ``shown`` by one word (Persian/Latin) or one whitespace/punct run.
+                const nextWordEnd = (full, from) => {
+                    if (from >= full.length) return full.length;
+                    const rest = full.slice(from);
+                    const ws = rest.match(/^\\s+/);
+                    if (ws) return from + ws[0].length;
+                    const word = rest.match(/^[\\u0600-\\u06FF\\u0750-\\u077F\\u08A0-\\u08FF\\uFB50-\\uFDFF\\uFE70-\\uFEFFa-zA-Z0-9۰-۹٠-٩_]+/);
+                    if (word) return from + word[0].length;
+                    return from + 1;
+                };
+
+                try {
+                const scheduleReveal = () => {
+                    if (revealTimer) return;
+                    revealTimer = window.setInterval(() => {
+                        if (shown.length >= reply.length) {
+                            stopReveal();
+                            paintShown();
+                            return;
+                        }
+                        shown = reply.slice(0, nextWordEnd(reply, shown.length));
+                        paintShown();
+                    }, STREAM_TICK_MS);
+                };
+
+                const waitUntilCaughtUp = () => new Promise((resolve) => {
+                    const tick = () => {
+                        if (shown.length >= reply.length) {
+                            stopReveal();
+                            resolve();
+                            return;
+                        }
+                        scheduleReveal();
+                        window.setTimeout(tick, STREAM_TICK_MS);
+                    };
+                    tick();
+                });
+
+                const consumeSseLine = (line) => {
+                    const trimmed = String(line || '').trim();
+                    if (!trimmed || !trimmed.startsWith('data:')) return;
+                    const dataStr = trimmed.slice(5).trim();
+                    if (!dataStr || dataStr === '[DONE]') return;
+                    let chunk;
+                    try {
+                        chunk = JSON.parse(dataStr);
+                    } catch (_) {
+                        return;
+                    }
+                    const delta = chunk?.choices?.[0]?.delta?.content;
+                    if (typeof delta === 'string' && delta) {
+                        reply += delta;
+                        scheduleReveal();
+                    }
+                    const meta = chunk?.yarkids;
+                    if (meta && typeof meta === 'object') {
+                        if (meta.persona) resolved = meta.persona;
+                        if (meta.chat_title) chatTitle = meta.chat_title;
+                        if (meta.error && !reply) reply = String(meta.error);
+                    }
+                };
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split('\\n');
+                    buffer = parts.pop() || '';
+                    for (const line of parts) consumeSseLine(line);
+                }
+                if (buffer.trim()) consumeSseLine(buffer);
+                await waitUntilCaughtUp();
+
+                if (!reply.trim()) {
+                    stopReveal();
+                    failRequest('پاسخی دریافت نشد.');
+                    return;
+                }
 
                 const target = sessionById(sessionId);
                 if (!target) {
                     if (typing && typing.parentNode) typing.remove();
                     return;
                 }
-
-                if (!res.ok) {
-                    const detail = (data && (data.detail || data.error || data.message)) || ('خطا ' + res.status);
-                    const msgs = (target.messages || []).slice();
-                    if (msgs.length && msgs[msgs.length - 1].role === 'user' && msgs[msgs.length - 1].content === text) {
-                        msgs.pop();
-                    }
-                    touchSession(target, msgs, target.persona, target.activePersona);
-                    if (token === requestToken && store.activeId === sessionId) {
-                        if (typing && typing.parentNode) typing.remove();
-                        history = msgs.slice();
-                        addBubble('assistant', String(detail), 'error');
-                    } else if (typing && typing.parentNode) {
-                        typing.remove();
-                    }
-                    saveStore();
-                    return;
-                }
-
-                const reply = data?.choices?.[0]?.message?.content
-                    || data?.response
-                    || 'پاسخی دریافت نشد.';
-                const resolved = data?.yarkids?.persona || data?.persona || null;
-                const chatTitle = data?.yarkids?.chat_title || data?.chat_title || null;
 
                 const msgs = (target.messages || []).slice();
                 msgs.push({ role: 'assistant', content: reply });
@@ -1342,34 +1484,29 @@ CHAT_PAGE_HTML = """
                 const nextPersona = (resolved && resolved !== 'none') ? resolved : target.persona;
                 touchSession(target, msgs, nextPersona, nextActive, chatTitle);
 
-                if (token === requestToken && store.activeId === sessionId) {
-                    if (typing && typing.parentNode) typing.remove();
+                if (isActiveView()) {
+                    shown = reply;
+                    if (streamBubble && streamBubble.parentNode) {
+                        streamBubble.classList.remove('streaming');
+                        streamBubble.innerHTML = renderMarkdown(reply);
+                    } else if (typing && typing.parentNode) {
+                        typing.remove();
+                        addBubble('assistant', reply, null, true);
+                    } else {
+                        addBubble('assistant', reply, null, true);
+                    }
                     history = msgs.slice();
                     if (resolved && resolved !== 'none') applyResolvedPersona(resolved);
-                    addBubble('assistant', reply, null, true);
                 } else if (typing && typing.parentNode) {
                     typing.remove();
                 }
                 saveStore();
-            } catch (err) {
-                const target = sessionById(sessionId);
-                if (target) {
-                    const msgs = (target.messages || []).slice();
-                    if (msgs.length && msgs[msgs.length - 1].role === 'user' && msgs[msgs.length - 1].content === text) {
-                        msgs.pop();
-                    }
-                    touchSession(target, msgs, target.persona, target.activePersona);
-                    if (token === requestToken && store.activeId === sessionId) {
-                        history = msgs.slice();
-                        if (typing && typing.parentNode) typing.remove();
-                        addBubble('assistant', 'ارتباط با سرور برقرار نشد. دوباره تلاش کن.', 'error');
-                    } else if (typing && typing.parentNode) {
-                        typing.remove();
-                    }
-                    saveStore();
-                } else if (typing && typing.parentNode) {
-                    typing.remove();
+                } catch (streamErr) {
+                    stopReveal();
+                    throw streamErr;
                 }
+            } catch (err) {
+                failRequest('ارتباط با سرور برقرار نشد. دوباره تلاش کن.');
             } finally {
                 if (token === requestToken) {
                     setBusy(false);
