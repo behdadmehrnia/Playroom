@@ -20,7 +20,9 @@ from .constants import (
     _ZW_CODE_PERSONA,
     _ZW_DIGIT,
     _ZW_DIGIT_INV,
-    _ZW_MARK,
+    _ZW_FENCE,
+    _ZW_LEGACY_MARK,
+    _ZW_LEGACY_PERSONA_MARKER_RE,
     _ZW_PERSONA_MARKER_RE,
 )
 from .types import ChatMessage
@@ -136,30 +138,52 @@ def strip_persona_markers(text: str) -> str:
         return text
     cleaned = _PERSONA_MARKER_RE.sub("", text)
     cleaned = _ZW_PERSONA_MARKER_RE.sub("", cleaned)
-    # Also drop leftover Word Joiners that some clients render as tofu.
-    cleaned = cleaned.replace("\u2060", "").replace("\ufeff", "")
+    cleaned = _ZW_LEGACY_PERSONA_MARKER_RE.sub("", cleaned)
+    # Drop leftover Word Joiners that some clients render as tofu.
+    cleaned = cleaned.replace(_ZW_LEGACY_MARK, "").replace("\ufeff", "")
     return cleaned.rstrip()
 
 
 def append_persona_marker(text: str, persona: PersonaId) -> str:
-    """Compatibility shim: never append visible/invisible junk to replies.
+    """Append an invisible persona tag so history can recover sticky persona.
 
-    Sticky persona is recovered from activity signals + metadata, not markers.
+    The tag uses only zero-width characters (no HTML, no Word Joiner) so it
+    should not change Open WebUI / playground / OpenAI-client display. Markers
+    are stripped before LLM prompts and can be stripped for UI rendering.
     """
-    del persona  # markers disabled — they render as garbage in Open WebUI
-    return strip_persona_markers(text) if text else text
+    base = strip_persona_markers(text) if text else ""
+    if not persona or persona == "none":
+        return base
+    code = _PERSONA_ZW_CODE.get(persona)
+    if not code or len(code) != 2:
+        return base
+    encoded = "".join(_ZW_DIGIT[ch] for ch in code)
+    marker = f"{_ZW_FENCE}{encoded}{_ZW_FENCE}"
+    if not base:
+        return marker
+    return f"{base}{marker}"
 
 
 def extract_persona_marker(text: str) -> PersonaId | None:
-    """Decode legacy markers from older chats (current replies have none)."""
+    """Decode persona tag from assistant history (current + legacy formats)."""
     if not text:
         return None
+
+    def _decode_zw_digits(blob: str) -> PersonaId | None:
+        code = "".join(_ZW_DIGIT_INV.get(ch, "") for ch in blob)
+        persona = _ZW_CODE_PERSONA.get(code)
+        return persona  # type: ignore[return-value]
+
     zw_matches = _ZW_PERSONA_MARKER_RE.findall(text)
     if zw_matches:
-        code = "".join(_ZW_DIGIT_INV.get(ch, "") for ch in zw_matches[-1])
-        persona = _ZW_CODE_PERSONA.get(code)
-        if persona:
-            return persona  # type: ignore[return-value]
+        decoded = _decode_zw_digits(zw_matches[-1])
+        if decoded:
+            return decoded
+    legacy_matches = _ZW_LEGACY_PERSONA_MARKER_RE.findall(text)
+    if legacy_matches:
+        decoded = _decode_zw_digits(legacy_matches[-1])
+        if decoded:
+            return decoded
     html_matches = _PERSONA_MARKER_RE.findall(text)
     if html_matches:
         return _normalize_persona(html_matches[-1])

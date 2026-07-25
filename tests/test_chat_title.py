@@ -89,7 +89,24 @@ def test_substantive_first_message_ready() -> None:
 
 def test_generic_english_intro_title() -> None:
     assert is_generic_chat_title("👋 Introduction to Yar Koodak") is True
+    assert is_generic_chat_title("Yar-e Koodak Greeting") is True
+    assert is_generic_chat_title("Greeting Yarkoodak") is True
+    assert is_generic_chat_title("Yar-e Koodak Intro") is True
+    assert is_generic_chat_title("سلام با یار کودک") is True
+    assert is_generic_chat_title("God of War release") is True
     assert is_generic_chat_title("✏️ تمرین کسر ریاضی") is False
+
+
+def test_title_task_detected_from_metadata() -> None:
+    messages = [
+        ChatMessage(role="user", content="سلام"),
+    ]
+    assert looks_like_title_generation_request(
+        messages, metadata={"task": "title_generation"}
+    )
+    assert looks_like_title_generation_request(
+        messages, task="title_generation"
+    )
 
 
 def test_sanitize_strips_prefix_and_quotes() -> None:
@@ -134,5 +151,28 @@ def test_should_emit_only_when_generic_current() -> None:
         is True
     )
     assert (
+        should_emit_chat_title(messages, current_title="Yar-e Koodak Greeting")
+        is True
+    )
+    assert (
         should_emit_chat_title(messages, current_title="📖 قصه روباه") is False
+    )
+
+
+def test_should_emit_stops_after_early_turns_when_title_unknown() -> None:
+    messages = [
+        ChatMessage(role="user", content="سلام"),
+        ChatMessage(role="assistant", content="سلام"),
+        ChatMessage(role="user", content="داستان روباه بگو"),
+        ChatMessage(role="assistant", content="باشه!"),
+        ChatMessage(role="user", content="روباه باهوش باشه"),
+        ChatMessage(role="assistant", content="باشه"),
+        ChatMessage(role="user", content="ادامه بده"),
+    ]
+    # 4 user turns + unknown current title → stop refreshing
+    assert should_emit_chat_title(messages, current_title=None) is False
+    # Still refresh if we know the sidebar title is English
+    assert (
+        should_emit_chat_title(messages, current_title="Yar-e Koodak Greeting")
+        is True
     )

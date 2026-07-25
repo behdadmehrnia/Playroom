@@ -114,16 +114,59 @@ async def test_welcome_menu_bazi_selects_gamer(welcome_menu_message: str) -> Non
 
 
 @pytest.mark.asyncio
-async def test_greeting_stays_none() -> None:
-    assert _looks_like_greeting_only("سلام")
-    assert _looks_like_greeting_only("سلام!")
-    assert not _looks_like_greeting_only("سلام بازی کنیم")
+async def test_soft_switch_creative_to_storyteller_no_confirmation() -> None:
+    llm = DummyLLM(default='{"persona":"storyteller","confidence":0.93}')
+    messages = [
+        ChatMessage(role="user", content="یه ایده خلاق بده"),
+        ChatMessage(role="assistant", content="ایده قشنگ: <!-- yarkids:creative -->"),
+        ChatMessage(role="user", content="قصه بگو"),
+    ]
+    body = {"metadata": {ACTIVE_PERSONA_METADATA_KEY: "creative"}}
+    res = await resolve_active_persona(llm, backend_model="x", messages=messages, body=body)
+    assert res.persona == "storyteller"
+    assert res.ask_confirmation is False
 
-    llm = DummyLLM(default='{"persona":"creative","confidence":0.99}')
-    messages = [ChatMessage(role="user", content="سلام")]
-    res = await resolve_active_persona(llm, backend_model="x", messages=messages, body={})
-    assert res.persona == "none"
+
+@pytest.mark.asyncio
+async def test_soft_switch_teacher_to_homework_no_confirmation() -> None:
+    llm = DummyLLM(default='{"persona":"homework","confidence":0.91}')
+    messages = [
+        ChatMessage(role="user", content="کسر یعنی چی؟"),
+        ChatMessage(role="assistant", content="کسر یعنی... <!-- yarkids:teacher -->"),
+        ChatMessage(role="user", content="کمک درس باش"),
+    ]
+    body = {"metadata": {ACTIVE_PERSONA_METADATA_KEY: "teacher"}}
+    res = await resolve_active_persona(llm, backend_model="x", messages=messages, body=body)
+    assert res.persona == "homework"
+    assert res.ask_confirmation is False
 
 
-def test_active_persona_metadata_key() -> None:
-    assert ACTIVE_PERSONA_METADATA_KEY == "yarkids_active_persona"
+@pytest.mark.asyncio
+async def test_cross_family_weak_intent_stays_put() -> None:
+    llm = DummyLLM(default='{"persona":"teacher","confidence":0.75}')
+    messages = [
+        ChatMessage(role="user", content="بازی کنیم"),
+        ChatMessage(role="assistant", content="باشه بازی! <!-- yarkids:gamer -->"),
+        ChatMessage(role="user", content="یه کم درباره کسر بگو"),
+    ]
+    body = {"metadata": {ACTIVE_PERSONA_METADATA_KEY: "gamer"}}
+    res = await resolve_active_persona(llm, backend_model="x", messages=messages, body=body)
+    assert res.persona == "gamer"
+    assert res.ask_confirmation is False
+
+
+@pytest.mark.asyncio
+async def test_cross_family_explicit_asks_confirmation() -> None:
+    llm = DummyLLM(default='{"persona":"teacher","confidence":0.98}')
+    messages = [
+        ChatMessage(role="user", content="بازی کنیم"),
+        ChatMessage(role="assistant", content="باشه بازی! <!-- yarkids:gamer -->"),
+        ChatMessage(role="user", content="باش معلم"),
+    ]
+    body = {"metadata": {ACTIVE_PERSONA_METADATA_KEY: "gamer"}}
+    res = await resolve_active_persona(llm, backend_model="x", messages=messages, body=body)
+    assert res.persona == "gamer"
+    assert res.ask_confirmation is True
+    assert res.pending_switch_to == "teacher"
+    assert "بله برو" in format_persona_switch_confirmation("gamer", "teacher")
+

@@ -56,12 +56,32 @@ def test_normalize_messages_multimodal() -> None:
     assert messages[2].content == "داستان"
 
 
-def test_persona_markers_disabled_for_display() -> None:
-    marked = append_persona_marker("سلام!\n\n<!--yarkids:gamer-->", "gamer")
+def test_persona_markers_roundtrip_invisible() -> None:
+    marked = append_persona_marker("سلام دوست من!", "teacher")
+    assert "سلام دوست من!" in marked
     assert "<!--" not in marked
-    legacy = "ادامه بازی\n\n<!--yarkids:gamer-->"
-    assert strip_persona_markers(legacy) == "ادامه بازی"
-    assert extract_persona_marker(legacy) == "gamer"
+    assert "\u2060" not in marked  # no Word Joiner tofu
+    assert extract_persona_marker(marked) == "teacher"
+    assert strip_persona_markers(marked) == "سلام دوست من!"
+
+    # Re-append replaces previous marker.
+    remaked = append_persona_marker(marked, "homework")
+    assert extract_persona_marker(remaked) == "homework"
+    assert strip_persona_markers(remaked) == "سلام دوست من!"
+
+
+def test_persona_markers_legacy_html_and_word_joiner() -> None:
+    legacy_html = "ادامه بازی\n\n<!--yarkids:gamer-->"
+    assert strip_persona_markers(legacy_html) == "ادامه بازی"
+    assert extract_persona_marker(legacy_html) == "gamer"
+
+    # Old Word-Joiner fence still decodes.
+    from api.core.constants import _ZW_DIGIT, _ZW_LEGACY_MARK
+
+    code = _ZW_DIGIT["1"] + _ZW_DIGIT["1"]  # gamer
+    legacy_zw = f"سلام{_ZW_LEGACY_MARK}{code}{_ZW_LEGACY_MARK}"
+    assert extract_persona_marker(legacy_zw) == "gamer"
+    assert strip_persona_markers(legacy_zw) == "سلام"
 
 
 def test_iter_text_chunks() -> None:

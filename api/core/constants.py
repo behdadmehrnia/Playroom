@@ -16,11 +16,12 @@ PENDING_PERSONA_METADATA_KEY = "yarkids_pending_persona"
 ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY = "yarkids_textbook_scope"
 # Legacy HTML marker (may still appear in older chat history).
 _PERSONA_MARKER_RE = re.compile(r"<!--\s*yarkids:([a-z_]+)\s*-->", re.IGNORECASE)
-# Invisible sticky marker: Word Joiner + 2 zero-width chars + Word Joiner.
-# Zero-width space/non-joiner/joiner encode the persona without showing in the UI.
-_ZW_MARK = "\u2060"
+# Invisible sticky marker in assistant content (kept in history, stripped for LLM).
+# Digits are encoded with ZWSP / ZWNJ / ZWJ. Fence avoids U+2060 (Word Joiner),
+# which some clients (incl. Open WebUI) render as tofu boxes.
 _ZW_DIGIT = {"0": "\u200b", "1": "\u200c", "2": "\u200d"}
 _ZW_DIGIT_INV = {v: k for k, v in _ZW_DIGIT.items()}
+_ZW_FENCE = "\u200b\u200d\u200c\u200b"  # ZWSP + ZWJ + ZWNJ + ZWSP
 _PERSONA_ZW_CODE: dict[str, str] = {
     "creative": "00",
     "storyteller": "01",
@@ -29,8 +30,14 @@ _PERSONA_ZW_CODE: dict[str, str] = {
     "gamer": "11",
 }
 _ZW_CODE_PERSONA: dict[str, str] = {v: k for k, v in _PERSONA_ZW_CODE.items()}
+_ZW_DIGIT_CLASS = f"{_ZW_DIGIT['0']}{_ZW_DIGIT['1']}{_ZW_DIGIT['2']}"
 _ZW_PERSONA_MARKER_RE = re.compile(
-    f"{_ZW_MARK}([{_ZW_DIGIT['0']}{_ZW_DIGIT['1']}{_ZW_DIGIT['2']}]{{2}}){_ZW_MARK}"
+    re.escape(_ZW_FENCE) + f"([{_ZW_DIGIT_CLASS}]{{2}})" + re.escape(_ZW_FENCE)
+)
+# Older replies used Word Joiner as the fence.
+_ZW_LEGACY_MARK = "\u2060"
+_ZW_LEGACY_PERSONA_MARKER_RE = re.compile(
+    f"{_ZW_LEGACY_MARK}([{_ZW_DIGIT_CLASS}]{{2}}){_ZW_LEGACY_MARK}"
 )
 PERSONA_AUTO_VALUE = "auto"
 SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework", "gamer")

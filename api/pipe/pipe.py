@@ -1,7 +1,7 @@
 """
 title: یار کودک (API Client)
 author: Yar Kids
-version: 0.6.6
+version: 0.6.8
 description: Pipe کلاینت OpenWebUI — منطق یار کودک را از طریق API مستقل (api/) اجرا می‌کند
 required_open_webui_version: 0.5.0
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import urllib.error
 import urllib.request
 from collections.abc import AsyncIterator
@@ -24,8 +25,46 @@ from pydantic import BaseModel, Field
 MODEL_ID = "yarkids_api"
 MODEL_NAME = "یار کودک مستقل"
 MANUAL_PERSONA_METADATA_KEY = "yarkids_persona"
+ACTIVE_PERSONA_METADATA_KEY = "yarkids_active_persona"
+CHAT_TITLE_METADATA_KEY = "yarkids_chat_title"
 SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework", "gamer")
 DEFAULT_API_TIMEOUT_SEC = 300.0
+_TITLE_TASK_MARKERS: tuple[str, ...] = (
+    "generate a concise",
+    "generate a title",
+    "create a title",
+    "3-5 word title",
+    "3-5 words",
+    "title with an emoji",
+    "summarizing the chat",
+    "عنوان گفتگو",
+    "عنوان کوتاه",
+)
+
+# Invisible persona tags embedded in assistant content by the API (must be
+# forwarded unchanged in chat history). Keep encoding in sync with api.core.
+_PERSONA_HTML_MARKER_RE = re.compile(
+    r"<!--\s*yarkids:([a-z_]+)\s*-->", re.IGNORECASE
+)
+_ZW_DIGIT = {"0": "\u200b", "1": "\u200c", "2": "\u200d"}
+_ZW_DIGIT_INV = {v: k for k, v in _ZW_DIGIT.items()}
+_ZW_FENCE = "\u200b\u200d\u200c\u200b"
+_ZW_DIGIT_CLASS = f"{_ZW_DIGIT['0']}{_ZW_DIGIT['1']}{_ZW_DIGIT['2']}"
+_ZW_PERSONA_MARKER_RE = re.compile(
+    re.escape(_ZW_FENCE) + f"([{_ZW_DIGIT_CLASS}]{{2}})" + re.escape(_ZW_FENCE)
+)
+_ZW_LEGACY_MARK = "\u2060"
+_ZW_LEGACY_PERSONA_MARKER_RE = re.compile(
+    f"{_ZW_LEGACY_MARK}([{_ZW_DIGIT_CLASS}]{{2}}){_ZW_LEGACY_MARK}"
+)
+_PERSONA_ZW_CODE: dict[str, str] = {
+    "creative": "00",
+    "storyteller": "01",
+    "teacher": "02",
+    "homework": "10",
+    "gamer": "11",
+}
+_ZW_CODE_PERSONA: dict[str, str] = {v: k for k, v in _PERSONA_ZW_CODE.items()}
 
 PERSONA_DROPDOWN_OPTIONS: list[dict[str, str]] = [
     {"value": "auto", "label": "✨ خودکار — خودم انتخاب می‌کنم!"},
@@ -59,6 +98,44 @@ def _normalize_persona(value: str | None) -> str | None:
         return None
     if normalized in SUPPORTED_PERSONAS:
         return normalized
+    return None
+
+
+def extract_persona_marker(text: str) -> str | None:
+    """Read invisible/legacy persona tag from an assistant message (if any)."""
+    if not text:
+        return None
+
+    def _decode_zw(blob: str) -> str | None:
+        code = "".join(_ZW_DIGIT_INV.get(ch, "") for ch in blob)
+        return _ZW_CODE_PERSONA.get(code)
+
+    matches = _ZW_PERSONA_MARKER_RE.findall(text)
+    if matches:
+        decoded = _decode_zw(matches[-1])
+        if decoded:
+            return decoded
+    legacy = _ZW_LEGACY_PERSONA_MARKER_RE.findall(text)
+    if legacy:
+        decoded = _decode_zw(legacy[-1])
+        if decoded:
+            return decoded
+    html = _PERSONA_HTML_MARKER_RE.findall(text)
+    if html:
+        return _normalize_persona(html[-1])
+    return None
+
+
+def sticky_persona_from_messages(messages: list[dict[str, Any]]) -> str | None:
+    """Recover last assistant persona tag from chat history."""
+    for message in reversed(messages):
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            marked = extract_persona_marker(content)
+            if marked:
+                return marked
     return None
 
 
@@ -320,6 +397,37 @@ class Pipe:
     def _api_chat_url(self) -> str:
         return self.valves.API_BASE_URL.strip().rstrip("/") + "/v1/chat"
 
+    @staticmethod
+    def _looks_like_title_task(
+        body: dict[str, Any],
+        *,
+        task: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Detect OpenWebUI title-generation calls (task arg or prompt blob)."""
+        meta = metadata if isinstance(metadata, dict) else {}
+        body_meta = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+        task_blob = " ".join(
+            str(part).lower()
+            for part in (task, meta.get("task"), body_meta.get("task"))
+            if part
+        )
+        if "title" in task_blob:
+            return True
+        messages = body.get("messages")
+        if not isinstance(messages, list):
+            return False
+        blob = "\n".join(
+            str(m.get("content", ""))
+            for m in messages
+            if isinstance(m, dict) and isinstance(m.get("content"), str)
+        ).lower()
+        if not blob.strip():
+            return False
+        return any(marker in blob for marker in _TITLE_TASK_MARKERS) and (
+            "title" in blob or "عنوان" in blob or "emoji" in blob or "summar" in blob
+        )
+
     def _build_status_emitter(
         self,
         __event_emitter__: Callable[[dict[str, Any]], Awaitable[None]] | None,
@@ -349,6 +457,7 @@ class Pipe:
         raw_messages = body.get("messages", [])
         if not isinstance(raw_messages, list):
             raw_messages = []
+        # Keep assistant content byte-for-byte (incl. invisible persona tags).
         messages = [
             {"role": m.get("role"), "content": m.get("content")}
             for m in raw_messages
@@ -371,8 +480,26 @@ class Pipe:
         payload["enable_reflection"] = self.valves.ENABLE_REFLECTION
         payload["enable_textbook_context"] = self.valves.ENABLE_TEXTBOOK_CONTEXT
         payload["enable_web_search"] = self.valves.ENABLE_WEB_SEARCH
-        metadata = body.get("metadata")
-        if isinstance(metadata, dict):
+
+        metadata: dict[str, Any] = {}
+        raw_metadata = body.get("metadata")
+        if isinstance(raw_metadata, dict):
+            metadata.update(raw_metadata)
+        if persona:
+            metadata[MANUAL_PERSONA_METADATA_KEY] = persona
+            metadata[ACTIVE_PERSONA_METADATA_KEY] = persona
+        elif ACTIVE_PERSONA_METADATA_KEY not in metadata:
+            sticky = sticky_persona_from_messages(messages)
+            if sticky:
+                metadata[ACTIVE_PERSONA_METADATA_KEY] = sticky
+        # Forward current sidebar title when OWUI provides it so the API can
+        # decide whether to overwrite English/generic Greeting titles.
+        for key in ("chat_title", "title", CHAT_TITLE_METADATA_KEY):
+            raw_title = metadata.get(key)
+            if isinstance(raw_title, str) and raw_title.strip():
+                metadata[CHAT_TITLE_METADATA_KEY] = raw_title.strip()
+                break
+        if metadata:
             payload["metadata"] = metadata
         return payload
 
@@ -433,9 +560,25 @@ class Pipe:
         __user__: dict[str, Any],
         __request__: Any,
         __event_emitter__: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        __task__: str | None = None,
+        __metadata__: dict[str, Any] | None = None,
     ) -> Union[str, AsyncIterator[str]]:
         if not self.valves.API_BASE_URL.strip():
             return NO_API_URL_MESSAGE
+        # Title / tags / follow-up tasks: never run the full kids chat pipeline.
+        # Force non-stream so OpenWebUI receives a clean title string.
+        if self._looks_like_title_task(
+            body, task=__task__, metadata=__metadata__
+        ):
+            body = {**body, "stream": False}
+            if isinstance(body.get("metadata"), dict):
+                body["metadata"] = {
+                    **body["metadata"],
+                    "task": __task__ or body["metadata"].get("task") or "title_generation",
+                }
+            elif __task__:
+                body["metadata"] = {"task": __task__}
+            return await self._finish_chat(body, __user__, __event_emitter__)
         if body.get("stream", False):
             return self._stream_chat(body, __user__, __event_emitter__)
         return await self._finish_chat(body, __user__, __event_emitter__)

@@ -303,8 +303,9 @@ LANDING_PAGE_HTML = """
 
         <div class="footer">
             <p>بخشی از اکوسیستم هوش مصنوعی  یار</p>
-            <p style="margin-top: 0.4rem;">تمامی حقوق برای شرکت یار محفوظ می باشد</p>
-            <p style="margin-top: 0.6rem; font-size: 0.65rem;">Built with ❤️ by <a href="https://t.me/BMDarkLight" target="_blank">Behdad</a>  |  <a href="/docs">API Documentation</a></p>
+            <p style="font-size: 0.65rem;">شرکت یار، از پیشگامان ایرانی هوش مصنوعی، با تمرکز بر توسعه فناوری‌های نوآورانه و بومی‌سازی مدل‌ها، راهکارهای تخصصی برای کسب‌وکارها و مردم ارائه می‌دهد. تیم ما متشکل از نخبگان دانشگاهی و متخصصان فناوری است که با رویکرد علمی و مسئولیت‌پذیر، دستیارهای هوشمند در حوزه‌هایی چون پزشکی، حقوقی، آموزشی، سلامت روان، پژوهش و کودکان طراحی کرده و نقشی مؤثر در تحول دیجیتال کشور ایفا می‌کند.</p>
+            <p style="margin-top: 0.6rem;">تمامی حقوق برای شرکت یار محفوظ می باشد</p>
+            <p style="margin-top: 0.7rem; font-size: 0.65rem;">Built with ❤️ by <a href="https://t.me/BMDarkLight" target="_blank">Behdad</a>  |  <a href="/docs">API Documentation</a></p>
         </div>
     </div>
 </body>
@@ -1211,11 +1212,22 @@ CHAT_PAGE_HTML = """
             updatePersonaChip();
         }
 
-        function renderMarkdown(text) {
-            if (window.marked && window.DOMPurify) {
-                return DOMPurify.sanitize(marked.parse(String(text || '')));
-            }
+        function stripPersonaMarkers(text) {
+            // Keep markers in stored history; strip only for on-screen rendering.
             return String(text || '')
+                .replace(/<!--\\s*yarkids:[a-z_]+\\s*-->/gi, '')
+                .replace(/\\u200b\\u200d\\u200c\\u200b[\\u200b\\u200c\\u200d]{2}\\u200b\\u200d\\u200c\\u200b/g, '')
+                .replace(/\\u2060[\\u200b\\u200c\\u200d]{2}\\u2060/g, '')
+                .replace(/[\\u2060\\ufeff]/g, '')
+                .replace(/\\s+$/g, '');
+        }
+
+        function renderMarkdown(text) {
+            const clean = stripPersonaMarkers(text);
+            if (window.marked && window.DOMPurify) {
+                return DOMPurify.sanitize(marked.parse(String(clean || '')));
+            }
+            return String(clean || '')
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
@@ -1227,11 +1239,12 @@ CHAT_PAGE_HTML = """
             if (empty) empty.remove();
             const div = document.createElement('div');
             div.className = 'bubble ' + role + (extraClass ? ' ' + extraClass : '');
+            const displayText = role === 'assistant' ? stripPersonaMarkers(text) : text;
             if (asMarkdown) {
                 div.classList.add('md');
-                div.innerHTML = renderMarkdown(text);
+                div.innerHTML = renderMarkdown(displayText);
             } else {
-                div.textContent = text;
+                div.textContent = displayText;
             }
             messagesEl.appendChild(div);
             if (scroll !== false) messagesEl.scrollTop = messagesEl.scrollHeight;

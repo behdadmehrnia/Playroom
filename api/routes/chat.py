@@ -18,6 +18,39 @@ from .helpers import build_resolve_body, chat_result_to_out, resolve_backend_mod
 
 router = APIRouter()
 
+
+def _title_only_result(title: str) -> ChatResultOut:
+    return ChatResultOut(
+        response=title,
+        persona="none",
+        persona_source="default",
+        textbook_context=None,
+        web_search_context=None,
+        attempts=0,
+        reflection=None,
+        revised=False,
+        status_events=[],
+        logs=[],
+        textbook=None,
+        web_search=None,
+        math_tool=[],
+        used_safe_fallback=False,
+        chat_title=title,
+    )
+
+
+async def _title_event_stream(title: str) -> Any:
+    yield {
+        "event": "chunk",
+        "data": json.dumps({"text": title}, ensure_ascii=False),
+    }
+    yield {
+        "event": "title",
+        "data": json.dumps({"title": title}, ensure_ascii=False),
+    }
+    yield {"event": "done", "data": _title_only_result(title).model_dump_json()}
+
+
 async def _chat_event_stream(
     *,
     settings: Settings,
@@ -82,6 +115,26 @@ async def chat_endpoint(
     backend_model = resolve_backend_model(settings, req.model)
     messages = to_chat_messages(req.messages)
     body = build_resolve_body(req.metadata)
+
+    # OpenWebUI title tasks go through the pipe → /v1/chat (not completions).
+    if settings.enable_chat_title:
+        from api.core import (
+            generate_chat_title,
+            looks_like_title_generation_request,
+        )
+
+        if looks_like_title_generation_request(
+            messages, metadata=req.metadata
+        ):
+            title = await generate_chat_title(
+                llm_client,
+                backend_model=backend_model,
+                messages=messages,
+                min_user_messages=settings.chat_title_min_user_messages,
+            )
+            if req.stream:
+                return EventSourceResponse(_title_event_stream(title))
+            return _title_only_result(title)
 
     if req.stream:
         return EventSourceResponse(

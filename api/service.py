@@ -561,9 +561,15 @@ async def run_chat(
         if isinstance(body, dict):
             metadata = body.get("metadata")
             if isinstance(metadata, dict):
-                raw_title = metadata.get(CHAT_TITLE_METADATA_KEY)
-                if isinstance(raw_title, str):
-                    current_title = raw_title
+                for key in (
+                    CHAT_TITLE_METADATA_KEY,
+                    "chat_title",
+                    "title",
+                ):
+                    raw_title = metadata.get(key)
+                    if isinstance(raw_title, str) and raw_title.strip():
+                        current_title = raw_title.strip()
+                        break
         if should_emit_chat_title(
             messages,
             current_title=current_title,

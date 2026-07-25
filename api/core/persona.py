@@ -135,6 +135,25 @@ PERSONA_FA_LABELS: dict[PersonaId, str] = {
     "none": "یار کودک",
 }
 
+# Within these pairs, persona may switch immediately (no confirmation).
+# Any switch outside a pair requires an explicit high-confidence ask + confirmation.
+SOFT_PERSONA_SWITCH_PAIRS: frozenset[frozenset[str]] = frozenset(
+    {
+        frozenset({"creative", "storyteller"}),
+        frozenset({"teacher", "homework"}),
+    }
+)
+
+
+def _is_soft_persona_switch(current: PersonaId, desired: PersonaId) -> bool:
+    """True when current→desired is an allowed easy sibling switch."""
+    if current == desired:
+        return True
+    if current == "none" or desired == "none":
+        return False
+    return frozenset({current, desired}) in SOFT_PERSONA_SWITCH_PAIRS
+
+
 _CONFIRM_YES_RE = re.compile(
     r"^(?:بله|آره|باشه|موافقم|باشه برو|بله برو|آره برو|باشه عوض کن|بله عوض کن)"
     r"(?:\s|$|[!.،,])",
@@ -472,16 +491,18 @@ def _extract_pending_switch_from_history(
 def format_persona_switch_confirmation(
     current: PersonaId, pending: PersonaId
 ) -> str:
-    """Ask the child before leaving the current persona."""
+    """Ask the child before leaving the current persona (cross-family switches)."""
     current_label = PERSONA_FA_LABELS.get(current, current)
     pending_label = PERSONA_FA_LABELS.get(pending, pending)
     return (
-        f"الان داریم با هم در حالت «{current_label}» ادامه می‌دیم. "
+        f"الان داریم با هم در حالت «{current_label}» کار می‌کنیم و می‌خوام همون‌جا بمونیم "
+        f"مگر خودت واقعاً بخوای عوضش کنیم.\n\n"
         f"به نظر می‌رسه می‌خوای بریم سراغ «{pending_label}». "
-        f"مطمئنی؟\n\n"
-        f"اگر آره، بگو «بله برو».\n"
-        f"اگر نه، بگو «نه همین‌جا» تا همون کار قبلی رو ادامه بدیم."
+        f"مطمئنی این کار رو بکنیم؟\n\n"
+        f"اگر آره و مطمئنی، بگو «بله برو».\n"
+        f"اگر نه، بگو «نه همین‌جا» تا همون حالت «{current_label}» رو ادامه بدیم."
     )
+
 
 
 def resolve_manual_persona(
@@ -561,7 +582,9 @@ async def resolve_active_persona(
 
     - Manual UserValves persona wins immediately (no confirmation).
     - Auto-detected persona sticks across turns (via metadata/history).
-    - Switching away from a sticky persona requires confirmation
+    - Easy switches without confirmation only within sibling pairs:
+      creative↔storyteller and teacher↔homework.
+    - Any other persona change requires a clear signal + confirmation
       («بله برو» / «نه همین‌جا»), except the very first selection.
     - Mid-activity short answers (e.g. word-chain «داستان») never switch.
     """
@@ -652,6 +675,10 @@ async def resolve_active_persona(
         current_persona=current_persona,
     )
     desired = intent.persona
+    confidence = intent.confidence if intent.confidence is not None else 0.0
+    explicit = (
+        _detect_explicit_persona_request(latest_user_msg) if latest_user_msg else None
+    )
 
     # First selection (no sticky yet): accept immediately.
     if not current_persona or current_persona == "none":
@@ -661,7 +688,16 @@ async def resolve_active_persona(
     if desired in (None, "none", current_persona):
         return PersonaResolution(persona=current_persona)
 
-    # Different persona requested while sticky → ask confirmation first.
+    # Sibling pairs may switch freely (creative↔storyteller, teacher↔homework).
+    if _is_soft_persona_switch(current_persona, desired):
+        return PersonaResolution(persona=desired)
+
+    # Cross-family: only offer a confirmation when the child was explicit
+    # or intent is very confident — otherwise stay put (don't thrash).
+    strong_cross_family = explicit == desired or confidence >= 0.9
+    if not strong_cross_family:
+        return PersonaResolution(persona=current_persona)
+
     return PersonaResolution(
         persona=current_persona,
         pending_switch_to=desired,

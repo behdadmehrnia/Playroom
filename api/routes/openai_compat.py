@@ -358,7 +358,9 @@ async def _handle_chat_completions(
         looks_like_title_generation_request,
     )
 
-    if settings.enable_chat_title and looks_like_title_generation_request(messages):
+    if settings.enable_chat_title and looks_like_title_generation_request(
+        messages, metadata=req.metadata
+    ):
         title = await generate_chat_title(
             llm_client,
             backend_model=backend_model,

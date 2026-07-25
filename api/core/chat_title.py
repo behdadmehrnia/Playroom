@@ -10,6 +10,9 @@ from .types import ChatMessage, LLMClient, LLMCompletionRequest
 PLACEHOLDER_CHAT_TITLE = "گفتگوی تازه"
 CHAT_TITLE_METADATA_KEY = "yarkids_chat_title"
 DEFAULT_MIN_USER_MESSAGES_FOR_TITLE = 2
+# When OpenWebUI title is unknown, re-emit through turns 2–3 so an early
+# English Greeting title can be overwritten once the topic is clear.
+_MAX_USER_MESSAGES_FOR_TITLE_REFRESH = 3
 
 _TITLE_GEN_MARKERS: tuple[str, ...] = (
     "generate a concise",
@@ -22,19 +25,25 @@ _TITLE_GEN_MARKERS: tuple[str, ...] = (
     "title with an emoji",
     "عنوان گفتگو",
     "عنوان کوتاه",
+    "title_generation",
 )
 
 _GENERIC_TITLE_RE = re.compile(
     r"(?ix)^"
-    r"(?:👋|✨|🌟|😊)?\s*"
+    r"(?:[\U0001F300-\U0001FAFF\u2600-\u27BF]+\s*)*"
     r"(?:"
     r"introduction\s+to\b.*|"
+    r"(?:greeting|intro(?:duction)?)\b.*|"
+    r".*\b(?:greeting|intro(?:duction)?)\b.*|"
     r"new\s+chat|"
     r"chat\b|"
     r"yar[\s\-]*(?:e[\s\-]*)?koodak\b.*|"
-    r"یار[\s\-]*کودک|"
+    r"yareh?\s*koodak\b.*|"
+    r".*\byar[\s\-]*(?:e[\s\-]*)?koodak\b.*|"
+    r"یار[\s\-]*کودک.*|"
+    r".*یار[\s\-]*کودک.*|"
     r"گفتگوی?\s*تازه|"
-    r"سلام(?:\s+و\s+احوالپرسی)?|"
+    r"سلام(?:\s+و\s+احوالپرسی)?(?:\s+با\s+یار[\s\-]*کودک)?|"
     r"خوش[\s\-]*آمد(?:ید|ی)?"
     r")"
     r".*$"
@@ -43,8 +52,24 @@ _GENERIC_TITLE_RE = re.compile(
 _MAX_TITLE_CHARS = 48
 
 
-def looks_like_title_generation_request(messages: list[ChatMessage]) -> bool:
+def looks_like_title_generation_request(
+    messages: list[ChatMessage],
+    *,
+    metadata: dict | None = None,
+    task: str | None = None,
+) -> bool:
     """True when OpenWebUI (or similar) asks the model to name the chat."""
+    task_blob = " ".join(
+        str(part).lower()
+        for part in (
+            task,
+            (metadata or {}).get("task") if isinstance(metadata, dict) else None,
+        )
+        if part
+    )
+    if "title" in task_blob:
+        return True
+
     blob = "\n".join(m.content for m in messages if m.content).lower()
     if not blob.strip():
         return False
@@ -57,13 +82,23 @@ def looks_like_title_generation_request(messages: list[ChatMessage]) -> bool:
     )
 
 
+def has_persian_script(text: str) -> bool:
+    return any("\u0600" <= ch <= "\u06FF" for ch in text)
+
+
 def is_generic_chat_title(title: str | None) -> bool:
     if not title or not title.strip():
         return True
     cleaned = title.strip()
     if cleaned == PLACEHOLDER_CHAT_TITLE:
         return True
-    return bool(_GENERIC_TITLE_RE.match(cleaned))
+    if _GENERIC_TITLE_RE.match(cleaned):
+        return True
+    # OpenWebUI's default task template prefers English — treat Latin-only
+    # titles as generic so we can overwrite them with Persian ones.
+    if not has_persian_script(cleaned) and re.search(r"[A-Za-z]{3,}", cleaned):
+        return True
+    return False
 
 
 _CHAT_HISTORY_SPLIT_RE = re.compile(
@@ -256,9 +291,21 @@ def should_emit_chat_title(
     current_title: str | None,
     min_user_messages: int = DEFAULT_MIN_USER_MESSAGES_FOR_TITLE,
 ) -> bool:
-    """Emit/overwrite when we have context and the current title is still generic."""
+    """Emit/overwrite when we have context and the current title is still generic.
+
+    When OpenWebUI's current title is unknown (``None``), only refresh through
+    the first few user turns so early English Greeting titles get replaced
+    without regenerating on every later message.
+    """
     if not conversation_ready_for_title(
         messages, min_user_messages=min_user_messages
     ):
         return False
-    return is_generic_chat_title(current_title)
+    if current_title and not is_generic_chat_title(current_title):
+        return False
+    users = count_user_messages(extract_conversation_for_title(messages))
+    refresh_until = max(min_user_messages + 1, _MAX_USER_MESSAGES_FOR_TITLE_REFRESH)
+    # Known generic/English → always overwrite once ready.
+    if current_title is not None:
+        return True
+    return users <= refresh_until
