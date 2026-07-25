@@ -80,6 +80,33 @@ def test_extract_grade_prefers_class_over_chapter_ordinal() -> None:
     assert scope.can_retrieve() is True
 
 
+def test_extract_grade_from_subject_plus_ordinal_with_chapter() -> None:
+    """«فصل هشتم فارسی چهارم» — چهارم is grade, هشتم is lesson."""
+    assert _extract_grade_token("فصل هشتم فارسی چهارم") == "چهارم"
+    from api.core.types import ChatMessage
+    from api.core.textbook import resolve_textbook_scope
+
+    scope = resolve_textbook_scope(
+        [ChatMessage(role="user", content="فصل هشتم فارسی چهارم")]
+    )
+    assert scope.grade == 4
+    assert scope.subject_id == "persian"
+    assert scope.lesson == 8
+    assert scope.can_retrieve() is True
+
+    scoped = resolve_textbook_scope(
+        [
+            ChatMessage(role="user", content="فصل هشتم فارسی چهارم"),
+            ChatMessage(role="assistant", content="صفحه چند؟"),
+            ChatMessage(role="user", content="صفحه ۳۴"),
+        ]
+    )
+    assert scoped.grade == 4
+    assert scoped.subject_id == "persian"
+    assert scoped.page == 34
+    assert scoped.has_page_lookup() is True
+
+
 def test_build_textbook_query_carries_grade_past_lesson_number() -> None:
     """«درس سوم» is lesson 3, not grade 3 — grade comes from earlier «کلاس چهارم»."""
     messages = [

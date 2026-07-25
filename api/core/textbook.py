@@ -404,6 +404,12 @@ def _extract_grade_token(text: str) -> str | None:
     has_grade_keyword = any(kw in text for kw in ("پایه", "کلاس", "دبستان"))
     lesson_context = _textbook_has_lesson(text)
 
+    # «فارسی چهارم»، «ریاضی ششم» — common grade shorthand without کلاس/پایه.
+    # Must win even when the same turn also has «فصل هشتم».
+    subject_anchored = _extract_grade_after_subject(text)
+    if subject_anchored:
+        return subject_anchored
+
     if (exercise_context or lesson_context) and not has_grade_keyword:
         return None
 
@@ -435,6 +441,20 @@ def _extract_grade_token(text: str) -> str | None:
     if casual and (has_grade_keyword or casual.group(1)):
         # Normalize «چهارمم» → «چهارم»
         return casual.group(1)
+    return None
+
+
+def _extract_grade_after_subject(text: str) -> str | None:
+    """Parse grade from «فارسی چهارم» / «ریاضی ششم» (no کلاس/پایه required)."""
+    # Longest book names first so «هدیه های آسمان» beats bare «هدیه».
+    for phrase in sorted(_TEXTBOOK_SUBJECT_PHRASES, key=len, reverse=True):
+        match = re.search(
+            rf"{re.escape(phrase)}\s*([3-6۳-۶٣-٦]|سوم|چهارم|پنجم|ششم)(?!\s*(?:درس|فصل))",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return match.group(1)
     return None
 
 
