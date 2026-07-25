@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable
 
 from .constants import (
     MAX_GENERATION_ATTEMPTS,
+    PERSONA_UI_LABELS,
     REVISION_INSTRUCTION_HEADER,
     SAFE_FALLBACK_RESPONSE,
     TEXTBOOK_CONTEXT_HEADER,
@@ -191,6 +192,15 @@ def build_system_prompt(
     persona_prompt = get_persona_prompt(persona)
     if persona_prompt:
         sections.append(persona_prompt)
+
+    if persona and persona != "none":
+        label = PERSONA_UI_LABELS.get(persona, persona)
+        sections.append(
+            "## حالت فعال فعلی (الزامی)\n"
+            f"الان از قبل در حالت «{label}» هستی و این انتخاب برای کودک انجام شده است.\n"
+            "**هرگز** دوباره لیست پرسونا/حالت‌ها را نشان نده و نپرس «کدام را انتخاب می‌کنی؟».\n"
+            "مستقیماً در همین حالت جواب بده، کمک کن، و گفتگو را ادامه بده."
+        )
 
     if textbook_context and textbook_context.matched and textbook_context.context_text:
         meta_parts: list[str] = []

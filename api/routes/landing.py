@@ -1303,7 +1303,16 @@ CHAT_PAGE_HTML = """
             const personaForRequest = selectedPersona;
 
             const payload = { messages: messagesForRequest };
-            if (personaForRequest && personaForRequest !== 'auto') payload.persona = personaForRequest;
+            if (personaForRequest && personaForRequest !== 'auto') {
+                payload.persona = personaForRequest;
+                payload.metadata = {
+                    yarkids_persona: personaForRequest,
+                    yarkids_active_persona: personaForRequest,
+                };
+            } else if (activePersona && activePersona !== 'none') {
+                // Keep sticky persona across turns even in auto mode.
+                payload.metadata = { yarkids_active_persona: activePersona };
+            }
 
             try {
                 const res = await fetch('/v1/chat/completions', {
