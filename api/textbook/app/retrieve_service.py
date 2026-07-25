@@ -12,6 +12,8 @@ from api.textbook.app.parser import parse_persian_query
 from api.textbook.app.subjects import canonical_subject_title, topic_label
 from api.textbook.app.store import (
     PageRecord,
+    _LESSON_TOC_THRESHOLD,
+    _lesson_marker_count,
     book_exists_for_grade,
     find_lesson_containing_page,
     get_lesson_bounds,
@@ -691,9 +693,10 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 prefer_page=start_page,
                 topic=topic_display,
             )
-        # Fallback to start page only (legacy behavior)
+        # Fallback to start page only (legacy behavior) — but never a TOC page
+        # that only lists many دروس (would make the model invent the lesson body).
         center = lesson_search(grade, subject, lesson)
-        if center:
+        if center and _lesson_marker_count(center.text or "") < _LESSON_TOC_THRESHOLD:
             neighbors = get_neighbor_pages(
                 grade, subject, center.printed_page, request.include_neighbors
             )
@@ -717,7 +720,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             )
             _attach_image(response, center, needs_image=needs_image)
             return response
-        # In-range (or unknown bounds) but OCR header not found.
+        # In-range (or unknown bounds) but OCR header not found / only TOC hit.
         extra: dict[str, int] = {}
         if lesson_bounds is not None:
             extra["min_lesson"] = lesson_bounds[0]
