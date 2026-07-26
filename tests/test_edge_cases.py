@@ -21,29 +21,35 @@ from api.core.textbook import (
 )
 from api.core.types import TextbookContext
 from api.core.web_search import looks_like_web_search_request
-from api.textbook.app.store import _lesson_target_patterns, get_neighbor_pages
+from api.textbook.app.store import get_neighbor_pages, lookup_catalog_start_page
 
 
-def test_lesson_patterns_accept_ocr_punctuation() -> None:
-    """MinerU/RTL often yields «فصل :3» instead of «فصل 3»."""
-    patterns = _lesson_target_patterns(3)
-    samples = (
-        "فصل 3 ضرب و تقسیم",
-        "فصل :3 ضرب و تقسیم",
-        "فصل:۳ ضرب",
-        "فصل-3",
-        "3 فصل",
-        "فصل سوم",
-        "سوم فصل",
+def test_catalog_kind_namespaces_keep_skill_and_lesson_apart() -> None:
+    """مهارت ۳ must not resolve to درس ۳ in کار و فناوری."""
+    assert lookup_catalog_start_page(6, "technology", lesson=3, kind="lesson") == 40
+    assert lookup_catalog_start_page(6, "technology", lesson=3, kind="skill") == 106
+
+
+def test_parser_and_scope_accept_unit_aliases() -> None:
+    from api.core.textbook import resolve_textbook_scope
+    from api.textbook.app.parser import parse_persian_query
+
+    skill = parse_persian_query("مهارت ۳ کار و فناوری ششم")
+    assert skill.lesson == 3 and skill.kind == "skill" and skill.grade == 6
+
+    section = parse_persian_query("بخش ۲ فناوری ششم")
+    assert section.chapter == 2 and section.grade == 6
+
+    outline = parse_persian_query("لیست فصل‌های فارسی چهارم")
+    assert outline.wants_outline is True and outline.grade == 4
+
+    scope = resolve_textbook_scope(
+        [ChatMessage(role="user", content="مهارت ۳ کار و فناوری ششم")]
     )
-    for sample in samples:
-        assert any(p.search(sample) for p in patterns), sample
-
-
-def test_lesson_patterns_do_not_match_wrong_number() -> None:
-    patterns = _lesson_target_patterns(3)
-    assert not any(p.search("فصل 2 کسر") for p in patterns)
-    assert not any(p.search("فصل :4 اندازهگیری") for p in patterns)
+    assert scope.lesson == 3
+    assert scope.kind == "skill"
+    assert scope.subject_id == "technology"
+    assert scope.can_retrieve() is True
 
 
 def test_compose_query_keeps_full_gifts_title() -> None:

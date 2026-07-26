@@ -269,7 +269,6 @@ def test_lesson_out_of_range_when_beyond_book_lesson_count() -> None:
             return_value=(1, 17),
         ),
         patch("api.textbook.app.retrieve_service.get_lesson_pages") as pages_mock,
-        patch("api.textbook.app.retrieve_service.lesson_search") as search_mock,
     ):
         response = retrieve_context(
             RetrieveRequest(
@@ -281,7 +280,6 @@ def test_lesson_out_of_range_when_beyond_book_lesson_count() -> None:
             )
         )
         pages_mock.assert_not_called()
-        search_mock.assert_not_called()
 
     assert response.matched is False
     assert response.failure_reason == "lesson_out_of_range"
@@ -291,28 +289,37 @@ def test_lesson_out_of_range_when_beyond_book_lesson_count() -> None:
     assert response.subject_title == "فارسی"
 
 
-def test_get_lesson_bounds_ignores_sparse_ocr_map() -> None:
-    """Single/stray chapter hits must not drive lesson_out_of_range."""
-    from api.textbook.app import store as store_mod
+def test_get_lesson_bounds_uses_catalog_kind_namespaces() -> None:
+    """مهارت and درس share numbers but stay in separate kind namespaces."""
+    from api.textbook.app.store import (
+        CatalogBook,
+        CatalogLesson,
+        get_lesson_bounds,
+        lookup_catalog_start_page,
+    )
 
-    with patch.object(store_mod, "list_lesson_starts", return_value=[(7, 90)]):
-        assert store_mod.get_lesson_bounds(4, "math") is None
-
-    with patch.object(
-        store_mod, "list_lesson_starts", return_value=[(2, 10), (3, 20), (4, 30)]
+    book = CatalogBook(
+        file="C617.pdf",
+        grade=6,
+        subject="technology",
+        title="کار و فناوری",
+        parent_label="بخش",
+        lessons=[
+            CatalogLesson(number=3, start_page=40, kind="lesson", chapter=1),
+            CatalogLesson(number=3, start_page=106, kind="skill", chapter=3),
+        ],
+    )
+    with patch(
+        "api.textbook.app.store.get_catalog_book",
+        lambda grade, subject: book if grade == 6 and subject == "technology" else None,
     ):
-        # Missing درس ۱ → incomplete map
-        assert store_mod.get_lesson_bounds(3, "math") is None
-
-    with patch.object(
-        store_mod,
-        "list_lesson_starts",
-        return_value=[(1, 5), (2, 15), (3, 25), (4, 40), (5, 55)],
-    ):
-        assert store_mod.get_lesson_bounds(4, "persian") == (1, 5)
+        assert get_lesson_bounds(6, "technology", kind="lesson") == (3, 3)
+        assert get_lesson_bounds(6, "technology", kind="skill") == (3, 3)
+        assert lookup_catalog_start_page(6, "technology", lesson=3, kind="lesson") == 40
+        assert lookup_catalog_start_page(6, "technology", lesson=3, kind="skill") == 106
 
 
-def test_sparse_lesson_map_yields_lesson_missing_not_oor() -> None:
+def test_missing_catalog_unit_yields_lesson_missing_not_oor() -> None:
     with (
         patch(
             "api.textbook.app.retrieve_service.get_lesson_bounds",
@@ -321,10 +328,6 @@ def test_sparse_lesson_map_yields_lesson_missing_not_oor() -> None:
         patch(
             "api.textbook.app.retrieve_service.get_lesson_pages",
             return_value=([], None, None, None),
-        ),
-        patch(
-            "api.textbook.app.retrieve_service.lesson_search",
-            return_value=None,
         ),
     ):
         response = retrieve_context(
@@ -371,6 +374,62 @@ def test_book_unavailable_system_prompt_mentions_available_grades() -> None:
     assert "برای پایه 4 نیست" in prompt or "پایهٔ درخواستی: 4" in prompt
 
 
+def test_page_missing_gets_canned_honest_reply() -> None:
+    from api.core.generation import compose_textbook_failure_reply
+
+    ctx = TextbookContext(
+        matched=False,
+        failure_reason="page_missing",
+        subject="persian",
+        subject_title="فارسی",
+        grade=4,
+        page=40,
+        page_query_failed=True,
+    )
+    canned = compose_textbook_failure_reply(ctx)
+    assert canned is not None
+    assert "۴۰" in canned or "40" in canned
+    assert "فارسی" in canned
+    assert "باز می‌کنم" not in canned
+    assert "عکس" in canned or "متن" in canned
+
+
+def test_matched_textbook_prompt_demands_immediate_help() -> None:
+    ctx = TextbookContext(
+        matched=True,
+        subject="persian",
+        subject_title="فارسی",
+        grade=4,
+        page=40,
+        context_text="متن نمونه درک مطلب صفحه ۴۰",
+        text_usable=True,
+        needs_image=True,
+        image_base64="fakeimg",
+    )
+    prompt = build_system_prompt("homework", textbook_context=ctx)
+    assert "متن نمونه درک مطلب" in prompt
+    assert "دستور کار فوری" in prompt
+    assert "تصویر" in prompt
+    assert "متن را خواندی" in prompt or "خوندی" in prompt or "مرور" in prompt
+    assert "صفحه را باز می‌کنم" in prompt or "باز می‌کنم" in prompt
+
+
+def test_matched_without_image_asks_for_photo() -> None:
+    ctx = TextbookContext(
+        matched=True,
+        subject="persian",
+        subject_title="فارسی",
+        grade=4,
+        page=40,
+        context_text="متن OCR مشکوک",
+        text_usable=True,
+        needs_image=True,
+    )
+    prompt = build_system_prompt("homework", textbook_context=ctx)
+    assert "عکس" in prompt
+    assert "دستور کار فوری" not in prompt
+
+
 def test_lesson_out_of_range_system_prompt_mentions_max() -> None:
     from api.core.generation import format_lesson_out_of_range_instruction
 
@@ -392,75 +451,79 @@ def test_lesson_out_of_range_system_prompt_mentions_max() -> None:
     assert "تا درس/فصل 17" in note or "تا درس ۱۷" in note or "17 دارد" in note
     prompt = build_system_prompt("homework", textbook_context=ctx)
     assert "وجود ندارد" in prompt or "خارج از محدوده" in prompt
-    assert "صفحهٔ همان درس ناموجود" in note or "درس ناموجود" in note
+    assert "صفحهٔ همان واحد ناموجود" in note or "واحد ناموجود" in note or "درس ناموجود" in note
 
 
-def test_parse_toc_payload_normalizes_chapter_and_lesson() -> None:
-    from api.textbook.app.toc_agent import parse_toc_payload
-
-    entries = parse_toc_payload(
-        {
-            "chapters": [{"number": "۴", "title": "فرهنگ بومی", "start_page": "۷۳"}],
-            "lessons": [
-                {
-                    "number": 4,
-                    "title": "ارزش علم",
-                    "start_page": 36,
-                    "chapter": 2,
-                }
-            ],
-            "sections": [
-                {
-                    "title": "روباه و زاغ",
-                    "start_page": 34,
-                    "kind": "بخوان و حفظ کن",
-                }
-            ],
-        },
-        grade=4,
-        subject="persian",
-        source_pages=[3, 4],
+def test_catalog_map_parses_persian_digits_and_titles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.textbook.app.store import (
+        CatalogBook,
+        CatalogChapter,
+        CatalogLesson,
+        _parse_catalog_chapters,
+        _parse_catalog_lessons,
+        lookup_catalog_by_title,
+        lookup_catalog_start_page,
     )
-    by_kind = {(e.kind, e.number): e for e in entries if e.number is not None}
-    assert by_kind[("chapter", 4)].start_page == 73
-    assert by_kind[("lesson", 4)].start_page == 36
-    sections = [e for e in entries if e.kind == "section"]
-    assert sections and sections[0].start_page == 34
-    assert "روباه" in sections[0].title
 
-
-def test_toc_resolve_and_retrieve_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    from api.textbook.app.store import TocEntry
-
-    entries = [
-        TocEntry(
-            grade=4,
-            subject="persian",
-            kind="chapter",
-            number=4,
-            title="فرهنگ بومی",
-            start_page=73,
-            source_pages=[3],
-        ),
-        TocEntry(
-            grade=4,
-            subject="persian",
-            kind="lesson",
-            number=4,
-            title="ارزش علم",
-            start_page=36,
-            source_pages=[3],
-        ),
+    chapters = _parse_catalog_chapters(
+        [{"number": "۴", "title": "فرهنگ بومی", "start_page": "۷۳"}]
+    )
+    lessons = _parse_catalog_lessons(
+        [
+            {
+                "number": 4,
+                "title": "ارزش علم",
+                "start_page": 36,
+                "chapter": 2,
+            }
+        ]
+    )
+    assert chapters == [CatalogChapter(number=4, start_page=73, title="فرهنگ بومی")]
+    assert lessons == [
+        CatalogLesson(number=4, start_page=36, title="ارزش علم", chapter=2)
     ]
 
-    monkeypatch.setattr(
-        "api.textbook.app.store.list_toc_entries",
-        lambda grade, subject: entries if grade == 4 and subject == "persian" else [],
+    book = CatalogBook(
+        file="C403.pdf",
+        grade=4,
+        subject="persian",
+        title="فارسی پایه چهارم",
+        chapters=chapters,
+        lessons=lessons,
     )
-    from api.textbook.app.toc_agent import lookup_toc_start_page
+    monkeypatch.setattr(
+        "api.textbook.app.store.get_catalog_book",
+        lambda grade, subject: book if grade == 4 and subject == "persian" else None,
+    )
+    assert lookup_catalog_start_page(4, "persian", chapter=4) == 73
+    assert lookup_catalog_start_page(4, "persian", lesson=4) == 36
+    assert lookup_catalog_by_title(4, "persian", "ارزش علم") == 36
 
-    assert lookup_toc_start_page(4, "persian", chapter=4) == 73
-    assert lookup_toc_start_page(4, "persian", lesson=4) == 36
+
+def test_catalog_resolve_and_retrieve_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from api.textbook.app.store import CatalogBook, CatalogChapter, CatalogLesson
+
+    book = CatalogBook(
+        file="C403.pdf",
+        grade=4,
+        subject="persian",
+        title="فارسی پایه چهارم",
+        chapters=[CatalogChapter(number=4, start_page=73, title="فرهنگ بومی")],
+        lessons=[
+            CatalogLesson(number=4, start_page=36, title="ارزش علم", chapter=2)
+        ],
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.store.get_catalog_book",
+        lambda grade, subject: book if grade == 4 and subject == "persian" else None,
+    )
+
+    from api.textbook.app.store import lookup_catalog_start_page
+
+    assert lookup_catalog_start_page(4, "persian", chapter=4) == 73
+    assert lookup_catalog_start_page(4, "persian", lesson=4) == 36
 
     page36 = _page(
         grade=4,
@@ -476,48 +539,41 @@ def test_toc_resolve_and_retrieve_fallback(monkeypatch: pytest.MonkeyPatch) -> N
         text="فصل چهارم فرهنگ بومی",
         title="فارسی",
     )
-
-    def fake_get_page(grade: int, subject: str, printed_page: int):
-        if grade != 4 or subject != "persian":
-            return None
-        if printed_page == 36:
-            return page36
-        if printed_page == 73:
-            return page73
-        return None
+    page74 = _page(
+        grade=4,
+        subject="persian",
+        printed_page=74,
+        text="ادامه فصل چهارم",
+        title="فارسی",
+    )
 
     monkeypatch.setattr(
         "api.textbook.app.retrieve_service.book_exists_for_grade", lambda g, s: True
     )
     monkeypatch.setattr(
-        "api.textbook.app.retrieve_service.get_printed_page_bounds",
-        lambda g, s: (1, 160),
+        "api.textbook.app.retrieve_service.get_chapter_pages",
+        lambda grade, subject, chapter_number, max_pages=40: (
+            [page73, page74],
+            4,
+            73,
+            74,
+        ),
     )
-    monkeypatch.setattr("api.textbook.app.retrieve_service.get_page", fake_get_page)
     monkeypatch.setattr(
-        "api.textbook.app.retrieve_service.get_neighbor_pages",
-        lambda *a, **k: [],
-    )
-    monkeypatch.setattr(
-        "api.textbook.app.retrieve_service.find_lesson_containing_page",
-        lambda *a, **k: None,
+        "api.textbook.app.retrieve_service.format_catalog_outline",
+        lambda grade, subject, chapter=None: "بخش فهرست آزمایشی",
     )
     monkeypatch.setattr(
         "api.textbook.app.retrieve_service.get_lesson_bounds",
-        lambda *a, **k: None,
+        lambda *a, **k: (1, 10),
     )
     monkeypatch.setattr(
         "api.textbook.app.retrieve_service.get_lesson_pages",
-        lambda *a, **k: ([], None, None, None),
-    )
-    monkeypatch.setattr(
-        "api.textbook.app.retrieve_service.lesson_search",
-        lambda *a, **k: None,
-    )
-    monkeypatch.setattr(
-        "api.textbook.app.toc_agent.lookup_toc_start_page",
-        lambda grade, subject, chapter=None, lesson=None: (
-            73 if chapter == 4 else (36 if lesson == 4 else None)
+        lambda grade, subject, lesson_number=None, page=None, kind=None, max_pages=40: (
+            [page36],
+            4,
+            36,
+            36,
         ),
     )
 
@@ -527,7 +583,8 @@ def test_toc_resolve_and_retrieve_fallback(monkeypatch: pytest.MonkeyPatch) -> N
     assert chapter_resp.matched is True
     assert chapter_resp.page == 73
     assert chapter_resp.chapter == 4
-    assert chapter_resp.match_type == "exact_page"
+    assert chapter_resp.match_type == "lesson_span"
+    assert "فهرست" in (chapter_resp.context_text or "")
 
     lesson_resp = retrieve_context(
         RetrieveRequest(grade=4, subject="persian", lesson=4, include_image="never")
@@ -535,38 +592,102 @@ def test_toc_resolve_and_retrieve_fallback(monkeypatch: pytest.MonkeyPatch) -> N
     assert lesson_resp.matched is True
     assert lesson_resp.page == 36
     assert lesson_resp.lesson == 4
-    assert lesson_resp.match_type == "exact_page"
+    assert lesson_resp.match_type == "lesson_span"
 
 
-def test_retrieve_by_lesson_title_via_toc(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_catalog_outline_and_skill_not_lesson(monkeypatch: pytest.MonkeyPatch) -> None:
+    from api.textbook.app.store import CatalogBook, CatalogChapter, CatalogLesson
+
+    book = CatalogBook(
+        file="C617.pdf",
+        grade=6,
+        subject="technology",
+        title="کار و فناوری",
+        parent_label="بخش",
+        chapters=[CatalogChapter(number=3, start_page=101, title="مهارت‌ها")],
+        lessons=[
+            CatalogLesson(number=3, start_page=40, kind="lesson", title="درس سه", chapter=1),
+            CatalogLesson(
+                number=3, start_page=106, kind="skill", title="گل‌سازی", chapter=3
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.store.get_catalog_book",
+        lambda grade, subject: book if grade == 6 and subject == "technology" else None,
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.book_exists_for_grade",
+        lambda g, s: True,
+    )
+    skill_page = _page(
+        grade=6,
+        subject="technology",
+        printed_page=106,
+        text="مهارت ۳ گل‌سازی",
+        title="کار و فناوری",
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_lesson_bounds",
+        lambda grade, subject, kind=None: (1, 13) if kind == "skill" else (1, 5),
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_lesson_pages",
+        lambda grade, subject, lesson_number=None, page=None, kind=None, max_pages=40: (
+            ([skill_page], 3, 106, 106)
+            if kind == "skill" and lesson_number == 3
+            else ([], None, None, None)
+        ),
+    )
+
+    outline = retrieve_context(
+        RetrieveRequest(
+            grade=6,
+            subject="technology",
+            wants_outline=True,
+            include_image="never",
+        )
+    )
+    assert outline.matched is True
+    assert outline.match_type == "catalog_outline"
+    assert "بخش" in (outline.context_text or "")
+    assert "مهارت 3" in (outline.context_text or "") or "مهارت ۳" in (
+        outline.context_text or ""
+    )
+
+    skill = retrieve_context(
+        RetrieveRequest(
+            grade=6,
+            subject="technology",
+            lesson=3,
+            kind="skill",
+            include_image="never",
+        )
+    )
+    assert skill.matched is True
+    assert skill.page == 106
+    assert "مهارت" in (skill.detected_topic_label or "")
+
+
+def test_retrieve_by_lesson_title_via_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     """Named title in query should open the lesson page, not chapter start."""
     from api.textbook.app.models import RetrieveRequest
     from api.textbook.app.retrieve_service import retrieve_context
-    from api.textbook.app.store import TocEntry
+    from api.textbook.app.store import CatalogBook, CatalogChapter, CatalogLesson
 
-    entries = [
-        TocEntry(
-            grade=6,
-            subject="persian",
-            kind="chapter",
-            number=3,
-            title="فصل سه",
-            start_page=40,
-            source_pages=[3],
-        ),
-        TocEntry(
-            grade=6,
-            subject="persian",
-            kind="lesson",
-            number=5,
-            title="ارزش علم",
-            start_page=52,
-            source_pages=[3],
-        ),
-    ]
+    book = CatalogBook(
+        file="C603.pdf",
+        grade=6,
+        subject="persian",
+        title="فارسی پایه ششم",
+        chapters=[CatalogChapter(number=3, start_page=40, title="فصل سه")],
+        lessons=[
+            CatalogLesson(number=5, start_page=52, title="ارزش علم", chapter=3)
+        ],
+    )
     monkeypatch.setattr(
-        "api.textbook.app.store.list_toc_entries",
-        lambda grade, subject: entries if grade == 6 and subject == "persian" else [],
+        "api.textbook.app.store.get_catalog_book",
+        lambda grade, subject: book if grade == 6 and subject == "persian" else None,
     )
     page52 = _page(
         grade=6,
@@ -604,3 +725,283 @@ def test_retrieve_by_lesson_title_via_toc(monkeypatch: pytest.MonkeyPatch) -> No
     assert resp.matched is True
     assert resp.page == 52
     assert "ارزش علم" in (resp.context_text or "")
+
+
+def test_agent_page_and_catalog_flows_side_by_side(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Page path stays exact; catalog intents use span/outline — as chat service wires them."""
+    from api.core.textbook import resolve_textbook_scope
+    from api.core.types import ChatMessage
+
+    page34 = _page(grade=4, subject="persian", printed_page=34, text="روباه و زاغ")
+    skill106 = _page(
+        grade=6, subject="technology", printed_page=106, text="مهارت گل‌سازی"
+    )
+
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.book_exists_for_grade",
+        lambda g, s: True,
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service._resolve_page_bounds",
+        lambda *a, **k: (1, 200),
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_page",
+        lambda g, s, p: page34 if (g, s, p) == (4, "persian", 34) else None,
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_neighbor_pages",
+        lambda *a, **k: [page34],
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.find_lesson_containing_page",
+        lambda *a, **k: (3, 30, 40),
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_lesson_pages",
+        lambda grade, subject, lesson_number=None, page=None, kind=None, max_pages=40: (
+            ([skill106], 3, 106, 106)
+            if kind == "skill" and lesson_number == 3
+            else (
+                (
+                    [
+                        _page(grade=4, subject="persian", printed_page=30, text="کل درس"),
+                        page34,
+                    ],
+                    3,
+                    30,
+                    40,
+                )
+                if page == 34
+                else ([], None, None, None)
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.retrieve_service.get_lesson_bounds",
+        lambda grade, subject, kind=None: (1, 13) if kind == "skill" else (1, 17),
+    )
+
+    # 1) Explicit page → exact_page even if a lesson span exists around it.
+    page_scope = resolve_textbook_scope(
+        [ChatMessage(role="user", content="صفحه ۳۴ فارسی پایه چهارم")]
+    )
+    page_resp = retrieve_context(
+        RetrieveRequest(
+            query="",
+            grade=page_scope.grade,
+            subject=page_scope.subject_id,
+            page=page_scope.page,
+            # Service drops lesson when page is known:
+            lesson=page_scope.lesson if page_scope.page is None else None,
+            chapter=page_scope.chapter if page_scope.page is None else None,
+            kind=page_scope.kind if page_scope.page is None else None,
+            wants_outline=page_scope.wants_outline,
+            include_image="never",
+        )
+    )
+    assert page_resp.matched is True
+    assert page_resp.match_type == "exact_page"
+    assert page_resp.page == 34
+    assert "روباه و زاغ" in (page_resp.context_text or "")
+    assert "کل درس" not in (page_resp.context_text or "")
+
+    # 2) Skill intent → catalog span on skill page, not lesson 3.
+    skill_scope = resolve_textbook_scope(
+        [ChatMessage(role="user", content="مهارت ۳ کار و فناوری ششم")]
+    )
+    skill_resp = retrieve_context(
+        RetrieveRequest(
+            query="",
+            grade=skill_scope.grade,
+            subject=skill_scope.subject_id,
+            page=skill_scope.page,
+            lesson=skill_scope.lesson,
+            kind=skill_scope.kind,
+            include_image="never",
+        )
+    )
+    assert skill_resp.matched is True
+    assert skill_resp.match_type == "lesson_span"
+    assert skill_resp.page == 106
+    assert "مهارت" in (skill_resp.detected_topic_label or "")
+
+    # 3) Outline intent → structure only.
+    outline_scope = resolve_textbook_scope(
+        [ChatMessage(role="user", content="لیست فصل‌های فارسی چهارم")]
+    )
+    monkeypatch.setattr(
+        "api.textbook.app.store.get_catalog_book",
+        lambda grade, subject: __import__(
+            "api.textbook.app.store", fromlist=["CatalogBook", "CatalogChapter"]
+        ).CatalogBook(
+            file="C403.pdf",
+            grade=4,
+            subject="persian",
+            title="فارسی پایه چهارم",
+            chapters=[
+                __import__(
+                    "api.textbook.app.store", fromlist=["CatalogChapter"]
+                ).CatalogChapter(number=1, start_page=5, title="آفرینش"),
+                __import__(
+                    "api.textbook.app.store", fromlist=["CatalogChapter"]
+                ).CatalogChapter(number=2, start_page=20, title="دانایی"),
+            ],
+        )
+        if grade == 4 and subject == "persian"
+        else None,
+    )
+    outline_resp = retrieve_context(
+        RetrieveRequest(
+            query="",
+            grade=outline_scope.grade,
+            subject=outline_scope.subject_id,
+            wants_outline=outline_scope.wants_outline,
+            include_image="never",
+        )
+    )
+    assert outline_resp.matched is True
+    assert outline_resp.match_type == "catalog_outline"
+    assert "فصل" in (outline_resp.context_text or "")
+
+
+def test_chapter_out_of_range_reports_max_chapter_and_lessons() -> None:
+    """«فصل ۳۰» when book has 6–7 chapters must not silently become lesson_missing."""
+    response = retrieve_context(
+        RetrieveRequest(
+            query="",
+            grade=5,
+            subject="persian",
+            chapter=30,
+            include_image="never",
+        )
+    )
+    assert response.matched is False
+    assert response.failure_reason == "chapter_out_of_range"
+    assert response.chapter == 30
+    assert response.max_chapter == 6
+    assert response.max_lesson == 17
+
+    from api.core.generation import (
+        compose_textbook_failure_reply,
+        format_chapter_out_of_range_instruction,
+    )
+    from api.core.types import TextbookContext
+
+    ctx = TextbookContext(
+        matched=False,
+        failure_reason="chapter_out_of_range",
+        subject="persian",
+        subject_title="فارسی",
+        grade=5,
+        chapter=30,
+        max_chapter=6,
+        max_lesson=17,
+        page_query_failed=True,
+    )
+    note = format_chapter_out_of_range_instruction(ctx)
+    assert "30" in note or "فصل" in note
+    assert "6" in note
+    assert "17" in note
+    canned = compose_textbook_failure_reply(ctx)
+    assert canned is not None
+    assert "فصل" in canned
+    assert "6" in canned
+    assert "17" in canned
+
+
+def test_named_lesson_title_expands_to_lesson_span() -> None:
+    """«ارزش علم» must open the full درس span, not just the start page."""
+    response = retrieve_context(
+        RetrieveRequest(
+            query="تمرین های درس ارزش علم فارسی پایه چهارم",
+            grade=4,
+            subject="persian",
+            include_image="never",
+        )
+    )
+    assert response.matched is True
+    assert response.match_type == "lesson_span"
+    assert response.lesson == 4
+    assert response.page == 36
+    assert "صفحات" in (response.context_text or "") or "درس 4" in (
+        response.context_text or ""
+    )
+
+
+def test_glued_named_title_matches_catalog() -> None:
+    from api.textbook.app.store import lookup_catalog_by_title, lookup_catalog_entry_by_title
+
+    assert lookup_catalog_by_title(4, "persian", "ارزشعلم") == 36
+    hit = lookup_catalog_entry_by_title(4, "persian", "ارزش علم")
+    assert hit is not None
+    assert hit.unit == "lesson"
+    assert hit.number == 4
+    assert hit.start_page == 36
+
+
+def test_catalog_outline_includes_page_ranges() -> None:
+    response = retrieve_context(
+        RetrieveRequest(
+            grade=4,
+            subject="persian",
+            wants_outline=True,
+            include_image="never",
+        )
+    )
+    assert response.matched is True
+    assert response.match_type == "catalog_outline"
+    text = response.context_text or ""
+    assert "۱۷" in text or "17" in text or "واحد" in text
+    assert "صفحات" in text or "صفحه" in text
+    assert "ارزش علم" in text
+
+
+def test_disk_page_bounds_without_index() -> None:
+    """When SQLite is absent, printed-page bounds come from on-disk PNGs."""
+    from api.textbook.app.store import get_printed_page_bounds
+
+    bounds = get_printed_page_bounds(4, "persian")
+    assert bounds is not None
+    min_p, max_p = bounds
+    assert min_p >= 1
+    assert max_p >= 100
+
+
+def test_page_lookup_works_with_images_only() -> None:
+    response = retrieve_context(
+        RetrieveRequest(
+            grade=4,
+            subject="persian",
+            page=36,
+            include_image="never",
+        )
+    )
+    assert response.matched is True
+    assert response.match_type == "exact_page"
+    assert response.page == 36
+
+
+def test_lesson_exercises_by_number_returns_span() -> None:
+    response = retrieve_context(
+        RetrieveRequest(
+            query="بریم سراغ حل تمرین های درس ۵ فارسی پایه ششم",
+            grade=6,
+            subject="persian",
+            lesson=5,
+            include_image="never",
+        )
+    )
+    assert response.matched is True
+    assert response.match_type == "lesson_span"
+    assert response.lesson == 5
+    assert response.page == 37  # هفت خان رستم
+
+
+def test_chapter_si_am_parses_as_30() -> None:
+    from api.textbook.app.parser import parse_persian_query
+
+    parsed = parse_persian_query("فصل سی ام فارسی پایه پنجم")
+    assert parsed.chapter == 30
+    assert parsed.grade == 5
+    assert parsed.subject == "persian"

@@ -63,6 +63,8 @@ class TextbookContext(BaseModel):
     max_page: int | None = None
     min_lesson: int | None = None
     max_lesson: int | None = None
+    min_chapter: int | None = None
+    max_chapter: int | None = None
     lesson: int | None = None
     chapter: int | None = None
     available_grades: list[int] | None = None
@@ -75,8 +77,10 @@ class TextbookScope:
     subject: str | None = None  # Persian keyword, e.g. «فارسی»
     subject_id: str | None = None  # catalog id, e.g. «persian»
     page: int | None = None
-    lesson: int | None = None  # درس N only
-    chapter: int | None = None  # فصل N only (distinct from lesson)
+    lesson: int | None = None  # child unit number (درس/جلسه/مهارت/پروژه)
+    chapter: int | None = None  # parent unit number (فصل/بخش)
+    kind: str | None = None  # lesson|session|project|skill|topic
+    wants_outline: bool = False
     # Free-text leftover for topic search only (names, «میرزا کوچک خان», …).
     topic_query: str | None = None
 
@@ -101,6 +105,13 @@ class TextbookScope:
             and self.chapter is not None
         )
 
+    def has_outline_lookup(self) -> bool:
+        return (
+            self.wants_outline
+            and self.grade is not None
+            and self.subject_id is not None
+        )
+
     def can_retrieve(self) -> bool:
         """True when structured fields (or a topic query) can hit the index.
 
@@ -111,6 +122,7 @@ class TextbookScope:
             self.has_page_lookup()
             or self.has_lesson_lookup()
             or self.has_chapter_lookup()
+            or self.has_outline_lookup()
         ):
             return True
         if self.topic_query and self.topic_query.strip():
@@ -120,10 +132,18 @@ class TextbookScope:
     def debug_label(self) -> str:
         """Human-readable scope for logs/debug — not used as a parser input."""
         parts: list[str] = []
+        if self.wants_outline:
+            parts.append("فهرست")
         if self.chapter is not None:
-            parts.append(f"فصل {self.chapter}")
+            parts.append(f"فصل/بخش {self.chapter}")
         if self.lesson is not None:
-            parts.append(f"درس {self.lesson}")
+            kind_label = {
+                "session": "جلسه",
+                "project": "پروژه",
+                "skill": "مهارت",
+                "topic": "موضوع",
+            }.get(self.kind or "", "درس")
+            parts.append(f"{kind_label} {self.lesson}")
         if self.page is not None:
             parts.append(f"صفحه {self.page}")
         label = (
@@ -153,10 +173,18 @@ class TextbookScope:
         parts: list[str] = []
         if user_message and user_message.strip():
             parts.append(user_message.strip())
+        if self.wants_outline:
+            parts.append("فهرست کتاب")
         if self.chapter is not None:
             parts.append(f"فصل {self.chapter}")
         if self.lesson is not None:
-            parts.append(f"درس {self.lesson}")
+            kind_label = {
+                "session": "جلسه",
+                "project": "پروژه",
+                "skill": "مهارت",
+                "topic": "موضوع",
+            }.get(self.kind or "", "درس")
+            parts.append(f"{kind_label} {self.lesson}")
         if self.page is not None:
             parts.append(f"صفحه {self.page}")
         _labels = {
@@ -179,8 +207,8 @@ class TextbookScope:
             parts.append(_GRADE_INT_LABELS.get(self.grade, f"پایه {self.grade}"))
         return " ".join(parts).strip()
 
-    def to_metadata(self) -> dict[str, int | str]:
-        payload: dict[str, int | str] = {}
+    def to_metadata(self) -> dict[str, int | str | bool]:
+        payload: dict[str, int | str | bool] = {}
         if self.grade is not None:
             payload["grade"] = self.grade
         if self.subject_id:
@@ -191,6 +219,8 @@ class TextbookScope:
             payload["lesson"] = self.lesson
         if self.chapter is not None:
             payload["chapter"] = self.chapter
+        if self.kind:
+            payload["kind"] = self.kind
         return payload
 
 

@@ -174,30 +174,44 @@ def _printed_page_from_offset(pdf_page_index: int, page_offset: int) -> int:
 
 
 def _report_lesson_map(grade: int, subject: str) -> None:
-    """Print درس/فصل map quality after indexing a book (helps catch weak OCR)."""
-    from api.textbook.app.store import get_lesson_bounds, list_lesson_starts
+    """Print catalog unit map after indexing a book."""
+    from api.textbook.app.store import (
+        format_catalog_outline,
+        get_chapter_bounds,
+        get_lesson_bounds,
+        list_chapter_starts,
+        list_lesson_starts,
+    )
 
-    starts = list_lesson_starts(grade, subject)
-    bounds = get_lesson_bounds(grade, subject)
-    if not starts:
+    lesson_starts = list_lesson_starts(grade, subject)
+    chapter_starts = list_chapter_starts(grade, subject)
+    lesson_bounds = get_lesson_bounds(grade, subject)
+    chapter_bounds = get_chapter_bounds(grade, subject)
+    if not lesson_starts and not chapter_starts:
         print(
-            "  lesson map: EMPTY — chapter headers not found in OCR text; "
-            "lesson lookups will ask for page/photo (not false out-of-range)"
+            "  catalog map: EMPTY — add chapters/lessons to catalog.json for "
+            "lesson/chapter lookups"
         )
         return
-    preview = ", ".join(f"{n}@p{p}" for n, p in starts[:12])
-    if len(starts) > 12:
+    preview = ", ".join(f"{n}@p{p}" for n, p in lesson_starts[:12])
+    if len(lesson_starts) > 12:
         preview += ", …"
-    if bounds is None:
-        print(
-            f"  lesson map: WEAK ({len(starts)} markers: {preview}) — "
-            "re-check MinerU text / page_offset; bounds not trusted for out-of-range"
-        )
-    else:
-        print(
-            f"  lesson map: OK bounds={bounds[0]}..{bounds[1]} "
-            f"({len(starts)} markers: {preview})"
-        )
+    bits = []
+    if lesson_bounds is not None:
+        bits.append(f"children={lesson_bounds[0]}..{lesson_bounds[1]}")
+    if chapter_bounds is not None:
+        bits.append(f"parents={chapter_bounds[0]}..{chapter_bounds[1]}")
+    bounds_txt = " ".join(bits) if bits else "no bounds"
+    print(
+        f"  catalog map: OK {bounds_txt} "
+        f"({len(lesson_starts)} children, {len(chapter_starts)} parents"
+        + (f": {preview}" if preview else "")
+        + ")"
+    )
+    outline = format_catalog_outline(grade, subject)
+    if outline:
+        first_lines = "\n".join(outline.splitlines()[:6])
+        print(f"  catalog outline preview:\n{first_lines}")
 
 
 def _init_db(conn: sqlite3.Connection) -> None:

@@ -7,6 +7,7 @@ from typing import Any
 
 from .constants import (
     ACTIVE_PERSONA_METADATA_KEY,
+    ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY,
     MANUAL_PERSONA_METADATA_KEY,
     PENDING_PERSONA_METADATA_KEY,
     PersonaId,
@@ -195,13 +196,23 @@ _WORD_CHAIN_SIGNALS = (
 )
 
 
+def _is_persona_switch_confirmation(content: str) -> bool:
+    """True when the assistant message is asking to confirm a persona switch."""
+    if "بریم سراغ «" in content:
+        return True
+    # Older copy used bare «مطمئنی؟»; current copy says «مطمئنی این کار رو بکنیم؟».
+    if "مطمئنی؟" in content or "مطمئنی این" in content:
+        return True
+    return False
+
+
 def _looks_like_word_chain_awaiting_answer(messages: list[ChatMessage]) -> bool:
     """True when the latest assistant turn is waiting for a word-chain reply."""
     for message in reversed(messages):
         if message.role != "assistant":
             continue
         content = message.content
-        if "مطمئنی؟" in content or "بریم سراغ «" in content:
+        if _is_persona_switch_confirmation(content):
             continue
         return any(signal in content for signal in _WORD_CHAIN_SIGNALS)
     return False
@@ -434,7 +445,7 @@ def _infer_persona_from_history(messages: list[ChatMessage]) -> PersonaId | None
     }
 
     for content in reversed(assistant_msgs):
-        if "مطمئنی؟" in content or "بریم سراغ «" in content:
+        if _is_persona_switch_confirmation(content):
             continue
         if _looks_like_welcome_or_menu(content):
             continue
@@ -473,7 +484,7 @@ def _extract_pending_switch_from_history(
         if message.role != "assistant":
             continue
         content = message.content
-        if "مطمئنی؟" not in content and "بریم سراغ «" not in content:
+        if not _is_persona_switch_confirmation(content):
             continue
         match = re.search(r"بریم سراغ «([^»]+)»", content)
         if not match:
@@ -580,7 +591,8 @@ async def resolve_active_persona(
     """
     Resolve persona with sticky behaviour.
 
-    - Manual UserValves persona wins immediately (no confirmation).
+    - Manual UserValves persona wins immediately (no confirmation),
+      except concrete textbook asks which need homework/teacher tools.
     - Auto-detected persona sticks across turns (via metadata/history).
     - Easy switches without confirmation only within sibling pairs:
       creative↔storyteller and teacher↔homework.
@@ -588,22 +600,78 @@ async def resolve_active_persona(
       («بله برو» / «نه همین‌جا»), except the very first selection.
     - Mid-activity short answers (e.g. word-chain «داستان») never switch.
     """
+    from .textbook import looks_like_textbook_session_switch, resolve_textbook_scope
+
     manual_persona = resolve_manual_persona(user_persona=user_persona, body=body)
     latest_user_msg = _get_latest_user_message(messages)
 
-    # Manual selection from Chat Controls: honor immediately.
+    sticky_scope: dict[str, Any] | None = None
+    if body:
+        metadata = body.get("metadata") or {}
+        if isinstance(metadata, dict):
+            raw_scope = metadata.get(ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY)
+            if isinstance(raw_scope, dict):
+                sticky_scope = raw_scope
+
+    def _textbook_force_persona() -> PersonaId | None:
+        """Homework/teacher when the child clearly needs catalog/page tools."""
+        if not latest_user_msg:
+            return None
+        if re.search(r"برای\s*تدریس|طرح\s*درس|ایده\s*(?:ی\s*)?تدریس", latest_user_msg):
+            return "teacher"
+        if looks_like_textbook_session_switch(latest_user_msg):
+            return "homework"
+        # Clarifying follow-ups («خود کتاب فارسی») while list/unit scope is pending.
+        from .textbook import (
+            _extract_subject_token,
+            looks_like_textbook_followup,
+            looks_like_textbook_help_request,
+        )
+
+        scope = resolve_textbook_scope(messages, sticky=sticky_scope)
+        # Only when a real book is already identified — bare topic_query like
+        # «داستان» (word-chain) must NOT force homework.
+        pending_book = (
+            scope.has_outline_lookup()
+            or scope.has_chapter_lookup()
+            or scope.has_lesson_lookup()
+            or scope.has_page_lookup()
+            or (
+                scope.grade is not None
+                and scope.subject_id is not None
+                and bool(scope.topic_query)
+            )
+        )
+        if not pending_book:
+            return None
+        if looks_like_textbook_followup(latest_user_msg) or looks_like_textbook_help_request(
+            latest_user_msg
+        ):
+            return "homework"
+        if _extract_subject_token(latest_user_msg):
+            return "homework"
+        if re.search(
+            r"خود\s*کتاب|همین\s*کتاب|کتاب\s*درسی|کتاب\s*اصلی|آره|بله|باشه|همون",
+            latest_user_msg,
+        ):
+            return "homework"
+        return None
+
+    textbook_persona = _textbook_force_persona()
+
+    # Manual Chat Controls persona wins — but never blocks real textbook work.
     if manual_persona:
+        if textbook_persona and manual_persona not in {"teacher", "homework"}:
+            return PersonaResolution(persona=textbook_persona)
         return PersonaResolution(persona=manual_persona)
 
     # Hard stay during word-chain even if sticky metadata/history was lost —
     # unless the child clearly asks for a textbook page/lesson.
-    from .textbook import looks_like_textbook_session_switch
-
     if (
         latest_user_msg
         and _looks_like_word_chain_awaiting_answer(messages)
         and not _looks_like_hard_switch_request(latest_user_msg)
-        and not looks_like_textbook_session_switch(latest_user_msg)
+        and not textbook_persona
     ):
         return PersonaResolution(persona="gamer")
 
@@ -629,6 +697,21 @@ async def resolve_active_persona(
         return PersonaResolution(persona="none")
 
     # Welcome-menu short picks («بازی»، «داستان»، …) are first selections, not switches.
+    # Concrete textbook asks leave sticky play modes immediately (no confirmation).
+    # Must run BEFORE menu-pick so «لیست درس‌های فارسی…» is never treated as a
+    # vague welcome-menu choice that skips catalog tools.
+    if textbook_persona and (
+        not current_persona
+        or current_persona == "none"
+        or current_persona not in {"teacher", "homework"}
+    ):
+        return PersonaResolution(persona=textbook_persona)
+    if textbook_persona and current_persona in {"teacher", "homework"}:
+        # Stay on teacher if already there (unless explicit homework-only cue).
+        if textbook_persona == "teacher":
+            return PersonaResolution(persona="teacher")
+        return PersonaResolution(persona=current_persona)
+
     menu_pick = (
         _detect_menu_persona_pick(latest_user_msg) if latest_user_msg else None
     )
@@ -638,15 +721,6 @@ async def resolve_active_persona(
         or _last_assistant_is_welcome(messages)
     ):
         return PersonaResolution(persona=menu_pick)
-
-    # Concrete textbook asks leave sticky play modes immediately (no confirmation),
-    # so the child gets real page lookup instead of invented homework.
-    # «برای تدریس …» is a teacher-prep ask → teacher (not homework).
-    if latest_user_msg and looks_like_textbook_session_switch(latest_user_msg):
-        if re.search(r"برای\s*تدریس|طرح\s*درس|ایده\s*(?:ی\s*)?تدریس", latest_user_msg):
-            return PersonaResolution(persona="teacher")
-        if current_persona not in {"teacher", "homework"}:
-            return PersonaResolution(persona="homework")
 
     # Answer a pending switch confirmation from the previous assistant turn.
     pending = _extract_pending_switch_from_history(messages)
@@ -682,6 +756,9 @@ async def resolve_active_persona(
 
     # First selection (no sticky yet): accept immediately.
     if not current_persona or current_persona == "none":
+        # Prefer textbook tools over creative/storyteller guesses for book asks.
+        if textbook_persona:
+            return PersonaResolution(persona=textbook_persona)
         return PersonaResolution(persona=desired if desired != "none" else "none")
 
     # Same persona or none → stay.

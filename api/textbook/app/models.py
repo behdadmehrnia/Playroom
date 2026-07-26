@@ -5,12 +5,21 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 IncludeImageMode = Literal["never", "auto", "always"]
-MatchType = Literal["exact_page", "lesson", "lesson_span", "topic_search", "none"]
+# Default: always attach page images — OCR is a weak secondary signal.
+MatchType = Literal[
+    "exact_page",
+    "lesson",
+    "lesson_span",
+    "topic_search",
+    "catalog_outline",
+    "none",
+]
 FailureReason = Literal[
     "page_out_of_range",
     "page_missing",
     "lesson_missing",
     "lesson_out_of_range",
+    "chapter_out_of_range",
     "book_unavailable",
     "need_grade_or_subject",
     "none",
@@ -25,12 +34,20 @@ class RetrieveRequest(BaseModel):
         description="Free-text for topic search only; optional when structured fields are set",
     )
     include_neighbors: int = Field(default=2, ge=0, le=3)
-    include_image: IncludeImageMode = "auto"
+    include_image: IncludeImageMode = "always"
     grade: int | None = Field(default=None, ge=3, le=6)
     subject: str | None = Field(default=None, description="شناسه درس مثل math")
     page: int | None = Field(default=None, ge=1)
-    lesson: int | None = Field(default=None, ge=1, description="شماره درس")
-    chapter: int | None = Field(default=None, ge=1, description="شماره فصل")
+    lesson: int | None = Field(default=None, ge=1, description="شماره واحد فرزند (درس/جلسه/…)")
+    chapter: int | None = Field(default=None, ge=1, description="شماره واحد والد (فصل/بخش)")
+    kind: str | None = Field(
+        default=None,
+        description="نوع واحد فرزند: lesson|session|project|skill|topic",
+    )
+    wants_outline: bool = Field(
+        default=False,
+        description="درخواست فهرست ساختار کتاب از catalog",
+    )
 
 
 class RetrieveResponse(BaseModel):
@@ -54,6 +71,8 @@ class RetrieveResponse(BaseModel):
     max_page: int | None = None
     min_lesson: int | None = None
     max_lesson: int | None = None
+    min_chapter: int | None = None
+    max_chapter: int | None = None
     lesson: int | None = None
     chapter: int | None = None
     available_grades: list[int] | None = None

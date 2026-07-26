@@ -32,10 +32,13 @@ def test_build_system_prompt_with_textbook_context() -> None:
         grade=6,
         page=7,
         text_usable=True,
+        needs_image=True,
+        image_base64="abc",
     )
     prompt = build_system_prompt("teacher", textbook_context=ctx)
     assert "متن صفحهٔ کتاب" in prompt
     assert "ریاضی" in prompt
+    assert "تصویر" in prompt
 
 
 def test_build_system_prompt_with_web_search_context() -> None:

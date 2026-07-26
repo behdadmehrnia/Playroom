@@ -18,8 +18,6 @@ from api.core import (
 )
 from api.core.types import LLMClient
 from api.models import (
-    RebuildTocRequest,
-    RebuildTocResponse,
     TextbookQueryRequest,
     TextbookQueryResponse,
     TextbookRetrieveRequest,
@@ -108,7 +106,7 @@ async def retrieve_textbook_endpoint(
         include_image = (req.include_image or settings.textbook_include_image)
         include_image = include_image.strip().lower()
         if include_image not in {"never", "auto", "always"}:
-            include_image = "auto"
+            include_image = "always"
         timeout = (
             req.timeout_sec
             if req.timeout_sec is not None
@@ -132,6 +130,8 @@ async def retrieve_textbook_endpoint(
                 page=scope.page,
                 lesson=scope.lesson if scope.page is None else None,
                 chapter=scope.chapter if scope.page is None else None,
+                kind=scope.kind if scope.page is None else None,
+                wants_outline=scope.wants_outline,
                 llm_client=llm_client,
                 backend_model=backend_model,
             )
@@ -157,6 +157,7 @@ async def retrieve_textbook_endpoint(
             elif reason in {
                 "lesson_missing",
                 "lesson_out_of_range",
+                "chapter_out_of_range",
             }:
                 context.page_query_failed = True
             elif reason == "book_unavailable":
@@ -195,40 +196,4 @@ async def retrieve_textbook_endpoint(
         gate_reason=gate_reason,
         textbook_context=context,
         debug=debug,
-    )
-
-
-@router.post("/v1/rebuild-toc", response_model=RebuildTocResponse, tags=["Textbook"])
-async def rebuild_toc_endpoint(
-    req: RebuildTocRequest,
-    settings: Settings = Depends(get_settings),
-    llm_client: LLMClient = Depends(get_llm_client),
-) -> RebuildTocResponse:
-    """Force-rebuild TOC map for one book from indexed فهرست pages."""
-    import asyncio
-
-    from api.textbook.app.store import list_toc_entries
-    from api.textbook.app.toc_agent import build_toc_map
-
-    try:
-        ok = await asyncio.wait_for(
-            build_toc_map(
-                req.grade,
-                req.subject.strip(),
-                llm_client=llm_client,
-                model=settings.backend_model,
-                force=req.force,
-                llm_timeout_sec=8.0,
-            ),
-            timeout=20.0,
-        )
-    except Exception:  # noqa: BLE001
-        ok = False
-    entries = list_toc_entries(req.grade, req.subject.strip()) if ok else []
-    return RebuildTocResponse(
-        ok=ok,
-        grade=req.grade,
-        subject=req.subject.strip(),
-        entry_count=len(entries),
-        error=None if ok else "TOC build failed",
     )

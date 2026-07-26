@@ -6,6 +6,7 @@ import pytest
 
 from api.config import Settings
 from api.core import ChatMessage
+from api.core.messages import strip_persona_markers
 from api.service import detect_intent_for, run_chat
 
 from tests.conftest import DummyLLM
@@ -52,7 +53,7 @@ async def test_run_chat_manual_persona(service_settings: Settings) -> None:
         enable_web_search=False,
         on_status=None,
     )
-    assert result.response == "پاسخ معلم"
+    assert strip_persona_markers(result.response) == "پاسخ معلم"
     assert result.persona == "teacher"
     assert result.persona_source == "manual"
 
@@ -78,4 +79,4 @@ async def test_run_chat_word_chain_confirmation(service_settings: Settings, word
     )
     assert result.persona == "gamer"
     assert result.persona_source == "confirm"
-    assert "مطمئنی؟" in result.response
+    assert "مطمئنی" in result.response

@@ -14,10 +14,15 @@ from .constants import (
     TEXTBOOK_CONTEXT_INSTRUCTION,
     TEXTBOOK_IMAGE_ONLY_INSTRUCTION,
     TEXTBOOK_LOOKUP_FAILED_INSTRUCTION,
+    TEXTBOOK_MATCHED_ACTION_HEADER,
+    TEXTBOOK_MISSING_IMAGE_INSTRUCTION,
     TEXTBOOK_NEED_INFO_INSTRUCTION,
     TEXTBOOK_LESSON_MISSING_INSTRUCTION,
     TEXTBOOK_LESSON_OUT_OF_RANGE_INSTRUCTION,
+    TEXTBOOK_CHAPTER_OUT_OF_RANGE_INSTRUCTION,
     TEXTBOOK_BOOK_UNAVAILABLE_INSTRUCTION,
+    TEXTBOOK_OUTLINE_ACTION_HEADER,
+    TEXTBOOK_OUTLINE_INSTRUCTION,
     TEXTBOOK_PAGE_OUT_OF_RANGE_INSTRUCTION,
     TEXTBOOK_UNREADABLE_INSTRUCTION,
     WEB_SEARCH_CONTEXT_HEADER,
@@ -72,14 +77,41 @@ def format_lesson_out_of_range_instruction(context: TextbookContext) -> str:
         f"کتاب: {title}",
     ]
     if context.lesson is not None:
-        bits.append(f"درس/فصل درخواستی: {context.lesson}")
+        bits.append(f"درس/واحد درخواستی: {context.lesson}")
+    if context.chapter is not None and context.lesson is None:
+        bits.append(f"فصل/بخش درخواستی: {context.chapter}")
     if context.max_lesson is not None:
         if context.min_lesson is not None and context.min_lesson > 1:
             bits.append(
                 f"محدودهٔ درس‌های شناخته‌شده در پایگاه: {context.min_lesson} تا {context.max_lesson}"
             )
         else:
-            bits.append(f"این کتاب تا درس/فصل {context.max_lesson} دارد")
+            bits.append(f"این کتاب تا درس {context.max_lesson} دارد")
+    if context.max_chapter is not None:
+        bits.append(f"این کتاب تا فصل/بخش {context.max_chapter} دارد")
+    if context.grade is not None:
+        bits.append(f"پایه: {context.grade}")
+    return "\n".join(bits)
+
+
+def format_chapter_out_of_range_instruction(context: TextbookContext) -> str:
+    """Inject concrete chapter (+ lesson) bounds when فصل/بخش is too high."""
+    title = context.subject_title or "این کتاب"
+    bits = [
+        TEXTBOOK_CHAPTER_OUT_OF_RANGE_INSTRUCTION,
+        f"کتاب: {title}",
+    ]
+    if context.chapter is not None:
+        bits.append(f"فصل/بخش درخواستی: {context.chapter}")
+    if context.max_chapter is not None:
+        if context.min_chapter is not None and context.min_chapter > 1:
+            bits.append(
+                f"محدودهٔ فصل/بخش‌های شناخته‌شده: {context.min_chapter} تا {context.max_chapter}"
+            )
+        else:
+            bits.append(f"این کتاب تا فصل/بخش {context.max_chapter} دارد")
+    if context.max_lesson is not None:
+        bits.append(f"این کتاب تا درس {context.max_lesson} دارد")
     if context.grade is not None:
         bits.append(f"پایه: {context.grade}")
     return "\n".join(bits)
@@ -112,38 +144,141 @@ def format_book_unavailable_instruction(context: TextbookContext) -> str:
     return "\n".join(bits)
 
 
+def compose_textbook_outline_reply(context: TextbookContext) -> str | None:
+    """Deterministic child-facing reply for catalog outline requests.
+
+    LLMs often ignore outline context (especially when page-oriented instructions
+    leak in) and invent «دوره اول/دوم» or claim they don't have the list.
+    """
+    if context.match_type != "catalog_outline" or not context.context_text:
+        return None
+    body = context.context_text.strip()
+    # Drop the LLM-facing instruction prefix; keep the structure block.
+    for marker in ("ساختار کتاب «", "ساختار کتاب \""):
+        idx = body.find(marker)
+        if idx >= 0:
+            body = body[idx:].strip()
+            break
+    # Soft cleanup if instruction lines somehow remain.
+    lines = [
+        line
+        for line in body.splitlines()
+        if line.strip()
+        and not line.strip().startswith("توجه:")
+        and "ممنوع:" not in line
+        and "همین فهرست را برای کودک بخوان" not in line
+    ]
+    body = "\n".join(lines).strip() or body
+    body = body.replace(" — فقط از همین فهرست استفاده کن", "")
+    title = context.subject_title or "این کتاب"
+    grade_bit = f" پایه {context.grade}" if context.grade is not None else ""
+    return (
+        f"این هم فهرست کتاب «{title}»{grade_bit} 📚\n\n"
+        f"{body}\n\n"
+        "کدوم فصل یا درس رو می‌خوای با هم کار کنیم؟"
+    )
+
+
 def compose_textbook_failure_reply(context: TextbookContext) -> str | None:
     """Deterministic child-facing reply for hard textbook failures (demo-safe).
 
-    LLMs often ignore book_unavailable and ask for a photo of the missing book;
-    for this failure we answer from the structured fields instead.
+    LLMs often ignore failure instructions and pretend the page opened; for these
+    failures we answer from structured fields instead of trusting free generation.
     """
-    if context.failure_reason != "book_unavailable":
-        return None
     title = context.subject_title or "این کتاب"
     grade = context.grade
-    avail = context.available_grades or []
-    if grade is not None and avail:
-        if len(avail) == 1:
-            avail_bit = f"معمولاً برای پایهٔ {avail[0]} است"
-        else:
-            grades = " و ".join(str(g) for g in avail)
-            avail_bit = f"برای پایه‌های {grades} هست"
+    page = context.page
+
+    if context.failure_reason == "book_unavailable":
+        avail = context.available_grades or []
+        if grade is not None and avail:
+            if len(avail) == 1:
+                avail_bit = f"معمولاً برای پایهٔ {avail[0]} است"
+            else:
+                grades = " و ".join(str(g) for g in avail)
+                avail_bit = f"برای پایه‌های {grades} هست"
+            return (
+                f"کتاب «{title}» برای پایه {grade} توی کتاب‌های مدرسه‌ای که من دارم نیست؛ "
+                f"{avail_bit}. "
+                "اگر پایه را اشتباه گفتی بگو، یا اسم کتاب درست را بگو. "
+                "اگر تمرین از کتاب دیگری است، عکس یا متن همان سوال را بفرست 📚"
+            )
+        if grade is not None:
+            return (
+                f"کتاب «{title}» برای پایه {grade} توی کتاب‌های مدرسه‌ای که من دارم نیست. "
+                "اسم کتاب یا پایه را دوباره بگو، یا عکس/متن سوال را از کتاب درست بفرست 📚"
+            )
         return (
-            f"کتاب «{title}» برای پایه {grade} توی کتاب‌های مدرسه‌ای که من دارم نیست؛ "
-            f"{avail_bit}. "
-            "اگر پایه را اشتباه گفتی بگو، یا اسم کتاب درست را بگو. "
-            "اگر تمرین از کتاب دیگری است، عکس یا متن همان سوال را بفرست 📚"
+            f"کتاب «{title}» را برای پایه‌ای که گفتی پیدا نکردم. "
+            "پایه و نام کتاب را دوباره بگو، یا عکس سوال را بفرست 📚"
         )
-    if grade is not None:
+
+    if context.failure_reason == "page_out_of_range" or context.page_out_of_range:
+        max_bit = (
+            f" (این کتاب تا صفحهٔ {context.max_page} دارد)"
+            if context.max_page is not None
+            else ""
+        )
+        page_bit = f"صفحهٔ {page}" if page is not None else "این صفحه"
+        grade_bit = f" پایه {grade}" if grade is not None else ""
         return (
-            f"کتاب «{title}» برای پایه {grade} توی کتاب‌های مدرسه‌ای که من دارم نیست. "
-            "اسم کتاب یا پایه را دوباره بگو، یا عکس/متن سوال را از کتاب درست بفرست 📚"
+            f"{page_bit} توی کتاب «{title}»{grade_bit} نیست{max_bit}. "
+            "یک شمارهٔ صفحهٔ داخل همین کتاب بگو، یا عکس/متن سوال را بفرست 📚"
         )
-    return (
-        f"کتاب «{title}» را برای پایه‌ای که گفتی پیدا نکردم. "
-        "پایه و نام کتاب را دوباره بگو، یا عکس سوال را بفرست 📚"
-    )
+
+    if context.failure_reason == "lesson_out_of_range":
+        unit = context.lesson if context.lesson is not None else context.chapter
+        max_bit = ""
+        if context.max_lesson is not None and context.max_chapter is not None:
+            max_bit = (
+                f" (این کتاب تا فصل {context.max_chapter} و تا درس {context.max_lesson} دارد)"
+            )
+        elif context.max_lesson is not None:
+            max_bit = f" (این کتاب تا درس {context.max_lesson} دارد)"
+        elif context.max_chapter is not None:
+            max_bit = f" (این کتاب تا فصل {context.max_chapter} دارد)"
+        unit_bit = f"درس/فصل {unit}" if unit is not None else "این درس/فصل"
+        grade_bit = f" پایه {grade}" if grade is not None else ""
+        return (
+            f"{unit_bit} توی کتاب «{title}»{grade_bit} نیست{max_bit}. "
+            "یک شمارهٔ درست داخل همین کتاب بگو، یا عکس/متن سوال را بفرست 📚"
+        )
+
+    if context.failure_reason == "chapter_out_of_range":
+        ch = context.chapter
+        max_bit = ""
+        if context.max_chapter is not None and context.max_lesson is not None:
+            max_bit = (
+                f" (این کتاب تا فصل {context.max_chapter} و تا درس {context.max_lesson} دارد)"
+            )
+        elif context.max_chapter is not None:
+            max_bit = f" (این کتاب تا فصل {context.max_chapter} دارد)"
+        ch_bit = f"فصل {ch}" if ch is not None else "این فصل"
+        grade_bit = f" پایه {grade}" if grade is not None else ""
+        return (
+            f"{ch_bit} توی کتاب «{title}»{grade_bit} نیست{max_bit}. "
+            "یک شمارهٔ فصل یا درس درست بگو، یا عکس/متن سوال را بفرست 📚"
+        )
+
+    if context.failure_reason in {"page_missing", "lesson_missing"}:
+        # Without a known book, ask for info instead of a fake «این کتاب» miss.
+        if not (context.subject_title or context.subject):
+            return None
+        where = ""
+        if page is not None:
+            where = f"صفحهٔ {page} "
+        elif context.lesson is not None:
+            where = f"درس {context.lesson} "
+        elif context.chapter is not None:
+            where = f"فصل {context.chapter} "
+        grade_bit = f" پایه {grade}" if grade is not None else ""
+        return (
+            f"الان نتونستم {where}از کتاب «{title}»{grade_bit} رو دقیق پیدا کنم. "
+            "اگر می‌تونی عکس همون صفحه رو بفرست، یا متن سوال/درک مطلب رو اینجا بنویس "
+            "تا با هم حلش کنیم 📚"
+        )
+
+    return None
 
 
 def format_need_info_instruction(context: TextbookContext) -> str:
@@ -173,6 +308,11 @@ def format_need_info_instruction(context: TextbookContext) -> str:
     bits = [TEXTBOOK_NEED_INFO_INSTRUCTION]
     if known:
         bits.append("همین الان می‌دانیم: " + "؛ ".join(known))
+        bits.append(
+            "**ممنوع:** دوباره پرسیدن موارد بالا (پایه/کتاب/فصل/درس که قبلاً گفته شده). "
+            "هرگز «دوره اول یا دوم» یا نسخهٔ دیگری از همان کتاب را نپرس — "
+            "برای هر پایه فقط یک کتاب فارسی/ریاضی/… در مجموعه هست."
+        )
     if missing:
         bits.append("هنوز لازم است بپرسی: " + "؛ ".join(missing))
     elif context.chapter is not None or context.lesson is not None:
@@ -219,16 +359,37 @@ def build_system_prompt(
         if textbook_context.page:
             meta_parts.append(f"صفحه {textbook_context.page}")
         meta = " — ".join(meta_parts)
-        if textbook_context.text_usable:
-            instruction = TEXTBOOK_CONTEXT_INSTRUCTION
-        elif textbook_context.image_base64:
+        has_image = bool(
+            textbook_context.image_base64
+            or (
+                textbook_context.images_base64
+                and any(img for img in textbook_context.images_base64 if img)
+            )
+        )
+        is_outline = textbook_context.match_type == "catalog_outline"
+        is_unit_span = textbook_context.match_type == "lesson_span"
+        if is_outline:
+            instruction = TEXTBOOK_OUTLINE_INSTRUCTION
+        elif has_image and not textbook_context.text_usable:
             instruction = TEXTBOOK_IMAGE_ONLY_INSTRUCTION
-        else:
+        elif has_image:
+            instruction = TEXTBOOK_CONTEXT_INSTRUCTION
+        elif is_unit_span and textbook_context.text_usable:
+            # Chapter/lesson span from catalog (+OCR): use it; don't nag for a page photo.
+            instruction = TEXTBOOK_CONTEXT_INSTRUCTION
+        elif not textbook_context.text_usable:
             instruction = TEXTBOOK_UNREADABLE_INSTRUCTION
+        else:
+            # OCR-only: unreliable — ask for a clear photo of the page.
+            instruction = TEXTBOOK_MISSING_IMAGE_INSTRUCTION
         header = f"{instruction}\n\n{TEXTBOOK_CONTEXT_HEADER}"
         if meta:
             header = f"{header}\n({meta})"
         sections.append(f"{header}\n{textbook_context.context_text}")
+        if is_outline:
+            sections.append(TEXTBOOK_OUTLINE_ACTION_HEADER)
+        elif has_image:
+            sections.append(TEXTBOOK_MATCHED_ACTION_HEADER)
     elif textbook_context and (
         textbook_context.page_out_of_range
         or textbook_context.failure_reason == "page_out_of_range"
@@ -236,6 +397,8 @@ def build_system_prompt(
         sections.append(format_page_out_of_range_instruction(textbook_context))
     elif textbook_context and textbook_context.failure_reason == "lesson_out_of_range":
         sections.append(format_lesson_out_of_range_instruction(textbook_context))
+    elif textbook_context and textbook_context.failure_reason == "chapter_out_of_range":
+        sections.append(format_chapter_out_of_range_instruction(textbook_context))
     elif textbook_context and textbook_context.failure_reason == "book_unavailable":
         sections.append(format_book_unavailable_instruction(textbook_context))
     elif textbook_context and textbook_context.failure_reason == "lesson_missing":
@@ -249,6 +412,8 @@ def build_system_prompt(
             bits.append(f"فصل درخواستی: {textbook_context.chapter}")
         if textbook_context.max_lesson is not None:
             bits.append(f"حداکثر درس شناخته‌شده: {textbook_context.max_lesson}")
+        if textbook_context.max_chapter is not None:
+            bits.append(f"حداکثر فصل شناخته‌شده: {textbook_context.max_chapter}")
         sections.append("\n".join(bits))
     elif textbook_context and textbook_context.page_query_failed:
         sections.append(TEXTBOOK_LOOKUP_FAILED_INSTRUCTION)
@@ -305,7 +470,7 @@ def _attach_textbook_image_to_messages(
         content.append(
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
             }
         )
 
@@ -428,9 +593,21 @@ async def reflect_on_response(
         textbook_context.page_query_failed
         or textbook_context.page_out_of_range
         or textbook_context.need_info
+        or (
+            textbook_context.failure_reason
+            in {
+                "page_missing",
+                "lesson_missing",
+                "book_unavailable",
+                "lesson_out_of_range",
+                "chapter_out_of_range",
+            }
+        )
     ):
         textbook_note = (
-            "\n\nتوجه بازبین: نویسنده متن صفحه را نداشته؛ اگر محتوای دقیق صفحه را ساخته، REVISE."
+            "\n\nتوجه بازبین: نویسنده متن صفحه را نداشته. "
+            "اگر وانمود کرده صفحه را باز کرده، محتوای دقیق ساخته، "
+            "یا گفته «یک لحظه صبر کن صفحه را می‌بینم»، REVISE."
         )
 
     web_note = ""

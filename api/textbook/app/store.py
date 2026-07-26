@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from api.textbook.app.config import CATALOG_PATH, DATA_DIR, INDEX_PATH, PAGES_DIR
+from api.textbook.app.subjects import SUBJECT_TITLES
 from api.textbook.app.text_quality import is_text_garbled
 
 
@@ -43,12 +45,75 @@ def _row_to_page(row: sqlite3.Row) -> PageRecord:
 
 
 @dataclass
+class CatalogChapter:
+    number: int
+    start_page: int
+    title: str = ""
+
+
+CHILD_KINDS = ("lesson", "session", "project", "skill", "topic")
+KIND_LABELS: dict[str, str] = {
+    "lesson": "درس",
+    "session": "جلسه",
+    "project": "پروژه",
+    "skill": "مهارت",
+    "topic": "زیربخش",
+}
+# Aliases kids say → kind
+KIND_ALIASES: dict[str, str] = {
+    "درس": "lesson",
+    "جلسه": "session",
+    "جلسه‌ی": "session",
+    "جلسهٔ": "session",
+    "پروژه": "project",
+    "پروژه‌ی": "project",
+    "پروژهٔ": "project",
+    "مهارت": "skill",
+}
+
+
+@dataclass
+class CatalogLesson:
+    number: int
+    start_page: int
+    title: str = ""
+    chapter: int | None = None
+    kind: str = "lesson"
+    aliases: list[str] = field(default_factory=list)
+
+    @property
+    def kind_label(self) -> str:
+        return KIND_LABELS.get(self.kind, "درس")
+
+    def all_titles(self) -> list[str]:
+        titles = [self.title] if self.title else []
+        titles.extend(a for a in self.aliases if a)
+        return titles
+
+
+@dataclass
+class CatalogTitleHit:
+    """Result of matching a free-text title against the manual catalog."""
+
+    start_page: int
+    unit: Literal["lesson", "chapter"] = "lesson"
+    number: int | None = None
+    kind: str = "lesson"
+    title: str = ""
+    chapter: int | None = None
+    score: int = 0
+
+
+@dataclass
 class CatalogBook:
     file: str
     grade: int
     subject: str
     title: str
     page_offset: int = 0
+    parent_label: str = "فصل"
+    chapters: list[CatalogChapter] = field(default_factory=list)
+    lessons: list[CatalogLesson] = field(default_factory=list)
 
 
 def _connect() -> sqlite3.Connection:
@@ -81,12 +146,99 @@ def page_count() -> int:
         return 0
 
 
+def _parse_catalog_int(value: object) -> int | None:
+    """Accept int or digit strings (Latin / Persian / Arabic-Indic)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        from api.textbook.app.parser import normalize_digits
+
+        cleaned = normalize_digits(value).strip()
+        if cleaned.isdigit():
+            return int(cleaned)
+    return None
+
+
+def _parse_catalog_chapters(raw: object) -> list[CatalogChapter]:
+    if not isinstance(raw, list):
+        return []
+    out: list[CatalogChapter] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        number = _parse_catalog_int(item.get("number"))
+        start_page = _parse_catalog_int(item.get("start_page"))
+        if number is None or start_page is None:
+            continue
+        if number < 1 or start_page < 1:
+            continue
+        out.append(
+            CatalogChapter(
+                number=number,
+                start_page=start_page,
+                title=str(item.get("title") or "").strip(),
+            )
+        )
+    return out
+
+
+def _parse_catalog_kind(raw: object) -> str:
+    kind = str(raw or "lesson").strip().lower()
+    if kind in CHILD_KINDS:
+        return kind
+    # Persian label in JSON → kind id
+    for alias, canonical in KIND_ALIASES.items():
+        if kind == alias or kind == canonical:
+            return canonical
+    return "lesson"
+
+
+def _parse_catalog_lessons(raw: object) -> list[CatalogLesson]:
+    if not isinstance(raw, list):
+        return []
+    out: list[CatalogLesson] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        number = _parse_catalog_int(item.get("number"))
+        start_page = _parse_catalog_int(item.get("start_page"))
+        if number is None or start_page is None:
+            continue
+        if number < 1 or start_page < 1:
+            continue
+        chapter_no = _parse_catalog_int(item.get("chapter"))
+        aliases_raw = item.get("aliases")
+        aliases: list[str] = []
+        if isinstance(aliases_raw, list):
+            aliases = [str(a).strip() for a in aliases_raw if str(a).strip()]
+        elif isinstance(aliases_raw, str) and aliases_raw.strip():
+            aliases = [aliases_raw.strip()]
+        out.append(
+            CatalogLesson(
+                number=number,
+                start_page=start_page,
+                title=str(item.get("title") or "").strip(),
+                chapter=chapter_no if chapter_no and chapter_no >= 1 else None,
+                kind=_parse_catalog_kind(item.get("kind")),
+                aliases=aliases,
+            )
+        )
+    return out
+
+
 def load_catalog() -> list[CatalogBook]:
     if not CATALOG_PATH.is_file():
         return []
     raw = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
     books: list[CatalogBook] = []
     for item in raw.get("books", []):
+        if not isinstance(item, dict):
+            continue
+        parent_label = str(item.get("parent_label") or "فصل").strip() or "فصل"
         books.append(
             CatalogBook(
                 file=item["file"],
@@ -94,9 +246,226 @@ def load_catalog() -> list[CatalogBook]:
                 subject=item["subject"],
                 title=item.get("title", item["subject"]),
                 page_offset=int(item.get("page_offset", 0)),
+                parent_label=parent_label,
+                chapters=_parse_catalog_chapters(item.get("chapters")),
+                lessons=_parse_catalog_lessons(item.get("lessons")),
             )
         )
     return books
+
+
+def get_catalog_book(grade: int, subject: str) -> CatalogBook | None:
+    subject_id = (subject or "").strip()
+    for book in load_catalog():
+        if book.grade == grade and book.subject == subject_id:
+            return book
+    return None
+
+
+def lookup_catalog_start_page(
+    grade: int,
+    subject: str,
+    *,
+    chapter: int | None = None,
+    lesson: int | None = None,
+    kind: str | None = None,
+) -> int | None:
+    """Resolve printed start page from manual catalog chapter/child maps."""
+    book = get_catalog_book(grade, subject)
+    if book is None:
+        return None
+    if chapter is not None:
+        for entry in book.chapters:
+            if entry.number == chapter:
+                return entry.start_page
+    if lesson is not None:
+        want_kind = _parse_catalog_kind(kind) if kind else None
+        for entry in book.lessons:
+            if entry.number != lesson:
+                continue
+            if want_kind is None:
+                # Prefer exact lesson kind; else first matching number.
+                if entry.kind == "lesson":
+                    return entry.start_page
+                continue
+            if entry.kind == want_kind:
+                return entry.start_page
+        if want_kind is None:
+            for entry in book.lessons:
+                if entry.number == lesson:
+                    return entry.start_page
+        # Session requested but only lessons exist (or vice versa).
+        if want_kind == "session":
+            for entry in book.lessons:
+                if entry.number == lesson and entry.kind == "lesson":
+                    return entry.start_page
+        if want_kind == "lesson":
+            for entry in book.lessons:
+                if entry.number == lesson and entry.kind == "session":
+                    return entry.start_page
+    return None
+
+
+_CATALOG_DIGIT_MAP = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def _normalize_catalog_title(text: str) -> str:
+    cleaned = (text or "").replace("\u200c", " ").strip().lower()
+    cleaned = cleaned.translate(_CATALOG_DIGIT_MAP)
+    cleaned = re.sub(r"[«»\"'`]", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned
+
+
+def _compact_catalog_title(text: str) -> str:
+    return _normalize_catalog_title(text).replace(" ", "")
+
+
+def _connectorless_compact(text: str) -> str:
+    """Compact title with optional Persian connectors removed for fuzzy match."""
+    cleaned = _normalize_catalog_title(text)
+    cleaned = re.sub(r"\b(?:و|با|در|از|به)\b", " ", cleaned)
+    return re.sub(r"\s+", "", cleaned)
+
+
+def _score_title_match(needle: str, title: str) -> int:
+    """Score a catalog title against a free-text needle (0 = no match)."""
+    etitle = _normalize_catalog_title(title)
+    if not etitle or not needle:
+        return 0
+    if needle == etitle:
+        return 100
+    n_compact = _compact_catalog_title(needle)
+    e_compact = _compact_catalog_title(etitle)
+    if n_compact and e_compact and (n_compact == e_compact):
+        return 98
+    n_fuzzy = _connectorless_compact(needle)
+    e_fuzzy = _connectorless_compact(etitle)
+    if n_fuzzy and e_fuzzy and n_fuzzy == e_fuzzy:
+        return 96
+    # Parenthetical / digit disambiguation: «فرهنگ بومی ۲» vs «۱»
+    n_digits = re.findall(r"\d+", needle)
+    e_digits = re.findall(r"\d+", etitle)
+    digit_bonus = 0
+    if n_digits and e_digits:
+        if n_digits[-1] == e_digits[-1]:
+            digit_bonus = 15
+        else:
+            # Wrong edition number — heavily penalize bare shared stem.
+            digit_bonus = -40
+    # Containment must stay below exact (100) so «حروف ناخوانا (۱)» beats
+    # «تمرین حروف ناخوانا (۱)» and nearer lengths win ties.
+    if needle in etitle or etitle in needle:
+        length_gap = abs(len(etitle) - len(needle))
+        return max(0, 72 + digit_bonus - length_gap)
+    if n_compact and e_compact and (
+        n_compact in e_compact or e_compact in n_compact
+    ):
+        length_gap = abs(len(e_compact) - len(n_compact))
+        return max(0, 65 + digit_bonus - length_gap // 2)
+    if n_fuzzy and e_fuzzy and (n_fuzzy in e_fuzzy or e_fuzzy in n_fuzzy):
+        length_gap = abs(len(e_fuzzy) - len(n_fuzzy))
+        return max(0, 62 + digit_bonus - length_gap // 2)
+    n_tokens = {t for t in needle.split() if len(t) >= 2}
+    e_tokens = {t for t in etitle.split() if len(t) >= 2}
+    # Ignore light connectors for token comparison.
+    connectors = {"با", "در", "از", "به"}
+    n_tokens -= connectors
+    e_tokens -= connectors
+    if n_tokens and n_tokens <= e_tokens:
+        return max(0, 55 + digit_bonus)
+    if n_tokens and e_tokens and len(n_tokens & e_tokens) >= max(2, len(n_tokens) - 1):
+        return max(0, 50 + digit_bonus)
+    return 0
+
+
+def lookup_catalog_entry_by_title(
+    grade: int, subject: str, title: str
+) -> CatalogTitleHit | None:
+    """Match a lesson/chapter title from the manual catalog (rich result)."""
+    needle = _normalize_catalog_title(title)
+    if not needle or len(needle) < 2:
+        return None
+    # Drop «تمرین» only when it is scaffolding before a unit label
+    # («تمرین درس ارزش علم»). Keep real titles like «تمرین حروف ناخوانا (۱)».
+    needle = re.sub(
+        r"^تمرین(?:‌ها|ات|های)?\s+(?=(?:درس|فصل|بخش|جلسه|مهارت|پروژه)\b)",
+        "",
+        needle,
+    ).strip()
+    for _ in range(3):
+        stripped = re.sub(
+            r"^(?:درس|فصل|بخش|جلسه|مهارت|پروژه)\s+",
+            "",
+            needle,
+        ).strip()
+        if stripped == needle:
+            break
+        needle = stripped
+    if not needle:
+        return None
+    book = get_catalog_book(grade, subject)
+    if book is None:
+        return None
+
+    candidates: list[CatalogTitleHit] = []
+    for entry in book.lessons:
+        best = 0
+        best_title = entry.title
+        for candidate_title in entry.all_titles():
+            score = _score_title_match(needle, candidate_title)
+            if score > best:
+                best = score
+                best_title = candidate_title
+        if best:
+            candidates.append(
+                CatalogTitleHit(
+                    start_page=entry.start_page,
+                    unit="lesson",
+                    number=entry.number,
+                    kind=entry.kind,
+                    title=best_title or entry.title,
+                    chapter=entry.chapter,
+                    score=best,
+                )
+            )
+    for entry in book.chapters:
+        score = _score_title_match(needle, entry.title)
+        if score:
+            candidates.append(
+                CatalogTitleHit(
+                    start_page=entry.start_page,
+                    unit="chapter",
+                    number=entry.number,
+                    kind="chapter",
+                    title=entry.title,
+                    chapter=entry.number,
+                    score=score,
+                )
+            )
+    if not candidates:
+        return None
+    # Prefer higher score, then nearer title length, then earlier unit number,
+    # then lessons over chapters. Duplicate exact titles («حل مسئله») resolve
+    # to the first occurrence in the book.
+    needle_len = len(needle)
+    candidates.sort(
+        key=lambda item: (
+            item.score,
+            -abs(len(_normalize_catalog_title(item.title or "")) - needle_len),
+            3 if item.unit == "lesson" else 1,
+            -(item.number or 10**6),
+        ),
+        reverse=True,
+    )
+    best = candidates[0]
+    return best if best.score >= 50 else None
+
+
+def lookup_catalog_by_title(grade: int, subject: str, title: str) -> int | None:
+    """Match a lesson/chapter title from the manual catalog (e.g. «ارزش علم»)."""
+    hit = lookup_catalog_entry_by_title(grade, subject, title)
+    return hit.start_page if hit is not None else None
 
 
 def grades_for_subject(subject: str) -> list[int]:
@@ -165,12 +534,42 @@ def upsert_book(book: CatalogBook) -> bool:
         "title": book.title,
         "page_offset": book.page_offset,
     }
+    if book.parent_label and book.parent_label != "فصل":
+        entry["parent_label"] = book.parent_label
+    if book.chapters:
+        entry["chapters"] = [
+            {
+                "number": ch.number,
+                "start_page": ch.start_page,
+                **({"title": ch.title} if ch.title else {}),
+            }
+            for ch in book.chapters
+        ]
+    if book.lessons:
+        entry["lessons"] = [
+            {
+                "number": les.number,
+                "start_page": les.start_page,
+                **({"title": les.title} if les.title else {}),
+                **({"chapter": les.chapter} if les.chapter is not None else {}),
+                **({"kind": les.kind} if les.kind and les.kind != "lesson" else {}),
+            }
+            for les in book.lessons
+        ]
 
     for i, existing in enumerate(books):
         if isinstance(existing, dict) and existing.get("file") == book.file:
-            if {k: existing.get(k) for k in entry} == entry:
+            # Preserve manually curated chapter/lesson maps unless caller provided new ones.
+            merged = {**existing, **entry}
+            if "chapters" not in entry and "chapters" in existing:
+                merged["chapters"] = existing["chapters"]
+            if "lessons" not in entry and "lessons" in existing:
+                merged["lessons"] = existing["lessons"]
+            if "parent_label" not in entry and "parent_label" in existing:
+                merged["parent_label"] = existing["parent_label"]
+            if merged == existing:
                 return False
-            books[i] = {**existing, **entry}
+            books[i] = merged
             _write_catalog(raw)
             return True
 
@@ -188,22 +587,49 @@ def _write_catalog(raw: dict[str, object]) -> None:
     )
 
 
+def _page_image_relpath(grade: int, subject: str, printed_page: int) -> str:
+    return f"pages/g{grade}_{subject}_p{printed_page}.png"
+
+
+def _image_only_page(
+    grade: int,
+    subject: str,
+    printed_page: int,
+) -> PageRecord | None:
+    """Build a vision-only page record when SQLite index is missing/incomplete."""
+    rel = _page_image_relpath(grade, subject, printed_page)
+    path = resolve_image_path(rel)
+    if path is None or not path.is_file():
+        return None
+    book = get_catalog_book(grade, subject)
+    title = book.title if book else SUBJECT_TITLES.get(subject, subject)
+    return PageRecord(
+        grade=grade,
+        subject=subject,
+        subject_title=title,
+        printed_page=printed_page,
+        text="",
+        image_path=rel,
+        is_scanned=True,
+        text_usable=False,
+    )
+
+
 def get_page(grade: int, subject: str, printed_page: int) -> PageRecord | None:
-    if not index_exists():
-        return None
-    with _connect() as conn:
-        row = conn.execute(
-            """
-            SELECT grade, subject, subject_title, printed_page, text, image_path,
-                   is_scanned, text_usable
-            FROM pages
-            WHERE grade = ? AND subject = ? AND printed_page = ?
-            """,
-            (grade, subject, printed_page),
-        ).fetchone()
-    if not row:
-        return None
-    return _row_to_page(row)
+    if index_exists():
+        with _connect() as conn:
+            row = conn.execute(
+                """
+                SELECT grade, subject, subject_title, printed_page, text, image_path,
+                       is_scanned, text_usable
+                FROM pages
+                WHERE grade = ? AND subject = ? AND printed_page = ?
+                """,
+                (grade, subject, printed_page),
+            ).fetchone()
+        if row:
+            return _row_to_page(row)
+    return _image_only_page(grade, subject, printed_page)
 
 
 def get_printed_page_bounds(
@@ -216,23 +642,50 @@ def get_printed_page_bounds(
     Uses only ``printed_page`` values already stored by the MinerU/indexer pipeline
     (offset already applied at index time). Does not read raw PDF page counts.
     When ``grade`` is None, aggregates across all grades for that subject.
+    Falls back to on-disk page images when the SQLite index is missing.
     """
-    if not subject or not index_exists():
+    if not subject:
         return None
-    sql = """
-        SELECT MIN(printed_page) AS min_p, MAX(printed_page) AS max_p
-        FROM pages
-        WHERE subject = ? AND printed_page > 0
-    """
-    params: list[object] = [subject]
+    if index_exists():
+        sql = """
+            SELECT MIN(printed_page) AS min_p, MAX(printed_page) AS max_p
+            FROM pages
+            WHERE subject = ? AND printed_page > 0
+        """
+        params: list[object] = [subject]
+        if grade is not None:
+            sql += " AND grade = ?"
+            params.append(grade)
+        with _connect() as conn:
+            row = conn.execute(sql, params).fetchone()
+        if row and row["min_p"] is not None and row["max_p"] is not None:
+            return int(row["min_p"]), int(row["max_p"])
+    return _disk_page_bounds(grade, subject)
+
+
+def _disk_page_bounds(
+    grade: int | None,
+    subject: str,
+) -> tuple[int, int] | None:
+    """Infer printed-page range from ``pages/g{grade}_{subject}_pN.png`` files."""
+    if not PAGES_DIR.is_dir():
+        return None
+    numbers: list[int] = []
     if grade is not None:
-        sql += " AND grade = ?"
-        params.append(grade)
-    with _connect() as conn:
-        row = conn.execute(sql, params).fetchone()
-    if not row or row["min_p"] is None or row["max_p"] is None:
+        pattern = f"g{grade}_{subject}_p*.png"
+        for path in PAGES_DIR.glob(pattern):
+            match = re.search(r"_p(\d+)\.png$", path.name)
+            if match:
+                numbers.append(int(match.group(1)))
+    else:
+        pattern = f"g*_{subject}_p*.png"
+        for path in PAGES_DIR.glob(pattern):
+            match = re.search(rf"^g\d+_{re.escape(subject)}_p(\d+)\.png$", path.name)
+            if match:
+                numbers.append(int(match.group(1)))
+    if not numbers:
         return None
-    return int(row["min_p"]), int(row["max_p"])
+    return min(numbers), max(numbers)
 
 
 def get_neighbor_pages(
@@ -258,243 +711,134 @@ def get_neighbor_pages(
     return sorted(pages, key=lambda p: p.printed_page)
 
 
-_LESSON_ORDINALS: dict[int, str] = {
-    1: "اول",
-    2: "دوم",
-    3: "سوم",
-    4: "چهارم",
-    5: "پنجم",
-    6: "ششم",
-    7: "هفتم",
-    8: "هشتم",
-    9: "نهم",
-    10: "دهم",
-    11: "یازدهم",
-    12: "دوازدهم",
-    13: "سیزدهم",
-    14: "چهاردهم",
-    15: "پانزدهم",
-    16: "شانزدهم",
-    17: "هفدهم",
-    18: "هجدهم",
-    19: "نوزدهم",
-    20: "بیستم",
-    21: "بیست و یکم",
-    22: "بیست و دوم",
-    23: "بیست و سوم",
-    24: "بیست و چهارم",
-    25: "بیست و پنجم",
-    26: "بیست و ششم",
-    27: "بیست و هفتم",
-    28: "بیست و هشتم",
-    29: "بیست و نهم",
-    30: "سی‌ام",
-    31: "سی و یکم",
-    32: "سی و دوم",
-    33: "سی و سوم",
-    34: "سی و چهارم",
-    35: "سی و پنجم",
-    36: "سی و ششم",
-    37: "سی و هفتم",
-    38: "سی و هشتم",
-    39: "سی و نهم",
-    40: "چهلم",
-}
-_LESSON_UNIT_WORDS = ("درس", "فصل")
-# Pages containing this many distinct lesson markers are treated as tables of
-# contents / unit dividers and skipped when locating a lesson's real start page.
-_LESSON_TOC_THRESHOLD = 3
-_MAX_DETECTABLE_LESSONS = 40
+_MAX_UNIT_PAGES = 40
 
 
-def _lesson_target_patterns(lesson_number: int):
-    """Patterns that mark the start of a specific lesson/chapter.
-
-    PDF/OCR for RTL books often yields «3 فصل», «فصل :3», or «فصل-۳» instead of
-    a clean «فصل 3», so we accept both orders, optional punctuation, and
-    digit/ordinal forms.
-    """
-    import re as _re
-
-    ordinal = _LESSON_ORDINALS.get(lesson_number)
-    digit = str(lesson_number)
-    persian_digit = digit.translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
-    # Optional OCR junk between unit word and number (colon, dash, Persian colon).
-    sep = r"[\s:：\-–—٫.\u200c]{0,4}"
-    patterns: list = []
-    for unit in _LESSON_UNIT_WORDS:
-        if ordinal:
-            patterns.append(_re.compile(rf"{unit}{sep}{ordinal}"))
-            patterns.append(_re.compile(rf"{ordinal}{sep}{unit}"))
-        for num in {digit, persian_digit}:
-            patterns.append(_re.compile(rf"{unit}{sep}{num}\b"))
-            patterns.append(_re.compile(rf"(?<!\d){num}{sep}{unit}"))
-            # OCR often drops the word boundary after Persian digits.
-            patterns.append(_re.compile(rf"{unit}{sep}{num}(?!\d)"))
-    return patterns
-
-
-def lesson_search(grade: int, subject: str, lesson_number: int) -> PageRecord | None:
-    """Locate the start page of a lesson/chapter (درس/فصل) within a book.
-
-    Lesson headers appear both on the table-of-contents pages (which list many
-    lessons) and on the real lesson page (which references only its own). We
-    pick the candidate page with the fewest distinct lesson markers.
-    """
-    if lesson_number < 1 or not index_exists():
-        return None
-
-    target_patterns = _lesson_target_patterns(lesson_number)
-    patterns_by_number = {
-        n: _lesson_target_patterns(n) for n in range(1, _MAX_DETECTABLE_LESSONS + 1)
-    }
-
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT grade, subject, subject_title, printed_page, text, image_path,
-                   is_scanned, text_usable
-            FROM pages
-            WHERE grade = ? AND subject = ? AND printed_page > 0
-            ORDER BY printed_page
-            """,
-            (grade, subject),
-        ).fetchall()
-
-    candidates: list[tuple[int, int, int, sqlite3.Row]] = []
-    for row in rows:
-        text = str(row["text"] or "")
-        if not any(p.search(text) for p in target_patterns):
-            continue
-        distinct = sum(
-            1
-            for n, patterns in patterns_by_number.items()
-            if any(p.search(text) for p in patterns)
-        )
-        head = text[:_LESSON_HEADER_CHARS]
-        not_in_header = 0 if any(p.search(head) for p in target_patterns) else 1
-        candidates.append((distinct, not_in_header, int(row["printed_page"]), row))
-
-    if not candidates:
-        return None
-
-    filtered = [c for c in candidates if c[0] < _LESSON_TOC_THRESHOLD]
-    pool = filtered or candidates
-    # Prefer real chapter openers (header + few markers) over TOC-like pages.
-    pool.sort(key=lambda c: (c[0], c[1], c[2]))
-    return _row_to_page(pool[0][3])
-
-
-_MAX_LESSON_PAGES = 14
-
-
-def list_lesson_starts(grade: int, subject: str) -> list[tuple[int, int]]:
-    """Return [(lesson_number, start_page), ...] sorted by start page.
-
-    Single pass over the book pages (avoids N full scans).
-    Prefers chapter-opener pages (header-zone match, few distinct markers).
-    """
-    if not index_exists():
+def list_lesson_starts(
+    grade: int,
+    subject: str,
+    *,
+    kind: str | None = None,
+) -> list[tuple[int, int]]:
+    """Return [(number, start_page), ...] from catalog, sorted by start page."""
+    book = get_catalog_book(grade, subject)
+    if book is None:
         return []
-
-    patterns_by_number = {
-        n: _lesson_target_patterns(n) for n in range(1, _MAX_DETECTABLE_LESSONS + 1)
-    }
-    # lesson_number -> best (distinct_count, not_in_header, printed_page)
-    best: dict[int, tuple[int, int, int]] = {}
-
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT printed_page, text
-            FROM pages
-            WHERE grade = ? AND subject = ? AND printed_page > 0
-            ORDER BY printed_page
-            """,
-            (grade, subject),
-        ).fetchall()
-
-    for row in rows:
-        text = str(row["text"] or "")
-        if not text.strip():
-            continue
-        present = [
-            n
-            for n, patterns in patterns_by_number.items()
-            if any(p.search(text) for p in patterns)
-        ]
-        if not present:
-            continue
-        distinct = len(present)
-        page = int(row["printed_page"])
-        head = text[:_LESSON_HEADER_CHARS]
-        for number in present:
-            patterns = patterns_by_number[number]
-            not_in_header = 0 if any(p.search(head) for p in patterns) else 1
-            prev = best.get(number)
-            # Prefer non-TOC, header-zone hits, then earlier pages.
-            score = (distinct, not_in_header, page)
-            if prev is None or score < prev:
-                best[number] = score
-
-    starts = [
-        (number, page)
-        for number, (distinct, _h, page) in best.items()
-        if distinct < _LESSON_TOC_THRESHOLD
-    ]
-    if not starts:
-        # Fall back to whatever we saw (including TOC-heavy pages).
-        starts = [(number, page) for number, (_d, _h, page) in best.items()]
-    starts.sort(key=lambda item: item[1])
-    deduped: list[tuple[int, int]] = []
-    seen_pages: set[int] = set()
-    for number, page in starts:
-        if page in seen_pages:
-            continue
-        seen_pages.add(page)
-        deduped.append((number, page))
-    return deduped
+    want = _parse_catalog_kind(kind) if kind else None
+    starts: list[tuple[int, int]] = []
+    for entry in book.lessons:
+        if want is not None and entry.kind != want:
+            # Allow lesson↔session soft match when filtering for either.
+            if not (
+                want in {"lesson", "session"}
+                and entry.kind in {"lesson", "session"}
+            ):
+                continue
+        starts.append((entry.number, entry.start_page))
+    starts.sort(key=lambda item: (item[1], item[0]))
+    return starts
 
 
-# Minimum distinct lesson/chapter headers before we trust max/min for
-# lesson_out_of_range. Sparse OCR (e.g. only «فصل 7» found) must not reject
-# legitimate requests for درس ۳ as out-of-range — fall through to lesson_missing.
-_MIN_TRUSTED_LESSON_MARKERS = 3
-# Detected lessons must cover at least this fraction of 1..max to count as a
-# real chapter map (avoids {1, 17} from TOC noise looking contiguous).
-_MIN_LESSON_COVERAGE_RATIO = 0.55
-# Prefer درس/فصل markers near the top of the page (real chapter openers).
-_LESSON_HEADER_CHARS = 320
+def list_chapter_starts(grade: int, subject: str) -> list[tuple[int, int]]:
+    book = get_catalog_book(grade, subject)
+    if book is None:
+        return []
+    starts = [(ch.number, ch.start_page) for ch in book.chapters]
+    starts.sort(key=lambda item: (item[1], item[0]))
+    return starts
 
 
 def get_lesson_bounds(
-    grade: int | None, subject: str | None
+    grade: int | None,
+    subject: str | None,
+    *,
+    kind: str | None = None,
 ) -> tuple[int, int] | None:
-    """Return trustworthy (min_lesson, max_lesson), or None if the map is weak.
-
-    Books without a reliable درس/فصل map must return None so retrieve falls
-    through to lesson_missing (ask for page/photo) instead of a false
-    lesson_out_of_range when only one stray header was OCR'd.
-    """
+    """Return (min_number, max_number) for catalog children of the given kind."""
     if grade is None or not subject:
         return None
-    starts = list_lesson_starts(grade, subject)
+    book = get_catalog_book(grade, subject)
+    if book is None or not book.lessons:
+        return None
+    want = _parse_catalog_kind(kind) if kind else "lesson"
+    numbers = sorted(
+        {
+            e.number
+            for e in book.lessons
+            if e.kind == want
+            or (
+                want in {"lesson", "session"}
+                and e.kind in {"lesson", "session"}
+            )
+        }
+    )
+    if not numbers:
+        # Fall back to all child numbers when kind filter empty (topic-only books).
+        if kind is None:
+            numbers = sorted({e.number for e in book.lessons})
+        if not numbers:
+            return None
+    return numbers[0], numbers[-1]
+
+
+def get_chapter_bounds(grade: int | None, subject: str | None) -> tuple[int, int] | None:
+    if grade is None or not subject:
+        return None
+    starts = list_chapter_starts(grade, subject)
     if not starts:
         return None
     numbers = sorted({n for n, _ in starts})
-    if len(numbers) < _MIN_TRUSTED_LESSON_MARKERS:
+    return numbers[0], numbers[-1]
+
+
+def _span_end_from_starts(
+    start_page: int,
+    starts: list[tuple[int, int]],
+    *,
+    max_pages: int,
+    book_max_page: int | None,
+) -> int:
+    end = start_page + max_pages - 1
+    for _number, other_start in starts:
+        if other_start > start_page:
+            end = min(end, other_start - 1)
+            break
+    else:
+        if book_max_page is not None and book_max_page >= start_page:
+            end = min(end, book_max_page)
+    if end < start_page:
+        end = start_page
+    return end
+
+
+def _book_max_printed_page(grade: int, subject: str) -> int | None:
+    bounds = get_printed_page_bounds(grade, subject)
+    return bounds[1] if bounds else None
+
+
+def _collect_pages(grade: int, subject: str, start: int, end: int) -> list[PageRecord]:
+    pages: list[PageRecord] = []
+    for printed in range(start, end + 1):
+        record = get_page(grade, subject, printed)
+        if record:
+            pages.append(record)
+    return pages
+
+
+def lesson_search(
+    grade: int,
+    subject: str,
+    lesson_number: int,
+    *,
+    kind: str | None = None,
+) -> PageRecord | None:
+    """Locate the catalog start page of a child unit and load it from the index."""
+    start = lookup_catalog_start_page(
+        grade, subject, lesson=lesson_number, kind=kind
+    )
+    if start is None:
         return None
-    # Incomplete maps that skip درس/فصل ۱ (e.g. only {2,3,4}) are not trusted
-    # for out-of-range — otherwise «درس اول» is wrongly rejected.
-    if numbers[0] != 1:
-        return None
-    max_n = numbers[-1]
-    if max_n < 1:
-        return None
-    coverage = len(numbers) / max_n
-    if coverage < _MIN_LESSON_COVERAGE_RATIO:
-        return None
-    return 1, max_n
+    return get_page(grade, subject, start)
 
 
 def find_lesson_containing_page(
@@ -502,10 +846,15 @@ def find_lesson_containing_page(
     subject: str,
     page: int,
 ) -> tuple[int, int, int] | None:
-    """Return (lesson_number, start_page, end_page) for the lesson containing page."""
-    starts = list_lesson_starts(grade, subject)
-    if not starts:
+    """Return (lesson_number, start_page, end_page) for the catalog unit containing page."""
+    book = get_catalog_book(grade, subject)
+    if book is None or not book.lessons:
         return None
+    # All child starts sorted by page (any kind) for contiguous spans.
+    starts = sorted(
+        [(e.number, e.start_page) for e in book.lessons],
+        key=lambda item: item[1],
+    )
     chosen: tuple[int, int] | None = None
     for number, start in starts:
         if start <= page:
@@ -515,54 +864,13 @@ def find_lesson_containing_page(
     if chosen is None:
         return None
     number, start = chosen
-    end = start
-    for other_number, other_start in starts:
-        if other_start > start:
-            end = other_start - 1
-            break
-    else:
-        # Last lesson: extend a reasonable window, capped later by get_lesson_pages.
-        end = start + _MAX_LESSON_PAGES - 1
+    book_max = _book_max_printed_page(grade, subject)
+    end = _span_end_from_starts(
+        start, starts, max_pages=_MAX_UNIT_PAGES, book_max_page=book_max
+    )
     if page < start or page > end:
-        # Page before first lesson header — treat as single-page span.
         return None
     return number, start, end
-
-
-def _lesson_marker_count(text: str) -> int:
-    """How many distinct درس/فصل numbers appear on a page (TOC pages score high)."""
-    if not text.strip():
-        return 0
-    patterns_by_number = {
-        n: _lesson_target_patterns(n) for n in range(1, _MAX_DETECTABLE_LESSONS + 1)
-    }
-    return sum(
-        1
-        for patterns in patterns_by_number.values()
-        if any(p.search(text) for p in patterns)
-    )
-
-
-def _refine_lesson_start_past_toc(
-    grade: int,
-    subject: str,
-    lesson_number: int,
-    *,
-    after_page: int,
-    scan_ahead: int = 40,
-) -> int | None:
-    """Find a non-TOC page for this lesson after a contents-list hit."""
-    target_patterns = _lesson_target_patterns(lesson_number)
-    for printed in range(after_page + 1, after_page + scan_ahead + 1):
-        record = get_page(grade, subject, printed)
-        if not record:
-            continue
-        text = record.text or ""
-        if not any(p.search(text) for p in target_patterns):
-            continue
-        if _lesson_marker_count(text) < _LESSON_TOC_THRESHOLD:
-            return printed
-    return None
 
 
 def get_lesson_pages(
@@ -571,66 +879,151 @@ def get_lesson_pages(
     *,
     lesson_number: int | None = None,
     page: int | None = None,
-    max_pages: int = _MAX_LESSON_PAGES,
+    kind: str | None = None,
+    max_pages: int = _MAX_UNIT_PAGES,
 ) -> tuple[list[PageRecord], int | None, int | None, int | None]:
-    """
-    Return (pages, lesson_number, start_page, end_page) for a whole lesson.
+    """Return (pages, lesson_number, start_page, end_page) from catalog maps.
 
-    Identify the lesson either by explicit lesson_number or by a page inside it.
+    Works with SQLite index when present; otherwise falls back to on-disk page images.
     """
-    if not index_exists():
-        return [], None, None, None
+    book = get_catalog_book(grade, subject)
+    all_starts = (
+        sorted([(e.number, e.start_page) for e in book.lessons], key=lambda i: i[1])
+        if book
+        else []
+    )
+    book_max = _book_max_printed_page(grade, subject)
 
     start: int | None = None
     end: int | None = None
-    resolved_lesson = lesson_number
+    resolved = lesson_number
 
     if lesson_number is not None:
-        center = lesson_search(grade, subject, lesson_number)
-        if not center:
+        start = lookup_catalog_start_page(
+            grade, subject, lesson=lesson_number, kind=kind
+        )
+        if start is None:
             return [], None, None, None
-        start = center.printed_page
-        # TOC pages list many دروس (e.g. page 29: درس چهارم + درس پنجم). Prefer a
-        # later page that opens this lesson alone; otherwise treat as missing so
-        # we ask for a real page instead of inventing from the contents list.
-        if _lesson_marker_count(center.text or "") >= _LESSON_TOC_THRESHOLD:
-            refined = _refine_lesson_start_past_toc(
-                grade, subject, lesson_number, after_page=start
-            )
-            if refined is None:
-                return [], None, None, None
-            start = refined
-        starts = list_lesson_starts(grade, subject)
-        end = start + max_pages - 1
-        for _number, other_start in starts:
-            if other_start > start:
-                end = min(end, other_start - 1)
-                break
+        end = _span_end_from_starts(
+            start, all_starts, max_pages=max_pages, book_max_page=book_max
+        )
     elif page is not None:
         found = find_lesson_containing_page(grade, subject, page)
         if not found:
-            # Fallback: current page ± a small window when headers are missing.
             single = get_page(grade, subject, page)
             return ([single] if single else []), None, page, page
-        resolved_lesson, start, end = found
+        resolved, start, end = found
     else:
         return [], None, None, None
 
     if start is None or end is None:
         return [], None, None, None
+    pages = _collect_pages(grade, subject, start, end)
+    return pages, resolved, start, end
 
-    if end < start:
-        end = start
-    if end - start + 1 > max_pages:
-        # Prefer keeping pages from the start of the lesson.
-        end = start + max_pages - 1
 
-    pages: list[PageRecord] = []
-    for printed in range(start, end + 1):
-        record = get_page(grade, subject, printed)
-        if record:
-            pages.append(record)
-    return pages, resolved_lesson, start, end
+def get_chapter_pages(
+    grade: int,
+    subject: str,
+    *,
+    chapter_number: int,
+    max_pages: int = _MAX_UNIT_PAGES,
+) -> tuple[list[PageRecord], int | None, int | None, int | None]:
+    """Return (pages, chapter_number, start_page, end_page) for a catalog parent unit."""
+    start = lookup_catalog_start_page(grade, subject, chapter=chapter_number)
+    if start is None:
+        return [], None, None, None
+    starts = list_chapter_starts(grade, subject)
+    book_max = _book_max_printed_page(grade, subject)
+    end = _span_end_from_starts(
+        start, starts, max_pages=max_pages, book_max_page=book_max
+    )
+    pages = _collect_pages(grade, subject, start, end)
+    return pages, chapter_number, start, end
+
+
+def format_catalog_outline(
+    grade: int,
+    subject: str,
+    *,
+    chapter: int | None = None,
+) -> str | None:
+    """Human-readable structure block for the LLM (labels from catalog)."""
+    book = get_catalog_book(grade, subject)
+    if book is None:
+        return None
+    parent_label = book.parent_label or "فصل"
+    lines: list[str] = [
+        f"ساختار کتاب «{book.title}» (پایه {book.grade}) — فقط از همین فهرست استفاده کن:"
+    ]
+    chapters = book.chapters
+    if chapter is not None:
+        chapters = [c for c in book.chapters if c.number == chapter]
+        if not chapters and book.chapters:
+            return None
+
+    book_max = _book_max_printed_page(grade, subject)
+    chapter_starts = list_chapter_starts(grade, subject)
+    lesson_starts = sorted(
+        [(e.number, e.start_page) for e in book.lessons],
+        key=lambda item: item[1],
+    )
+
+    def _end_for(start: int, starts: list[tuple[int, int]]) -> int:
+        return _span_end_from_starts(
+            start, starts, max_pages=_MAX_UNIT_PAGES, book_max_page=book_max
+        )
+
+    if chapters:
+        lines.append(
+            f"این کتاب {len(book.chapters)} {parent_label} و "
+            f"{len(book.lessons)} واحد فرزند دارد."
+        )
+        for ch in sorted(chapters, key=lambda c: c.number):
+            title = f" — {ch.title}" if ch.title else ""
+            ch_end = _end_for(ch.start_page, chapter_starts)
+            page_bit = (
+                f"صفحات {ch.start_page} تا {ch_end}"
+                if ch_end > ch.start_page
+                else f"از صفحه {ch.start_page}"
+            )
+            lines.append(f"{parent_label} {ch.number}{title} ({page_bit})")
+            children = [
+                e
+                for e in book.lessons
+                if e.chapter == ch.number
+            ]
+            children.sort(key=lambda e: (e.start_page, e.number))
+            for e in children:
+                et = f" — {e.title}" if e.title else ""
+                end = _end_for(e.start_page, lesson_starts)
+                page_bit = (
+                    f"صفحات {e.start_page} تا {end}"
+                    if end > e.start_page
+                    else f"صفحه {e.start_page}"
+                )
+                lines.append(
+                    f"  - {e.kind_label} {e.number}{et} ({page_bit})"
+                )
+    else:
+        # Flat book (gifts/science): list children only.
+        children = sorted(book.lessons, key=lambda e: (e.start_page, e.number))
+        if not children:
+            return None
+        lines.append(f"این کتاب {len(children)} واحد دارد.")
+        for e in children:
+            et = f" — {e.title}" if e.title else ""
+            end = _end_for(e.start_page, lesson_starts)
+            page_bit = (
+                f"صفحات {e.start_page} تا {end}"
+                if end > e.start_page
+                else f"صفحه {e.start_page}"
+            )
+            lines.append(
+                f"{e.kind_label} {e.number}{et} ({page_bit})"
+            )
+    return "\n".join(lines)
+
 
 
 def _tokenize_for_fts(text: str) -> list[str]:
@@ -800,324 +1193,3 @@ def resolve_image_path(image_path: str | None) -> Path | None:
     return None
 
 
-# --- TOC map (فصل / درس structure parsed from فهرست pages) -----------------
-
-TocKind = str  # "chapter" | "lesson" | "section"
-
-
-@dataclass
-class TocEntry:
-    grade: int
-    subject: str
-    kind: TocKind
-    number: int | None
-    title: str
-    start_page: int
-    source_pages: list[int]
-
-
-def ensure_toc_tables(conn: sqlite3.Connection | None = None) -> None:
-    """Create toc_entries / toc_jobs if missing (safe on existing indexes)."""
-    owns = conn is None
-    if owns:
-        if not INDEX_PATH.is_file():
-            return
-        conn = _connect()
-    assert conn is not None
-    try:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS toc_entries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                grade INTEGER NOT NULL,
-                subject TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                number INTEGER,
-                title TEXT NOT NULL DEFAULT '',
-                start_page INTEGER NOT NULL,
-                source_pages TEXT NOT NULL DEFAULT '[]',
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(grade, subject, kind, number, title, start_page)
-            );
-            CREATE INDEX IF NOT EXISTS idx_toc_lookup
-                ON toc_entries(grade, subject, kind, number);
-
-            CREATE TABLE IF NOT EXISTS toc_jobs (
-                grade INTEGER NOT NULL,
-                subject TEXT NOT NULL,
-                status TEXT NOT NULL,
-                error TEXT,
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                PRIMARY KEY (grade, subject)
-            );
-            """
-        )
-        if owns:
-            conn.commit()
-    finally:
-        if owns:
-            conn.close()
-
-
-def find_toc_candidate_pages(
-    grade: int,
-    subject: str,
-    *,
-    max_pages: int = 4,
-) -> list[PageRecord]:
-    """Pick فهرست / TOC-like pages from the existing index for LLM parsing."""
-    if not index_exists():
-        return []
-    ensure_toc_tables()
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT grade, subject, subject_title, printed_page, text,
-                   image_path, is_scanned, text_usable
-            FROM pages
-            WHERE grade = ? AND subject = ? AND printed_page > 0
-            ORDER BY printed_page
-            LIMIT 80
-            """,
-            (grade, subject),
-        ).fetchall()
-
-    scored: list[tuple[tuple[int, int, int], PageRecord]] = []
-    for row in rows:
-        page = _row_to_page(row)
-        text = page.text or ""
-        markers = _lesson_marker_count(text)
-        has_fehrest = "فهرست" in text
-        # Prefer early pages that look like a contents list.
-        if not has_fehrest and markers < _LESSON_TOC_THRESHOLD:
-            continue
-        # Lower score is better: fehrest first, then denser markers, then earlier page.
-        score = (0 if has_fehrest else 1, -markers, page.printed_page)
-        scored.append((score, page))
-
-    if not scored:
-        # Fallback: first few pages often hold decorative TOC with weak OCR.
-        early = [_row_to_page(r) for r in rows[:6]]
-        return [p for p in early if p.image_path][:max_pages]
-
-    scored.sort(key=lambda item: item[0])
-    # Keep a contiguous cluster around the best hit when possible.
-    best_pages = [item[1] for item in scored[: max_pages * 2]]
-    best_pages.sort(key=lambda p: p.printed_page)
-    if not best_pages:
-        return []
-    # Prefer consecutive pages starting at the earliest strong hit.
-    start = best_pages[0].printed_page
-    cluster = [p for p in best_pages if start <= p.printed_page <= start + max_pages]
-    if len(cluster) < 2:
-        cluster = best_pages[:max_pages]
-    return cluster[:max_pages]
-
-
-def get_toc_job_status(grade: int, subject: str) -> str | None:
-    if not index_exists():
-        return None
-    ensure_toc_tables()
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT status, updated_at FROM toc_jobs WHERE grade = ? AND subject = ?",
-            (grade, subject),
-        ).fetchone()
-    if not row:
-        return None
-    status = str(row["status"])
-    # Stale "running" after crash/timeout would permanently block TOC rebuild.
-    if status == "running":
-        updated = str(row["updated_at"] or "")
-        try:
-            # SQLite datetime('now') is UTC naive "YYYY-MM-DD HH:MM:SS"
-            from datetime import datetime, timezone
-
-            started = datetime.strptime(updated, "%Y-%m-%d %H:%M:%S").replace(
-                tzinfo=timezone.utc
-            )
-            age = (datetime.now(timezone.utc) - started).total_seconds()
-            if age > 45:
-                set_toc_job_status(grade, subject, "error", "stale running job cleared")
-                return "error"
-        except ValueError:
-            set_toc_job_status(grade, subject, "error", "invalid running timestamp")
-            return "error"
-    return status
-
-
-def set_toc_job_status(
-    grade: int,
-    subject: str,
-    status: str,
-    error: str | None = None,
-) -> None:
-    if not index_exists():
-        return
-    ensure_toc_tables()
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO toc_jobs(grade, subject, status, error, updated_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
-            ON CONFLICT(grade, subject) DO UPDATE SET
-                status = excluded.status,
-                error = excluded.error,
-                updated_at = datetime('now')
-            """,
-            (grade, subject, status, error),
-        )
-        conn.commit()
-
-
-def clear_toc_entries(grade: int, subject: str) -> None:
-    if not index_exists():
-        return
-    ensure_toc_tables()
-    with _connect() as conn:
-        conn.execute(
-            "DELETE FROM toc_entries WHERE grade = ? AND subject = ?",
-            (grade, subject),
-        )
-        conn.commit()
-
-
-def save_toc_entries(grade: int, subject: str, entries: list[TocEntry]) -> None:
-    if not index_exists():
-        return
-    ensure_toc_tables()
-    with _connect() as conn:
-        conn.execute(
-            "DELETE FROM toc_entries WHERE grade = ? AND subject = ?",
-            (grade, subject),
-        )
-        for entry in entries:
-            conn.execute(
-                """
-                INSERT INTO toc_entries(
-                    grade, subject, kind, number, title, start_page,
-                    source_pages, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-                """,
-                (
-                    grade,
-                    subject,
-                    entry.kind,
-                    entry.number,
-                    entry.title,
-                    entry.start_page,
-                    json.dumps(entry.source_pages, ensure_ascii=False),
-                ),
-            )
-        conn.commit()
-
-
-def list_toc_entries(grade: int, subject: str) -> list[TocEntry]:
-    if not index_exists():
-        return []
-    ensure_toc_tables()
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT grade, subject, kind, number, title, start_page, source_pages
-            FROM toc_entries
-            WHERE grade = ? AND subject = ?
-            ORDER BY kind, number, start_page
-            """,
-            (grade, subject),
-        ).fetchall()
-    out: list[TocEntry] = []
-    for row in rows:
-        raw_pages = row["source_pages"] or "[]"
-        try:
-            pages = [int(p) for p in json.loads(raw_pages)]
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pages = []
-        out.append(
-            TocEntry(
-                grade=int(row["grade"]),
-                subject=str(row["subject"]),
-                kind=str(row["kind"]),
-                number=int(row["number"]) if row["number"] is not None else None,
-                title=str(row["title"] or ""),
-                start_page=int(row["start_page"]),
-                source_pages=pages,
-            )
-        )
-    return out
-
-
-def toc_map_ready(grade: int, subject: str) -> bool:
-    return get_toc_job_status(grade, subject) == "ok" and bool(
-        list_toc_entries(grade, subject)
-    )
-
-
-def resolve_page_from_toc(
-    grade: int,
-    subject: str,
-    *,
-    chapter: int | None = None,
-    lesson: int | None = None,
-) -> int | None:
-    """Return start_page from cached TOC for chapter and/or lesson number."""
-    entries = list_toc_entries(grade, subject)
-    if not entries:
-        return None
-    if chapter is not None:
-        for entry in entries:
-            if entry.kind == "chapter" and entry.number == chapter:
-                return entry.start_page
-    if lesson is not None:
-        for entry in entries:
-            if entry.kind == "lesson" and entry.number == lesson:
-                return entry.start_page
-    return None
-
-
-def _normalize_toc_title(text: str) -> str:
-    cleaned = (text or "").replace("\u200c", " ").strip().lower()
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    cleaned = re.sub(r"^[«»\"'`]+|[«»\"'`]+$", "", cleaned)
-    return cleaned
-
-
-def resolve_page_from_toc_title(
-    grade: int,
-    subject: str,
-    title: str,
-) -> int | None:
-    """Match a lesson/section/chapter title in cached TOC (e.g. «ارزش علم»)."""
-    needle = _normalize_toc_title(title)
-    if not needle or len(needle) < 2:
-        return None
-    entries = list_toc_entries(grade, subject)
-    if not entries:
-        return None
-
-    best_page: int | None = None
-    best_score = 0
-    best_kind_rank = -1
-    kind_rank = {"lesson": 3, "section": 2, "chapter": 1}
-    for entry in entries:
-        if entry.kind not in kind_rank:
-            continue
-        etitle = _normalize_toc_title(entry.title)
-        if not etitle:
-            continue
-        score = 0
-        if needle == etitle:
-            score = 100
-        elif needle in etitle or etitle in needle:
-            score = 70
-        else:
-            n_tokens = {t for t in needle.split() if len(t) >= 2}
-            e_tokens = {t for t in etitle.split() if len(t) >= 2}
-            if n_tokens and n_tokens <= e_tokens:
-                score = 55
-        rank = kind_rank[entry.kind]
-        if score > best_score or (score == best_score and rank > best_kind_rank):
-            best_score = score
-            best_kind_rank = rank
-            best_page = entry.start_page
-    return best_page if best_score >= 55 else None

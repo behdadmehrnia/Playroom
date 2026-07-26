@@ -23,10 +23,10 @@ _TEXTBOOK_PAGE_QUERY_RE = re.compile(
     r"(?:صفحه[\s\u200c]*[ٔةهی]?|ص\.?)\s*[\d۰-۹٠-٩]+",
     re.IGNORECASE,
 )
-# Anchor detection for Persian number-words like «بیست و یکم»:
-# we only need to detect the presence of the page marker keyword.
+# Anchor detection for Persian number-words like «بیست و یکم».
+# Never treat the «ص» inside «فصل» as a page marker.
 _TEXTBOOK_PAGE_MARKER_RE = re.compile(
-    r"(?:صفحه[\s\u200c]*[ٔةهی]?|ص\.?)",
+    r"(?:صفحه[\s\u200c]*[ٔةهی]?|ص\.(?=\s|$)|(?<![\u0600-\u06FFa-zA-Z])ص(?=\s*[\d۰-۹٠-٩]))",
     re.IGNORECASE,
 )
 # Lesson reference only (درس دوازدهم، درس ۱۲) — not فصل.
@@ -36,18 +36,32 @@ _TEXTBOOK_LESSON_ONLY_RE = re.compile(
     r"یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم)",
     re.IGNORECASE,
 )
-# Chapter reference only (فصل سوم، فصل ۱۲).
+# Chapter / parent reference (فصل سوم، بخش ۱۲).
 _TEXTBOOK_CHAPTER_ONLY_RE = re.compile(
-    r"فصل\s*(?:[\d۰-۹٠-٩]+|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش|"
+    r"(?:فصل|بخش)\s*(?:[\d۰-۹٠-٩]+|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش|"
     r"هفتم|هفت|هشتم|هشت|نهم|نه|دهم|ده|"
     r"یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم)",
     re.IGNORECASE,
 )
-# Either درس or فصل (session-switch / help heuristics).
+# Either درس/فصل or other catalog unit labels (session-switch / help heuristics).
 _TEXTBOOK_LESSON_RE = re.compile(
-    r"(?:درس|فصل)\s*(?:[\d۰-۹٠-٩]+|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش|"
+    r"(?:درس|فصل|بخش|جلسه|مهارت|پروژه)\s*(?:[\d۰-۹٠-٩]+|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش|"
     r"هفتم|هفت|هشتم|هشت|نهم|نه|دهم|ده|"
     r"یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم)",
+    re.IGNORECASE,
+)
+_TEXTBOOK_OUTLINE_RE = re.compile(
+    r"(?:"
+    r"(?:لیست|فهرست)\s*(?:کن\s*)?(?:همهٔ?\s*)?(?:ی\s*)?"
+    r"(?:فصل|فصول|بخش|درس|دروس|جلسه|جلسات|مهارت|پروژه|موضوع)"
+    r"(?:[\u200c\s]*ها[یي]?)?"
+    r"|(?:فصول|دروس|جلسات)\b"
+    r"|(?:فصل|بخش|درس|جلسه|مهارت|پروژه)(?:[\u200c\s]*ها[یي]?)\b"
+    r"|ساختار\s*کتاب"
+    r"|فهرست\s*مطالب"
+    r"|(?:فصول|دروس|فصل|درس|بخش)(?:[\u200c\s]*ها[یي]?)?(?:[\u200c\s]*[ایش]+)?\s*"
+    r"(?:چیه|چیه\؟|چی\b|چیست|کدامند|کدومن|کدامن)"
+    r")",
     re.IGNORECASE,
 )
 # Explicit page number after a page marker (Persian or ASCII digits).
@@ -264,6 +278,8 @@ def looks_like_textbook_page_query(text: str) -> bool:
         return True
     if _textbook_wants_whole_lesson(text):
         return True
+    if _textbook_wants_outline(text):
+        return True
     if _textbook_has_topic_intent(text):
         return True
     has_page = bool(_TEXTBOOK_PAGE_MARKER_RE.search(text))
@@ -289,11 +305,18 @@ def looks_like_textbook_session_switch(text: str) -> bool:
         return True
     if _textbook_wants_whole_lesson(text):
         return True
+    if _textbook_wants_outline(text):
+        return True
     has_page_ref = _textbook_has_page_reference(text)
     has_lesson = _textbook_has_lesson(text)
     has_grade = _textbook_has_grade(text)
     has_subject = _extract_subject_token(text) is not None
-    if (has_page_ref or has_lesson) and (has_grade or has_subject):
+    # «فصل چهارم» alone is enough — grade/subject may already be sticky in chat.
+    if has_page_ref or has_lesson:
+        return True
+    if has_subject and has_grade and any(
+        m in text for m in ("کتاب", "تمرین", "درس", "دروس", "فصل", "لیست", "فهرست")
+    ):
         return True
     return False
 
@@ -306,7 +329,15 @@ _TEXTBOOK_HELP_MARKERS: tuple[str, ...] = (
     "تمرین",
     "صفحه",
     "درس",
+    "دروس",
     "فصل",
+    "فصول",
+    "بخش",
+    "جلسه",
+    "مهارت",
+    "پروژه",
+    "لیست",
+    "فهرست",
     "مسئله",
     "مسأله",
     "سوال",
@@ -388,6 +419,10 @@ def _textbook_wants_whole_lesson(text: str) -> bool:
     return bool(_TEXTBOOK_WHOLE_LESSON_RE.search(text))
 
 
+def _textbook_wants_outline(text: str) -> bool:
+    return bool(_TEXTBOOK_OUTLINE_RE.search(text))
+
+
 def _textbook_has_page(text: str) -> bool:
     return bool(_TEXTBOOK_PAGE_MARKER_RE.search(text))
 
@@ -409,6 +444,8 @@ def _textbook_has_page_reference(text: str) -> bool:
 def _textbook_has_anchor(text: str) -> bool:
     """A concrete reference the service can resolve: page, lesson, or relative page."""
     if _relative_page_delta(text) != 0:
+        return True
+    if _textbook_wants_outline(text):
         return True
     return _textbook_has_page_reference(text) or _textbook_has_lesson(text)
 
@@ -442,6 +479,16 @@ def _extract_grade_token(text: str) -> str | None:
     has_grade_keyword = any(kw in text for kw in ("پایه", "کلاس", "دبستان"))
     lesson_context = _textbook_has_lesson(text)
 
+    # Explicit پایه/کلاس/دبستان always wins over shorthand «فارسی پنجم» /
+    # digit-before-subject guesses («درس 25 قرآن» must not become پایه ۵).
+    anchored = re.search(
+        r"(?:پایه|کلاس|دبستان)\s*([3-6۳-۶٣-٦]|سوم|چهارم|پنجم|ششم)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if anchored:
+        return anchored.group(1)
+
     # «فارسی چهارم»، «ریاضی ششم» — common grade shorthand without کلاس/پایه.
     # Must win even when the same turn also has «فصل هشتم».
     subject_anchored = _extract_grade_after_subject(text)
@@ -450,15 +497,6 @@ def _extract_grade_token(text: str) -> str | None:
 
     if (exercise_context or lesson_context) and not has_grade_keyword:
         return None
-
-    # Prefer پایه/کلاس/دبستان anchors so «فصل سوم … کلاس چهارم» → چهارم, not None.
-    anchored = re.search(
-        r"(?:پایه|کلاس|دبستان)\s*([3-6۳-۶٣-٦]|سوم|چهارم|پنجم|ششم)",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if anchored:
-        return anchored.group(1)
 
     for match in _TEXTBOOK_GRADE_TOKEN_RE.finditer(text):
         token = match.group(0).strip()
@@ -512,13 +550,14 @@ def _extract_grade_after_subject(text: str) -> str | None:
       - «ریاضی‌ام چهارمه»
     """
     # Longest book names first so «هدیه های آسمان» beats bare «هدیه».
+    unit_labels = r"درس|فصل|بخش|جلسه|مهارت|پروژه"
     for phrase in sorted(_TEXTBOOK_SUBJECT_PHRASES, key=len, reverse=True):
         escaped = re.escape(phrase)
         # subject (+ optional «‌ام/م») then grade
         match = re.search(
             rf"{escaped}(?:[\u200c]*ا?م)?"
             rf"\s*({_GRADE_AFTER_SUBJECT_ALT}){_GRADE_SPOKEN_TAIL}"
-            rf"(?!\s*(?:درس|فصل))",
+            rf"(?!\s*(?:{unit_labels}))",
             text,
             flags=re.IGNORECASE,
         )
@@ -526,12 +565,21 @@ def _extract_grade_after_subject(text: str) -> str | None:
             return _normalize_grade_ordinal_token(match.group(1))
         # grade then subject («چهارم ریاضی»، «۵ فارسی»)
         match = re.search(
-            rf"(?<!(?:درس|فصل)\s)({_GRADE_AFTER_SUBJECT_ALT}){_GRADE_SPOKEN_TAIL}"
+            rf"({_GRADE_AFTER_SUBJECT_ALT}){_GRADE_SPOKEN_TAIL}"
             rf"\s*{escaped}",
             text,
             flags=re.IGNORECASE,
         )
         if match:
+            # Reject «درس ششم فارسی» / «مهارت ۳ کار و فناوری» as grade.
+            prefix = text[max(0, match.start() - 12) : match.start()]
+            if re.search(rf"(?:{unit_labels})\s*$", prefix):
+                continue
+            # Reject ones-digit of a larger number («درس 25 قرآن» ≠ پایه ۵).
+            if match.start() > 0:
+                prev = text[match.start() - 1]
+                if prev.isdigit() or prev in "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩":
+                    continue
             return _normalize_grade_ordinal_token(match.group(1))
     return None
 
@@ -542,6 +590,8 @@ def _extract_subject_token(text: str) -> str | None:
     Prefers the longest phrase (e.g. «هدیه های آسمان» over bare «هدیه»).
     When several subjects appear (e.g. «ریاضی تموم شد بریم سراغ فارسی صفحه ۴۱»),
     prefer the one closest to the page marker; otherwise the last mentioned.
+    Chapter titles that contain words like «اجتماعی» must not beat the real
+    book name next to «پایه/کلاس/کتاب».
     """
     hits: list[tuple[int, int, str]] = []  # start, length, phrase
     for phrase in _TEXTBOOK_SUBJECT_PHRASES:
@@ -559,6 +609,13 @@ def _extract_subject_token(text: str) -> str | None:
     if page_match:
         page_pos = page_match.start()
         hits.sort(key=lambda item: (abs(item[0] - page_pos), -item[1], -item[0]))
+        return hits[0][2]
+
+    # Prefer subject nearest to پایه/کلاس/کتاب (real book locator).
+    anchor = re.search(r"(?:پایه|کلاس|کتاب)", text)
+    if anchor:
+        anchor_pos = anchor.start()
+        hits.sort(key=lambda item: (abs(item[0] - anchor_pos), -item[1], -item[0]))
         return hits[0][2]
 
     # Prefer longer phrases, then later mentions.
@@ -644,10 +701,11 @@ def _extract_named_lesson_title(text: str) -> str | None:
     """Return a bare lesson/section title like «ارزش علم» when the turn is that title.
 
     Numeric «درس سوم» / «فصل سوم» are handled separately; this catches the common
-    case where the child answers with the lesson *name* after we asked for it.
+    case where the child answers with the lesson *name* after we asked for it,
+    or says «درس میرزا کوچک خان فارسی ششم».
     """
     raw = (text or "").strip()
-    if not raw or len(raw) > 48:
+    if not raw or len(raw) > 80:
         return None
     if not any("\u0600" <= ch <= "\u06FF" for ch in raw):
         return None
@@ -655,44 +713,75 @@ def _extract_named_lesson_title(text: str) -> str | None:
         return None
     if _relative_page_delta(raw) != 0:
         return None
+    if _textbook_wants_outline(raw):
+        return None
+
+    from api.textbook.app.parser import normalize_digits
+
+    candidate = normalize_digits(raw)
 
     # «درس چهارم ارزش علم» → keep the title after the numeric درس.
-    lesson_no = _extract_lesson_number(raw)
+    lesson_no = _extract_lesson_number(candidate)
     if lesson_no is not None:
-        from api.textbook.app.parser import normalize_digits
-
-        stripped = normalize_digits(raw)
         stripped = re.sub(
-            r"درس\s*(?:\d{1,2}|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|"
+            r"(?:درس|جلسه|مهارت|پروژه)\s*(?:\d{1,2}|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|"
             r"ششم|شش|هفتم|هفت|هشتم|هشت|نهم|نه|دهم|ده|"
             r"یازدهم|دوازدهم|سیزدهم|چهاردهم|پانزدهم|شانزدهم|هفدهم|هجدهم|نوزدهم|بیستم)"
             r"\s*",
             "",
-            stripped,
+            candidate,
             count=1,
             flags=re.IGNORECASE,
         ).strip(" ،,")
-        if stripped and 1 <= len(stripped.split()) <= 6:
-            if not any(n in stripped for n in _NAMED_LESSON_CONVERSATIONAL):
-                return stripped
+        candidate = stripped
+    else:
+        # Strip a leading bare «درس » when there is no number («درس ارزش علم»).
+        candidate = re.sub(
+            r"^(?:درس|جلسه|مهارت|پروژه)\s+",
+            "",
+            candidate,
+            count=1,
+            flags=re.IGNORECASE,
+        ).strip()
+
+    if not candidate:
         return None
 
-    # Pure chapter locator («فصل سوم») is not a title.
-    if _extract_chapter_number(raw) is not None and len(raw.split()) <= 4:
-        return None
-
-    # Strip a leading bare «درس » when there is no number («درس ارزش علم»).
-    candidate = re.sub(r"^درس\s+", "", raw, count=1, flags=re.IGNORECASE).strip()
+    # Drop book/grade scaffolding so «میرزا کوچک خان فارسی پایه ششم» → title.
+    candidate = re.sub(
+        r"(?:کتاب\s*)?(?:فارسی|ریاضی|علوم|نگارش|قرآن|هدیه(?:\s*های)?\s*آسمان|"
+        r"مطالعات(?:\s*اجتماعی)?|تفکر(?:\s*و\s*پژوهش)?|کار\s*و\s*فناوری|فناوری)"
+        r"(?:\s*(?:پایه|کلاس))?",
+        " ",
+        candidate,
+        flags=re.IGNORECASE,
+    )
+    candidate = re.sub(
+        r"(?:پایه|کلاس)\s*(?:[3-6۳-۶]|سوم|چهارم|پنجم|ششم|سه|چهار|پنج|شش)م?",
+        " ",
+        candidate,
+        flags=re.IGNORECASE,
+    )
+    candidate = re.sub(
+        r"\b(?:سوم|چهارم|پنجم|ششم)\b",
+        " ",
+        candidate,
+        flags=re.IGNORECASE,
+    )
+    candidate = re.sub(r"\s+", " ", candidate).strip(" ،,")
     if not candidate:
         return None
     if any(n in candidate for n in _NAMED_LESSON_CONVERSATIONAL):
         return None
 
-    words = candidate.split()
-    if not (1 <= len(words) <= 6):
+    # Pure chapter locator left after stripping («فصل سوم») is not a title.
+    if _extract_chapter_number(candidate) is not None and len(candidate.split()) <= 4:
         return None
 
-    # Grade-only / subject-only / book+grade replies are never lesson titles.
+    words = candidate.split()
+    if not (1 <= len(words) <= 8):
+        return None
+
     grade_token = _extract_grade_token(candidate)
     subject_token = _extract_subject_token(candidate)
     if "کتاب" in candidate:
@@ -702,7 +791,6 @@ def _extract_named_lesson_title(text: str) -> str | None:
     if grade_token and subject_token:
         return None
     if grade_token and len(words) <= 3 and not subject_token:
-        # «کلاس ششم» / «ششم»
         if re.fullmatch(
             rf"(?:کلاس|پایه)?\s*{re.escape(grade_token)}م?",
             candidate.replace("\u200c", ""),
@@ -730,6 +818,9 @@ def _extract_named_lesson_title(text: str) -> str | None:
         "درک",
         "مطلب",
         "درک مطلب",
+        "لیست",
+        "فهرست",
+        "دروس",
     }
     if candidate in banned_alone:
         return None
@@ -829,10 +920,55 @@ def _resolve_relative_page(recent_user_texts: list[str]) -> int | None:
 
 
 def _extract_unit_number(text: str, *, unit: str) -> int | None:
-    """Parse «{unit} سوم» / «{unit} 3» into an int (None if absent)."""
+    """Parse «{unit} سوم» / «{unit} 3» into an int (None if absent).
+
+    Bare cardinals that start a title («درس هفت خان رستم») are ignored.
+    Morphological ordinals and digits always count as numbers.
+    """
     from api.textbook.app.parser import LESSON_ORDINAL_WORDS, normalize_digits
 
     normalized = normalize_digits(text)
+
+    def _is_bare_cardinal(token: str) -> bool:
+        cleaned = (token or "").strip()
+        if not cleaned or cleaned.isdigit() or cleaned not in LESSON_ORDINAL_WORDS:
+            return False
+        if re.search(r"(?:‌|\s)?و(?:‌|\s)?", cleaned):
+            return False
+        if cleaned.endswith(("م", "ین", "ام")):
+            return False
+        return True
+
+    def _ordinal_is_word_prefix(match: re.Match[str], source: str) -> bool:
+        end = match.end()
+        if end >= len(source):
+            return False
+        nxt = source[end]
+        return ("\u0600" <= nxt <= "\u06FF") or nxt.isalpha()
+
+    def _followed_by_title(match: re.Match[str], source: str, token: str) -> bool:
+        if not _is_bare_cardinal(token):
+            return False
+        rest = source[match.end() :].strip()
+        if not rest:
+            return False
+        if re.match(
+            r"^(?:"
+            r"کتاب|فارسی|ریاضی|علوم|نگارش|قرآن|هدیه|مطالعات|اجتماعی|تفکر|فناوری|کار|"
+            r"پایه|کلاس|صفحه|فصل|بخش|جلسه|مهارت|پروژه|دبستان|"
+            r"چی|چیه|یعنی|باشه|دیگه|دیگر|"
+            r"را\b|رو\b|و\b|،|,|\.|!|\?|؟"
+            r")",
+            rest,
+            flags=re.IGNORECASE,
+        ):
+            return False
+        next_token = re.split(r"[\s\u200c]+", rest, maxsplit=1)[0]
+        next_token = next_token.strip("،,.!?؟«»\"'")
+        if len(next_token) < 2:
+            return False
+        return any("\u0600" <= ch <= "\u06FF" for ch in next_token)
+
     digit_match = re.search(rf"{unit}\s*(\d{{1,2}})\b", normalized)
     if not digit_match:
         digit_match = re.search(rf"(?<!\d)(\d{{1,2}})\s*{unit}", normalized)
@@ -845,18 +981,44 @@ def _extract_unit_number(text: str, *, unit: str) -> int | None:
     if not word_match:
         word_match = re.search(rf"({alt})\s*{unit}", text)
     if word_match:
-        return LESSON_ORDINAL_WORDS.get(word_match.group(1))
+        token = word_match.group(1)
+        if _ordinal_is_word_prefix(word_match, text):
+            return None
+        if _followed_by_title(word_match, text, token):
+            return None
+        return LESSON_ORDINAL_WORDS.get(token)
     return None
 
 
 def _extract_lesson_number(text: str) -> int | None:
-    """Parse «درس سوم» into an int (ignores فصل)."""
-    return _extract_unit_number(text, unit="درس")
+    """Parse «درس سوم» / «مهارت ۳» / «جلسه ۵» into an int."""
+    for unit in ("مهارت", "پروژه", "جلسه", "درس"):
+        value = _extract_unit_number(text, unit=unit)
+        if value is not None:
+            return value
+    return None
+
+
+def _extract_unit_kind(text: str) -> str | None:
+    """Return catalog child kind when a labeled unit appears in text."""
+    for kind, unit in (
+        ("skill", "مهارت"),
+        ("project", "پروژه"),
+        ("session", "جلسه"),
+        ("lesson", "درس"),
+    ):
+        if _extract_unit_number(text, unit=unit) is not None:
+            return kind
+    return None
 
 
 def _extract_chapter_number(text: str) -> int | None:
-    """Parse «فصل سوم» into an int (ignores درس)."""
-    return _extract_unit_number(text, unit="فصل")
+    """Parse «فصل سوم» / «بخش ۲» into an int."""
+    for unit in ("بخش", "فصل"):
+        value = _extract_unit_number(text, unit=unit)
+        if value is not None:
+            return value
+    return None
 
 
 def resolve_textbook_scope(
@@ -883,6 +1045,8 @@ def resolve_textbook_scope(
     current_page: int | None = None
     lesson: int | None = None
     chapter: int | None = None
+    kind: str | None = None
+    wants_outline: bool = False
 
     if sticky:
         raw_grade = sticky.get("grade")
@@ -904,6 +1068,9 @@ def resolve_textbook_scope(
         raw_chapter = sticky.get("chapter")
         if isinstance(raw_chapter, int) and raw_chapter >= 1:
             chapter = raw_chapter
+        raw_kind = sticky.get("kind")
+        if isinstance(raw_kind, str) and raw_kind.strip():
+            kind = raw_kind.strip()
 
     last_assistant: str | None = None
     user_texts: list[str] = []
@@ -932,6 +1099,7 @@ def resolve_textbook_scope(
         chapter_no = _extract_chapter_number(text)
         if chapter_no is not None:
             chapter = chapter_no
+            wants_outline = False
             if (
                 _extract_page_number(text) is None
                 and _extract_bare_page_number(text) is None
@@ -942,6 +1110,10 @@ def resolve_textbook_scope(
         lesson_no = _extract_lesson_number(text)
         if lesson_no is not None:
             lesson = lesson_no
+            wants_outline = False
+            unit_kind = _extract_unit_kind(text)
+            if unit_kind is not None:
+                kind = unit_kind
             # «درس پنجم منظورم بود» after a wrong page must drop the old page,
             # otherwise page lookup wins and we keep returning out_of_range.
             if (
@@ -951,9 +1123,31 @@ def resolve_textbook_scope(
             ):
                 current_page = None
 
+        # Outline is a per-turn intent (do not stick after «فصل چهارم» follow-ups).
+        if _textbook_wants_outline(text):
+            wants_outline = True
+            current_page = None
+            # Full-book outline unless this same turn names a parent unit.
+            if _extract_chapter_number(text) is None:
+                chapter = None
+            # Drop child number so outline isn't treated as unit retrieve.
+            if _extract_lesson_number(text) is None:
+                lesson = None
+                kind = None
+        else:
+            # Later concrete turns cancel a previous outline ask.
+            if (
+                chapter_no is not None
+                or lesson_no is not None
+                or _extract_page_number(text) is not None
+                or _extract_bare_page_number(text) is not None
+            ):
+                wants_outline = False
+
         explicit_page = _extract_page_number(text)
         if explicit_page is not None:
             current_page = explicit_page
+            wants_outline = False
             continue
 
         bare_page = _extract_bare_page_number(text)
@@ -999,7 +1193,7 @@ def resolve_textbook_scope(
 
     # Named lesson title (e.g. «ارزش علم») — even when فصل is already sticky.
     # Keep the most recent title across follow-ups until a page/lesson number wins.
-    if not current_page and not lesson:
+    if not current_page and not lesson and not wants_outline:
         for idx, text in enumerate(reversed(user_texts)):
             is_latest = idx == 0
             title = _extract_named_lesson_title(text)
@@ -1020,6 +1214,7 @@ def resolve_textbook_scope(
         and not current_page
         and not lesson
         and not chapter
+        and not wants_outline
         and (
             _textbook_has_topic_intent(latest)
             or (
@@ -1034,6 +1229,27 @@ def resolve_textbook_scope(
     ):
         topic_query = latest
 
+    # Parser leftover / cleaned title (e.g. «هفت خان رستم») — prefer over raw latest.
+    if (
+        not current_page
+        and not lesson
+        and not wants_outline
+        and grade is not None
+        and subject_id
+        and latest
+    ):
+        from api.textbook.app.parser import parse_persian_query
+
+        parsed_latest = parse_persian_query(latest)
+        if parsed_latest.search_text and (
+            parsed_latest.wants_topic_search
+            or topic_query
+            or _textbook_has_topic_intent(latest)
+        ):
+            # Prefer cleaned search_text when we only had the raw utterance.
+            if not topic_query or topic_query == latest:
+                topic_query = parsed_latest.search_text
+
     return TextbookScope(
         grade=grade,
         subject=subject_kw,
@@ -1041,6 +1257,8 @@ def resolve_textbook_scope(
         page=current_page,
         lesson=lesson,
         chapter=chapter,
+        kind=kind,
+        wants_outline=wants_outline,
         topic_query=topic_query,
     )
 
@@ -1130,6 +1348,18 @@ def build_textbook_query(
 
     if anchor_idx is not None:
         anchor = recent[anchor_idx]
+        if _textbook_wants_outline(anchor):
+            scope = resolve_textbook_scope(messages, sticky=sticky, window=window)
+            if scope.has_outline_lookup():
+                return scope.compose_query()
+            subject = _lookup_subject(anchor_idx)
+            grade = _lookup_grade(anchor_idx)
+            parts = ["فهرست کتاب"]
+            if subject:
+                parts.append(subject)
+            if grade:
+                parts.append(grade)
+            return " ".join(parts) if (subject or grade) else "فهرست کتاب"
         page = _extract_page_number(anchor)
         page_words = _extract_page_word_phrase(anchor) if page is None else None
         lesson_phrase = (
@@ -1187,7 +1417,48 @@ def build_textbook_query(
             parts.append(grade)
         return " ".join(parts).strip()
 
+    # Outline / list-of-lessons without a page number.
+    if any(_textbook_wants_outline(t) for t in recent):
+        scope = resolve_textbook_scope(messages, sticky=sticky, window=window)
+        if scope.has_outline_lookup():
+            return scope.compose_query()
+        subject = _lookup_subject(latest_idx)
+        grade = _lookup_grade(latest_idx)
+        if subject or grade:
+            parts = ["فهرست کتاب"]
+            if subject:
+                parts.append(subject)
+            if grade:
+                parts.append(grade)
+            return " ".join(parts)
+
     return ""
+
+
+def _backfill_textbook_page_image(context: TextbookContext) -> TextbookContext:
+    """If retrieve asked for an image but encode missed, try once more from the index."""
+    if not context.matched or not context.needs_image:
+        return context
+    if context.images_base64 or context.image_base64:
+        return context
+    if context.grade is None or not context.subject or context.page is None:
+        return context
+    try:
+        from api.textbook.app.retrieve_service import _encode_page_image_b64
+        from api.textbook.app.store import get_page
+    except Exception:  # noqa: BLE001
+        return context
+    record = get_page(context.grade, context.subject, context.page)
+    if record is None:
+        return context
+    encoded = _encode_page_image_b64(record)
+    if not encoded:
+        return context
+    context.image_base64 = encoded
+    context.images_base64 = [encoded]
+    return context
+
+
 def _textbook_context_from_payload(data: dict[str, Any]) -> TextbookContext:
     raw_image = str(data["image_base64"]) if data.get("image_base64") else None
     images: list[str] = []
@@ -1214,6 +1485,8 @@ def _textbook_context_from_payload(data: dict[str, Any]) -> TextbookContext:
         max_page=int(data["max_page"]) if data.get("max_page") is not None else None,
         min_lesson=int(data["min_lesson"]) if data.get("min_lesson") is not None else None,
         max_lesson=int(data["max_lesson"]) if data.get("max_lesson") is not None else None,
+        min_chapter=int(data["min_chapter"]) if data.get("min_chapter") is not None else None,
+        max_chapter=int(data["max_chapter"]) if data.get("max_chapter") is not None else None,
         available_grades=(
             [int(g) for g in data["available_grades"]]
             if isinstance(data.get("available_grades"), list)
@@ -1239,16 +1512,19 @@ async def _fetch_textbook_context_local(
     page: int | None = None,
     lesson: int | None = None,
     chapter: int | None = None,
+    kind: str | None = None,
+    wants_outline: bool = False,
     llm_client: Any | None = None,
     backend_model: str | None = None,
-    toc_timeout_sec: float = 12.0,
 ) -> TextbookContext | None:
     from api.textbook.app.models import RetrieveRequest
     from api.textbook.app.retrieve_service import retrieve_context
 
+    _ = llm_client, backend_model  # kept for API compatibility with callers
+
     mode = include_image.strip().lower()
     if mode not in {"never", "auto", "always"}:
-        mode = "auto"
+        mode = "always"
 
     def _retrieve() -> TextbookContext:
         try:
@@ -1262,6 +1538,8 @@ async def _fetch_textbook_context_local(
                     page=page,
                     lesson=lesson,
                     chapter=chapter,
+                    kind=kind,
+                    wants_outline=wants_outline,
                 )
             )
         except Exception as exc:  # noqa: BLE001 — graceful degrade
@@ -1290,6 +1568,12 @@ async def _fetch_textbook_context_local(
                 max_page=int(payload["max_page"]) if payload.get("max_page") is not None else None,
                 min_lesson=int(payload["min_lesson"]) if payload.get("min_lesson") is not None else None,
                 max_lesson=int(payload["max_lesson"]) if payload.get("max_lesson") is not None else None,
+                min_chapter=(
+                    int(payload["min_chapter"]) if payload.get("min_chapter") is not None else None
+                ),
+                max_chapter=(
+                    int(payload["max_chapter"]) if payload.get("max_chapter") is not None else None
+                ),
                 available_grades=(
                     [int(g) for g in payload["available_grades"]]
                     if isinstance(payload.get("available_grades"), list)
@@ -1297,52 +1581,11 @@ async def _fetch_textbook_context_local(
                 ),
                 page_out_of_range=failure_reason == "page_out_of_range",
             )
-        return _textbook_context_from_payload(payload)
+        context = _textbook_context_from_payload(payload)
+        return _backfill_textbook_page_image(context)
 
-    # Prefer OCR/index first. On lesson/chapter miss, try TOC inline with a hard
-    # timeout (text-only LLM). Safe on ~1GB: no page PNGs, capped HTTP timeout.
-    # If TOC is slow/fails, return miss quickly and optionally continue in background.
-    context = await asyncio.to_thread(_retrieve)
-    needs_toc = bool(
-        context
-        and not context.matched
-        and context.failure_reason == "lesson_missing"
-        and grade is not None
-        and subject
-        and page is None
-        and (lesson is not None or chapter is not None)
-        and llm_client is not None
-        and backend_model
-    )
-    if needs_toc:
-        from api.textbook.app.toc_agent import ensure_toc_map, schedule_toc_map_build
-
-        built = False
-        inline_budget = min(12.0, max(6.0, toc_timeout_sec))
-        llm_budget = min(8.0, inline_budget - 1.0)
-        try:
-            built = await asyncio.wait_for(
-                ensure_toc_map(
-                    grade,
-                    subject,
-                    llm_client=llm_client,
-                    model=backend_model,
-                    llm_timeout_sec=llm_budget,
-                ),
-                timeout=inline_budget,
-            )
-        except Exception:  # noqa: BLE001 — never block/crash chat on TOC
-            built = False
-            schedule_toc_map_build(
-                grade,
-                subject,
-                llm_client=llm_client,
-                model=backend_model,
-            )
-        if built:
-            context = await asyncio.to_thread(_retrieve)
-
-    return context
+    # Chapter/lesson pages come from manual maps in catalog.json (not an LLM TOC agent).
+    return await asyncio.to_thread(_retrieve)
 
 
 async def fetch_textbook_context(
@@ -1358,6 +1601,8 @@ async def fetch_textbook_context(
     page: int | None = None,
     lesson: int | None = None,
     chapter: int | None = None,
+    kind: str | None = None,
+    wants_outline: bool = False,
     llm_client: Any | None = None,
     backend_model: str | None = None,
 ) -> TextbookContext | None:
@@ -1372,9 +1617,10 @@ async def fetch_textbook_context(
             page=page,
             lesson=lesson,
             chapter=chapter,
+            kind=kind,
+            wants_outline=wants_outline,
             llm_client=llm_client,
             backend_model=backend_model,
-            toc_timeout_sec=min(12.0, max(4.0, timeout_sec)),
         )
 
     base = _normalize_api_base_url(api_url)
@@ -1400,6 +1646,10 @@ async def fetch_textbook_context(
         payload["lesson"] = lesson
     if chapter is not None:
         payload["chapter"] = chapter
+    if kind:
+        payload["kind"] = kind
+    if wants_outline:
+        payload["wants_outline"] = True
 
     def _retrieve() -> tuple[dict[str, Any] | None, str | None]:
         try:
@@ -1438,6 +1688,12 @@ async def fetch_textbook_context(
             max_page=int(data["max_page"]) if data and data.get("max_page") is not None else None,
             min_lesson=int(data["min_lesson"]) if data and data.get("min_lesson") is not None else None,
             max_lesson=int(data["max_lesson"]) if data and data.get("max_lesson") is not None else None,
+            min_chapter=(
+                int(data["min_chapter"]) if data and data.get("min_chapter") is not None else None
+            ),
+            max_chapter=(
+                int(data["max_chapter"]) if data and data.get("max_chapter") is not None else None
+            ),
             available_grades=(
                 [int(g) for g in data["available_grades"]]
                 if data and isinstance(data.get("available_grades"), list)
@@ -1464,6 +1720,8 @@ async def fetch_textbook_context(
                 encoded = base64.b64encode(image_bytes).decode("ascii")
                 context.image_base64 = encoded
                 context.images_base64 = [encoded]
+        if not context.images_base64:
+            context = _backfill_textbook_page_image(context)
 
     return context
 def build_textbook_diag(

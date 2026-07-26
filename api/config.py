@@ -56,7 +56,7 @@ class Settings(BaseModel):
         default=DEFAULT_TEXTBOOK_TIMEOUT_SEC, ge=1.0, le=1200.0
     )
     textbook_neighbor_pages: int = Field(default=2, ge=0, le=3)
-    textbook_include_image: str = Field(default="auto")
+    textbook_include_image: str = Field(default="always")
     textbook_debug: bool = Field(default=False)
 
     # --- Web search — creative / storyteller / gamer ---
@@ -136,7 +136,7 @@ class Settings(BaseModel):
                 "YARKIDS_TEXTBOOK_REQUEST_TIMEOUT_SEC", DEFAULT_TEXTBOOK_TIMEOUT_SEC
             ),
             textbook_neighbor_pages=env_int("YARKIDS_TEXTBOOK_NEIGHBOR_PAGES", 2),
-            textbook_include_image=env("YARKIDS_TEXTBOOK_INCLUDE_IMAGE", "auto").strip().lower(),
+            textbook_include_image=env("YARKIDS_TEXTBOOK_INCLUDE_IMAGE", "always").strip().lower(),
             textbook_debug=env_bool("YARKIDS_TEXTBOOK_DEBUG", False),
             enable_web_search=env_bool("YARKIDS_ENABLE_WEB_SEARCH", True),
             web_search_provider=env("YARKIDS_WEB_SEARCH_PROVIDER", "auto").strip().lower(),

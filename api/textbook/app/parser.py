@@ -138,6 +138,7 @@ LESSON_ORDINAL_WORDS: dict[str, int] = {
     "بیست و نهم": 29,
     "سی‌ام": 30,
     "سیام": 30,
+    "سی ام": 30,
     "سی‌ویکم": 31,
     "سی و یکم": 31,
     "سی‌ودوم": 32,
@@ -167,7 +168,7 @@ _LESSON_ORDINAL_ALT = (
     "بیست‌وسوم|بیست و سوم|بیست‌وچهارم|بیست و چهارم|"
     "بیست‌وپنجم|بیست و پنجم|بیست‌وششم|بیست و ششم|"
     "بیست‌وهفتم|بیست و هفتم|بیست‌وهشتم|بیست و هشتم|"
-    "بیست‌ونهم|بیست و نهم|سی‌ام|سیام|"
+    "بیست‌ونهم|بیست و نهم|سی‌ام|سیام|سی ام|"
     "سی‌ویکم|سی و یکم|سی‌ودوم|سی و دوم|"
     "سی‌وسوم|سی و سوم|سی‌وچهارم|سی و چهارم|"
     "سی‌وپنجم|سی و پنجم|سی‌وششم|سی و ششم|"
@@ -185,9 +186,11 @@ class ParsedQuery:
     page: int | None = None
     lesson: int | None = None
     chapter: int | None = None
+    kind: str | None = None  # lesson|session|project|skill|topic
     search_text: str | None = None
     wants_topic_search: bool = False
     wants_whole_lesson: bool = False
+    wants_outline: bool = False
     confidence: float = 0.0
 
 
@@ -328,62 +331,16 @@ def parse_persian_query(text: str) -> ParsedQuery:
             if parsed_page is not None:
                 result.page = parsed_page
 
-    # Lesson (درس …) and chapter (فصل …) are distinct numbering schemes.
-    lesson_match = re.search(
-        r"درس\s*(\d{1,2})",
-        normalized,
-        flags=re.IGNORECASE,
-    )
-    if not lesson_match:
-        lesson_match = re.search(
-            r"(?<!\d)(\d{1,2})\s*درس",
-            normalized,
-            flags=re.IGNORECASE,
-        )
-    if lesson_match:
-        result.lesson = int(lesson_match.group(1))
-    else:
-        lesson_word_match = re.search(
-            rf"درس\s+({_LESSON_ORDINAL_ALT})",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if not lesson_word_match:
-            lesson_word_match = re.search(
-                rf"({_LESSON_ORDINAL_ALT})\s*درس",
-                text,
-                flags=re.IGNORECASE,
-            )
-        if lesson_word_match:
-            result.lesson = LESSON_ORDINAL_WORDS.get(lesson_word_match.group(1))
+    # Child units (درس/جلسه/مهارت/پروژه) — more specific labels win over درس.
+    child_kind, child_no = _extract_child_unit(normalized, text)
+    if child_no is not None:
+        result.lesson = child_no
+        result.kind = child_kind
 
-    chapter_match = re.search(
-        r"فصل\s*(\d{1,2})",
-        normalized,
-        flags=re.IGNORECASE,
-    )
-    if not chapter_match:
-        chapter_match = re.search(
-            r"(?<!\d)(\d{1,2})\s*فصل",
-            normalized,
-            flags=re.IGNORECASE,
-        )
-    if chapter_match:
-        result.chapter = int(chapter_match.group(1))
-    else:
-        chapter_word_match = re.search(
-            rf"فصل\s+({_LESSON_ORDINAL_ALT})",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if not chapter_word_match:
-            chapter_word_match = re.search(
-                rf"({_LESSON_ORDINAL_ALT})\s*فصل",
-                text,
-                flags=re.IGNORECASE,
-            )
-        if chapter_word_match:
-            result.chapter = LESSON_ORDINAL_WORDS.get(chapter_word_match.group(1))
+    # Parent units (فصل / بخش)
+    parent_no = _extract_parent_unit(normalized, text)
+    if parent_no is not None:
+        result.chapter = parent_no
 
     # 1) Book-level subject (prefer subject nearest to «صفحه», else last mention)
     book_subject, book_alias = _find_subject_near_page(text, lower, BOOK_SUBJECT_SYNONYMS)
@@ -417,17 +374,25 @@ def parse_persian_query(text: str) -> ParsedQuery:
             match = re.search(
                 rf"{escaped}(?:[\u200c]*ا?م)?\s*"
                 rf"([3-6۳-۶]|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش)[هة]?م?"
-                rf"(?!\s*(?:درس|فصل))",
+                rf"(?!\s*(?:درس|فصل|بخش|جلسه|مهارت|پروژه))",
                 text,
                 flags=re.IGNORECASE,
             )
             if not match:
                 match = re.search(
-                    rf"(?<!(?:درس|فصل)\s)([3-6۳-۶]|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش)[هة]?م?"
+                    rf"([3-6۳-۶]|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش)[هة]?م?"
                     rf"\s*{escaped}",
                     text,
                     flags=re.IGNORECASE,
                 )
+                if match:
+                    # Reject «درس ششم فارسی» / «مهارت سوم …» as grade.
+                    prefix = text[max(0, match.start() - 12) : match.start()]
+                    if re.search(
+                        r"(?:درس|فصل|بخش|جلسه|مهارت|پروژه)\s*$",
+                        prefix,
+                    ):
+                        match = None
             if match:
                 token = match.group(1)
                 digit = normalize_digits(token)
@@ -448,12 +413,18 @@ def parse_persian_query(text: str) -> ParsedQuery:
             # Skip when the ordinal is actually a lesson/chapter reference
             # («درس ششم» / «فصل سوم»)، not the student's grade.
             if word in text and not re.search(
-                rf"(?:درس|فصل)\s*{word}|{word}\s*(?:درس|فصل)", text
+                rf"(?:درس|فصل|بخش|جلسه|مهارت|پروژه)\s*{word}|{word}\s*(?:درس|فصل|بخش|جلسه|مهارت|پروژه)",
+                text,
             ):
                 result.grade = GRADE_WORDS[word]
                 break
 
     # Free-text topic / named-content search («میرزا کوچک خان»، «شعر ستایش»)
+    result.wants_outline = _wants_outline(text)
+    if result.wants_outline and result.kind is None:
+        outline_kind = _outline_kind_hint(text)
+        if outline_kind:
+            result.kind = outline_kind
     result.search_text = _extract_search_text(normalized, result)
     result.wants_topic_search = _wants_topic_search(text, result)
     result.wants_whole_lesson = _wants_whole_lesson(text)
@@ -474,6 +445,8 @@ def parse_persian_query(text: str) -> ParsedQuery:
         score += 0.2
     if result.wants_whole_lesson:
         score = min(score + 0.1, 1.0)
+    if result.wants_outline:
+        score = min(score + 0.15, 1.0)
     result.confidence = min(score, 1.0)
 
     return result
@@ -510,8 +483,158 @@ def _wants_whole_lesson(text: str) -> bool:
     return bool(_WHOLE_LESSON_RE.search(text))
 
 
+_OUTLINE_RE = re.compile(
+    r"(?:"
+    # «لیست فصل‌ها» / «فهرست دروس»
+    r"(?:لیست|فهرست)\s*(?:کن\s*)?(?:همهٔ?\s*)?(?:ی\s*)?"
+    r"(?:فصل|فصول|بخش|درس|دروس|جلسه|جلسات|مهارت|پروژه|موضوع)"
+    r"(?:[\u200c\s]*ها[یي]?)?"
+    # Plural forms: فصول، دروس، فصل‌ها، درس‌ها، …
+    r"|(?:فصول|دروس|جلسات)\b"
+    r"|(?:فصل|بخش|درس|جلسه|مهارت|پروژه)(?:[\u200c\s]*ها[یي]?)\b"
+    r"|ساختار\s*کتاب"
+    r"|فهرست\s*مطالب"
+    # «فصول ریاضی چیه؟» / «فصل‌هاش چی بود»
+    r"|(?:فصول|دروس|فصل|درس|بخش)(?:[\u200c\s]*ها[یي]?)?(?:[\u200c\s]*[ایش]+)?\s*"
+    r"(?:چیه|چیه\؟|چی\b|چیست|کدامند|کدومن|کدامن)"
+    r")",
+    flags=re.IGNORECASE,
+)
+
+
+def _wants_outline(text: str) -> bool:
+    return bool(_OUTLINE_RE.search(text))
+
+
+def _outline_kind_hint(text: str) -> str | None:
+    if re.search(r"مهارت", text):
+        return "skill"
+    if re.search(r"پروژه", text):
+        return "project"
+    if re.search(r"جلسه|جلسات", text):
+        return "session"
+    if re.search(r"درس|دروس", text):
+        return "lesson"
+    return None
+
+
+def _extract_labeled_number(
+    normalized: str,
+    original: str,
+    labels: tuple[str, ...],
+) -> int | None:
+    """Parse «برچسب N» / «N برچسب» / «برچسب سوم» for any of the given labels.
+
+    Bare cardinals that start a title («درس هفت خان رستم») are ignored.
+    Morphological ordinals («هفتم»، «سی و یکم») and digits always count as numbers
+    even when a title follows («درس چهارم ارزش علم»).
+    """
+    alt = "|".join(re.escape(label) for label in labels)
+
+    def _is_bare_cardinal(token: str) -> bool:
+        """True for هفت/چهار/سه — False for هفتم/چهارم/سی‌ویکم."""
+        cleaned = (token or "").strip()
+        if not cleaned or cleaned.isdigit() or cleaned not in LESSON_ORDINAL_WORDS:
+            return False
+        if re.search(r"(?:‌|\s)?و(?:‌|\s)?", cleaned):
+            return False
+        if cleaned.endswith(("م", "ین", "ام")):
+            return False
+        return True
+
+    def _ordinal_is_word_prefix(match: re.Match[str], source: str) -> bool:
+        """True when «درس دو» is only the start of «درس دوستی»."""
+        end = match.end()
+        if end >= len(source):
+            return False
+        nxt = source[end]
+        return ("\u0600" <= nxt <= "\u06FF") or nxt.isalpha()
+
+    def _followed_by_title(match: re.Match[str], source: str, token: str) -> bool:
+        if not _is_bare_cardinal(token):
+            return False
+        rest = source[match.end() :].strip()
+        if not rest:
+            return False
+        if re.match(
+            r"^(?:"
+            r"کتاب|فارسی|ریاضی|علوم|نگارش|قرآن|هدیه|مطالعات|اجتماعی|تفکر|فناوری|کار|"
+            r"پایه|کلاس|صفحه|فصل|بخش|جلسه|مهارت|پروژه|دبستان|"
+            r"چی|چیه|یعنی|باشه|دیگه|دیگر|"
+            r"را\b|رو\b|و\b|،|,|\.|!|\?|؟"
+            r")",
+            rest,
+            flags=re.IGNORECASE,
+        ):
+            return False
+        next_token = re.split(r"[\s\u200c]+", rest, maxsplit=1)[0]
+        next_token = next_token.strip("،,.!?؟«»\"'")
+        if len(next_token) < 2:
+            return False
+        return any("\u0600" <= ch <= "\u06FF" for ch in next_token)
+
+    digit_match = re.search(
+        rf"(?:{alt})\s*(\d{{1,2}})",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not digit_match:
+        digit_match = re.search(
+            rf"(?<!\d)(\d{{1,2}})\s*(?:{alt})",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    if digit_match:
+        # Digits are always unit numbers («مهارت ۳ کار و فناوری»).
+        return int(digit_match.group(1))
+
+    word_match = re.search(
+        rf"(?:{alt})\s+({_LESSON_ORDINAL_ALT})",
+        original,
+        flags=re.IGNORECASE,
+    )
+    if not word_match:
+        word_match = re.search(
+            rf"({_LESSON_ORDINAL_ALT})\s*(?:{alt})",
+            original,
+            flags=re.IGNORECASE,
+        )
+    if word_match:
+        token = word_match.group(1)
+        if _ordinal_is_word_prefix(word_match, original):
+            return None
+        if _followed_by_title(word_match, original, token):
+            return None
+        return LESSON_ORDINAL_WORDS.get(token)
+    return None
+
+
+def _extract_child_unit(
+    normalized: str, original: str
+) -> tuple[str | None, int | None]:
+    """Return (kind, number) for درس/جلسه/مهارت/پروژه — first match wins by priority."""
+    for kind, labels in (
+        ("skill", ("مهارت",)),
+        ("project", ("پروژه", "پروژه‌ی", "پروژهٔ")),
+        ("session", ("جلسه", "جلسه‌ی", "جلسهٔ")),
+        ("lesson", ("درس",)),
+    ):
+        number = _extract_labeled_number(normalized, original, labels)
+        if number is not None:
+            return kind, number
+    return None, None
+
+
+def _extract_parent_unit(normalized: str, original: str) -> int | None:
+    for labels in (("بخش",), ("فصل",)):
+        number = _extract_labeled_number(normalized, original, labels)
+        if number is not None:
+            return number
+    return None
+
+
 def _wants_topic_search(text: str, parsed: ParsedQuery) -> bool:
-    if parsed.page or parsed.lesson:
+    if parsed.page or parsed.lesson or parsed.wants_outline:
         return False
     if parsed.topic:
         return True
@@ -535,8 +658,57 @@ def _extract_search_text(normalized: str, parsed: ParsedQuery) -> str | None:
         cleaned,
         flags=re.IGNORECASE,
     )
+
+    def _strip_unit_number(match: re.Match[str]) -> str:
+        """Keep «درس هفت خان رستم»; strip only real «درس هفت» / «درس ۷» locators."""
+        token = match.group(0)
+        # «درس دوستی» — ordinal is glued to the title word; keep the whole match.
+        end = match.end()
+        if end < len(cleaned):
+            nxt = cleaned[end]
+            if ("\u0600" <= nxt <= "\u06FF") or nxt.isalpha():
+                return token
+        # Digits and morphological ordinals are always locators.
+        if re.search(r"\d", token):
+            return " "
+        # Bare cardinal + title word → keep the whole phrase for search_text.
+        parts = re.split(r"\s+", token.strip(), maxsplit=1)
+        cardinal = parts[1] if len(parts) > 1 else ""
+        is_bare = bool(cardinal) and cardinal in LESSON_ORDINAL_WORDS and not (
+            cardinal.endswith(("م", "ین", "ام"))
+            or re.search(r"(?:‌|\s)?و(?:‌|\s)?", cardinal)
+        )
+        rest = cleaned[end:]
+        rest_stripped = rest.lstrip()
+        if is_bare and rest_stripped and not re.match(
+            r"^(?:"
+            r"کتاب|فارسی|ریاضی|علوم|نگارش|قرآن|هدیه|مطالعات|اجتماعی|تفکر|فناوری|کار|"
+            r"پایه|کلاس|صفحه|فصل|بخش|جلسه|مهارت|پروژه|دبستان|"
+            r"چی|چیه|یعنی|باشه|دیگه|دیگر|"
+            r"را\b|رو\b|و\b|،|,|\.|!|\?|؟|$"
+            r")",
+            rest_stripped,
+            flags=re.IGNORECASE,
+        ):
+            next_token = re.split(r"[\s\u200c]+", rest_stripped, maxsplit=1)[0]
+            next_token = next_token.strip("،,.!?؟«»\"'")
+            if len(next_token) >= 2 and any(
+                "\u0600" <= ch <= "\u06FF" for ch in next_token
+            ):
+                # Keep ordinal as part of the title; drop only the unit label.
+                return f" {cardinal} "
+        return " "
+
     cleaned = re.sub(
-        rf"(?:درس|فصل)\s*(?:\d{{1,2}}|{_LESSON_ORDINAL_ALT})",
+        rf"(?:درس|فصل|بخش|جلسه|مهارت|پروژه)\s*(?:\d{{1,2}}|{_LESSON_ORDINAL_ALT})",
+        _strip_unit_number,
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"(?:لیست|فهرست)\s*(?:کن\s*)?(?:همهٔ?\s*)?(?:ی\s*)?"
+        r"(?:فصل|فصول|بخش|درس|دروس|جلسه|جلسات|مهارت|پروژه|موضوع)"
+        r"(?:[\u200c\s]*ها[یي]?)?",
         " ",
         cleaned,
         flags=re.IGNORECASE,
@@ -547,6 +719,11 @@ def _extract_search_text(normalized: str, parsed: ParsedQuery) -> str | None:
         cleaned,
         flags=re.IGNORECASE,
     )
+    # Strip multi-word book names before tokenizing («هدیه های آسمان» → nothing,
+    # not leftover «آسمان» which falsely matches «سخن آسمانی»).
+    for phrase in sorted(BOOK_SUBJECT_SYNONYMS.keys(), key=len, reverse=True):
+        if " " in phrase or "\u200c" in phrase:
+            cleaned = cleaned.replace(phrase, " ")
     drop_words = {
         "کتاب",
         "کجا",
@@ -572,7 +749,7 @@ def _extract_search_text(normalized: str, parsed: ParsedQuery) -> str | None:
         "را",
         "از",
         "در",
-        "با",
+        # Keep «با» / «و» — titles like «تقسیم با باقی‌مانده» / «… و محاسبات …»
         "که",
         "این",
         "اون",
@@ -586,6 +763,23 @@ def _extract_search_text(normalized: str, parsed: ParsedQuery) -> str | None:
         "سراغ",
         "بعد",
         "قبل",
+        "لیست",
+        "فهرست",
+        "تمرین",
+        "تمرینات",
+        "تمرین‌ها",
+        "تمرینهای",
+        "سوال",
+        "سؤال",
+        "سوالات",
+        "سؤالات",
+        "درس",
+        "فصل",
+        "بخش",
+        "جلسه",
+        "مهارت",
+        "پروژه",
+        "آسمان",  # fragment of «هدیه های آسمان»
         *GRADE_WORDS.keys(),
         *BOOK_SUBJECT_SYNONYMS.keys(),
     }
@@ -596,4 +790,5 @@ def _extract_search_text(normalized: str, parsed: ParsedQuery) -> str | None:
     ]
     if not tokens:
         return None
-    return " ".join(tokens[:8])
+    # Keep enough tokens for long Quran / multi-clause lesson titles.
+    return " ".join(tokens[:16])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 
 from api.textbook.app.models import (
     FailureReason,
@@ -12,17 +13,19 @@ from api.textbook.app.parser import parse_persian_query
 from api.textbook.app.subjects import canonical_subject_title, topic_label
 from api.textbook.app.store import (
     PageRecord,
-    _LESSON_TOC_THRESHOLD,
-    _lesson_marker_count,
     book_exists_for_grade,
     find_lesson_containing_page,
+    format_catalog_outline,
+    get_catalog_book,
+    get_chapter_bounds,
+    get_chapter_pages,
     get_lesson_bounds,
     get_lesson_pages,
     get_neighbor_pages,
     get_page,
     get_printed_page_bounds,
     grades_for_subject,
-    lesson_search,
+    lookup_catalog_entry_by_title,
     resolve_image_path,
     topic_search,
 )
@@ -98,6 +101,8 @@ def _unmatched(
     max_page: int | None = None,
     min_lesson: int | None = None,
     max_lesson: int | None = None,
+    min_chapter: int | None = None,
+    max_chapter: int | None = None,
     available_grades: list[int] | None = None,
 ) -> RetrieveResponse:
     return RetrieveResponse(
@@ -115,6 +120,8 @@ def _unmatched(
         max_page=max_page,
         min_lesson=min_lesson,
         max_lesson=max_lesson,
+        min_chapter=min_chapter,
+        max_chapter=max_chapter,
         available_grades=available_grades,
     )
 
@@ -209,23 +216,16 @@ def _build_context_text(
 
 
 def _needs_image(page: PageRecord, include_image: IncludeImageMode) -> bool:
+    """Prefer attaching page images: OCR text is unreliable for exercises/figures."""
     if include_image == "never":
         return False
     if include_image == "always":
         return True
-    # auto
-    if page.is_scanned:
-        return True
-    if not page.text_usable:
-        return True
-    if len(page.text.strip()) < 40:
-        return True
-    if is_text_garbled(page.text):
-        return True
-    return False
+    # auto — still prefer vision whenever we have a page record
+    return True
 
 
-_MAX_LESSON_IMAGES = 2
+_MAX_LESSON_IMAGES = 3
 _LLM_IMAGE_MAX_SIDE = 1280
 _LLM_IMAGE_JPEG_QUALITY = 60
 _LLM_IMAGE_MAX_BYTES = 450_000
@@ -244,12 +244,20 @@ def _encode_page_image_b64(page: PageRecord) -> str | None:
         with Image.open(image_file) as img:
             img = img.convert("RGB")
             img.thumbnail((_LLM_IMAGE_MAX_SIDE, _LLM_IMAGE_MAX_SIDE), Image.Resampling.LANCZOS)
+            for quality in (_LLM_IMAGE_JPEG_QUALITY, 45, 35):
+                buf = BytesIO()
+                img.save(buf, format="JPEG", quality=quality, optimize=True)
+                raw = buf.getvalue()
+                if len(raw) <= _LLM_IMAGE_MAX_BYTES:
+                    return base64.b64encode(raw).decode("ascii")
+            # Last resort: smaller thumbnail
+            img.thumbnail((960, 960), Image.Resampling.LANCZOS)
             buf = BytesIO()
-            img.save(buf, format="JPEG", quality=_LLM_IMAGE_JPEG_QUALITY, optimize=True)
+            img.save(buf, format="JPEG", quality=35, optimize=True)
             raw = buf.getvalue()
-        if len(raw) > _LLM_IMAGE_MAX_BYTES:
-            return None
-        return base64.b64encode(raw).decode("ascii")
+            if len(raw) > _LLM_IMAGE_MAX_BYTES:
+                return None
+            return base64.b64encode(raw).decode("ascii")
     except Exception:  # noqa: BLE001 — image is optional
         return None
 
@@ -279,39 +287,41 @@ def _attach_lesson_images(
     include_image: IncludeImageMode,
     prefer_page: int | None = None,
 ) -> None:
-    """Attach up to N page images, prioritizing unreadable pages and the user's page."""
+    """Attach up to N page images; prefer the child's page, then earliest pages."""
     if include_image == "never" or not pages:
         return
+    # Always mark that vision is preferred for this span (even if encode fails).
+    response.needs_image = True
     ranked = sorted(
         pages,
         key=lambda p: (
             0 if prefer_page is not None and p.printed_page == prefer_page else 1,
-            0 if _needs_image(p, "auto" if include_image == "always" else include_image) else 1,
             p.printed_page,
         ),
     )
     encoded_images: list[str] = []
+    first_with_path: PageRecord | None = None
     for page in ranked:
-        if include_image != "always" and not _needs_image(page, include_image):
-            continue
+        if first_with_path is None and page.image_path:
+            first_with_path = page
         encoded = _encode_page_image_b64(page)
         if not encoded:
             continue
         encoded_images.append(encoded)
         if len(encoded_images) >= _MAX_LESSON_IMAGES:
             break
+    anchor = next((p for p in ranked if prefer_page and p.printed_page == prefer_page), None)
+    anchor = anchor or first_with_path or pages[0]
+    if anchor.grade and anchor.subject and anchor.printed_page:
+        response.image_url = (
+            f"/v1/page-image?grade={anchor.grade}"
+            f"&subject={anchor.subject}&page={anchor.printed_page}"
+        )
     if not encoded_images:
         return
-    response.needs_image = True
     response.image_base64 = encoded_images[0]
-    # Stash extras in context_text header note; pipe reads image_base64 only today.
-    # Extra images are joined with a delimiter the pipe understands.
     if len(encoded_images) > 1:
         response.image_base64 = "\n---YK_IMAGE---\n".join(encoded_images)
-    first = pages[0]
-    response.image_url = (
-        f"/v1/page-image?grade={first.grade}&subject={first.subject}&page={first.printed_page}"
-    )
 
 
 def _build_lesson_span_response(
@@ -324,19 +334,26 @@ def _build_lesson_span_response(
     confidence: float,
     prefer_page: int | None = None,
     topic: str | None = None,
+    chapter: int | None = None,
+    unit_label: str = "درس",
+    outline_prefix: str | None = None,
 ) -> RetrieveResponse:
     primary = pages[0]
     label_bits = []
+    if chapter is not None:
+        book = get_catalog_book(primary.grade, primary.subject)
+        parent = (book.parent_label if book else None) or "فصل"
+        label_bits.append(f"{parent} {chapter}")
     if lesson_number:
-        label_bits.append(f"درس {lesson_number}")
+        label_bits.append(f"{unit_label} {lesson_number}")
     if start_page and end_page:
         label_bits.append(f"صفحات {start_page} تا {end_page}")
-    span_label = " — ".join(label_bits) if label_bits else "کل درس"
+    span_label = " — ".join(label_bits) if label_bits else f"کل {unit_label}"
     header = (
         f"توجه: متن کامل «{span_label}» در ادامه آمده است "
         f"({_book_title(primary)}، پایه {primary.grade}). "
-        "برای درخواست‌هایی مثل کلمات سختِ کل درس یا بقیهٔ درس، از همهٔ این صفحات استفاده کن؛ "
-        "از کودک نخواه صفحهٔ بعد را خودش باز کند."
+        "برای درخواست‌هایی مثل کلمات سختِ کل درس یا بقیهٔ درس یا تمرین‌های این بخش، "
+        "از همهٔ این صفحات استفاده کن؛ از کودک نخواه صفحهٔ بعد را خودش باز کند."
     )
     if prefer_page is not None:
         header += (
@@ -344,7 +361,10 @@ def _build_lesson_span_response(
             f"اگر پرسید «این صفحه / محتویات صفحه»، فقط بلوک «صفحه {prefer_page}» را توصیف کن "
             "و محتوای صفحات دیگر را به آن صفحه نسبت نده."
         )
-    blocks: list[str] = [header]
+    blocks: list[str] = []
+    if outline_prefix:
+        blocks.append(outline_prefix)
+    blocks.append(header)
     all_usable = True
     for page in pages:
         block, ok = _format_page_block(page, topic=topic)
@@ -361,6 +381,8 @@ def _build_lesson_span_response(
         text_usable=all_usable,
         confidence=confidence,
         detected_topic_label=span_label,
+        lesson=lesson_number,
+        chapter=chapter,
     )
     _attach_lesson_images(
         response,
@@ -369,6 +391,40 @@ def _build_lesson_span_response(
         prefer_page=prefer_page,
     )
     return response
+
+
+def _build_outline_response(
+    *,
+    grade: int,
+    subject: str,
+    chapter: int | None,
+    confidence: float,
+) -> RetrieveResponse | None:
+    outline = format_catalog_outline(grade, subject, chapter=chapter)
+    if not outline:
+        return None
+    book = get_catalog_book(grade, subject)
+    title = book.title if book else subject
+    return RetrieveResponse(
+        matched=True,
+        match_type="catalog_outline",
+        grade=grade,
+        subject=subject,
+        subject_title=title,
+        page=None,
+        context_text=(
+            "توجه: فهرست ساختار کتاب از روی نقشهٔ رسمی catalog آمده است. "
+            "**همین فهرست را برای کودک بخوان** (عنوان و شمارهٔ واحدها). "
+            "فقط از همین برچسب‌ها (فصل/بخش/درس/جلسه/مهارت/پروژه) استفاده کن؛ "
+            "ساختار یا شمارهٔ واحدی که اینجا نیست اختراع نکن. "
+            "**ممنوع:** گفتن «لیست را ندارم» یا «کتاب‌ها ممکن است تغییر کنند».\n\n"
+            + outline
+        ),
+        text_usable=True,
+        confidence=confidence,
+        detected_topic_label="فهرست کتاب",
+        chapter=chapter,
+    )
 
 
 def _is_topic_search_query(
@@ -608,8 +664,6 @@ def _build_topic_search_response(
 
 def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
     # Structured fields from chat scope win; query is only for topic / legacy NL.
-    from api.textbook.app.toc_agent import lookup_toc_by_title, lookup_toc_start_page
-
     parsed = (
         parse_persian_query(request.query)
         if (request.query or "").strip()
@@ -622,26 +676,97 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
     chapter = (
         request.chapter if request.chapter is not None else getattr(parsed, "chapter", None)
     )
+    kind = request.kind if request.kind is not None else getattr(parsed, "kind", None)
+    wants_outline = bool(request.wants_outline or getattr(parsed, "wants_outline", False))
     topic_display = topic_label(parsed.topic) if parsed.topic else parsed.topic_alias
 
-    # Named lesson title in query (e.g. «ارزش علم») — resolve via TOC before
-    # chapter-start lookup so we open the real درس, not the first page of فصل.
+    def _unit_label() -> str:
+        from api.textbook.app.store import KIND_LABELS
+
+        return KIND_LABELS.get(kind or "lesson", "درس")
+
+    # Named lesson/chapter title («ارزش علم»، «هفت خان رستم»، «کسر») —
+    # prefer full unit span so exercise / "کل درس" style asks get every page.
+    # When the user already named فصل/درس N, don't let a weak leftover topic
+    # (book-name fragment) override the numeric unit.
     title_needle = (parsed.search_text or request.query or "").strip()
-    if (
-        grade
-        and subject
-        and page is None
-        and title_needle
-        and _is_topic_search_query(
+    title_hit = None
+    # Allow short catalog titles («کسر») once grade+subject are known.
+    can_title_lookup = bool(title_needle) and (
+        parsed.wants_topic_search
+        or parsed.topic
+        or len(title_needle.split()) >= 2
+        or len(title_needle) >= 3
+        or _is_topic_search_query(
             request.query,
             parsed_topic=parsed.topic,
             wants_topic_search=parsed.wants_topic_search,
             search_text=parsed.search_text or title_needle,
         )
+    )
+    strong_title = bool(title_needle) and (
+        (lesson is None and chapter is None) or len(title_needle.split()) >= 2
+    )
+    if (
+        grade
+        and subject
+        and page is None
+        and not wants_outline
+        and strong_title
+        and can_title_lookup
     ):
-        title_page = lookup_toc_by_title(grade, subject, title_needle)
-        if title_page is not None:
-            page = title_page
+        # Try cleaned search_text first, then raw query — stopwords can drop
+        # connectors that are part of real titles («تقسیم با باقی‌مانده»).
+        needles: list[str] = []
+        for candidate in (parsed.search_text, request.query, title_needle):
+            cleaned = (candidate or "").strip()
+            if cleaned and cleaned not in needles:
+                needles.append(cleaned)
+        best_hit = None
+        for needle in needles:
+            hit = lookup_catalog_entry_by_title(grade, subject, needle)
+            if hit is None:
+                continue
+            if best_hit is None or hit.score > best_hit.score:
+                best_hit = hit
+        title_hit = best_hit
+        if title_hit is not None and not topic_display:
+            topic_display = title_hit.title or title_needle
+
+    if (
+        title_hit is not None
+        and grade
+        and subject
+        and page is None
+        and lesson is None
+        and (chapter is None or title_hit.unit == "lesson")
+    ):
+        if title_hit.unit == "lesson" and title_hit.number is not None:
+            from api.textbook.app.store import KIND_LABELS
+
+            pages, lesson_no, start_page, end_page = get_lesson_pages(
+                grade,
+                subject,
+                lesson_number=title_hit.number,
+                kind=title_hit.kind,
+            )
+            if pages:
+                return _build_lesson_span_response(
+                    pages,
+                    lesson_number=lesson_no or title_hit.number,
+                    start_page=start_page,
+                    end_page=end_page,
+                    include_image=request.include_image,
+                    confidence=max(parsed.confidence, 0.9),
+                    prefer_page=start_page,
+                    topic=topic_display,
+                    chapter=title_hit.chapter,
+                    unit_label=KIND_LABELS.get(title_hit.kind, "درس"),
+                )
+        elif title_hit.unit == "chapter" and title_hit.number is not None:
+            chapter = title_hit.number
+        else:
+            page = title_hit.start_page
             if not topic_display:
                 topic_display = title_needle
 
@@ -670,8 +795,8 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             failure_reason="need_grade_or_subject",
         )
 
-    # A page/lesson/chapter is only meaningful together with a specific book + grade.
-    if (page or lesson or chapter) and not (grade and subject):
+    # A page/lesson/chapter/outline is only meaningful with a specific book + grade.
+    if (page or lesson or chapter or wants_outline) and not (grade and subject):
         return _unmatched(
             grade=grade,
             subject=subject,
@@ -696,6 +821,57 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             available_grades=grades_for_subject(subject) or None,
         )
 
+    # Catalog structure outline («لیست فصل‌ها / فهرست مهارت‌ها»)
+    if wants_outline and grade and subject:
+        if chapter is not None:
+            chapter_bounds = get_chapter_bounds(grade, subject)
+            if chapter_bounds is not None:
+                min_ch, max_ch = chapter_bounds
+                if chapter < min_ch or chapter > max_ch:
+                    lesson_bounds = get_lesson_bounds(grade, subject, kind=kind)
+                    return _unmatched(
+                        grade=grade,
+                        subject=subject,
+                        chapter=chapter,
+                        confidence=max(parsed.confidence, 0.9),
+                        failure_reason="chapter_out_of_range",
+                        min_chapter=min_ch,
+                        max_chapter=max_ch,
+                        min_lesson=lesson_bounds[0] if lesson_bounds else None,
+                        max_lesson=lesson_bounds[1] if lesson_bounds else None,
+                    )
+            elif get_catalog_book(grade, subject) is not None:
+                # Flat book: no parent units — report child bounds instead.
+                lesson_bounds = get_lesson_bounds(grade, subject, kind=kind)
+                if lesson_bounds is not None and (
+                    chapter < lesson_bounds[0] or chapter > lesson_bounds[1]
+                ):
+                    return _unmatched(
+                        grade=grade,
+                        subject=subject,
+                        chapter=chapter,
+                        lesson=chapter,
+                        confidence=max(parsed.confidence, 0.9),
+                        failure_reason="lesson_out_of_range",
+                        min_lesson=lesson_bounds[0],
+                        max_lesson=lesson_bounds[1],
+                    )
+        outline = _build_outline_response(
+            grade=grade,
+            subject=subject,
+            chapter=chapter,
+            confidence=max(parsed.confidence, 0.9),
+        )
+        if outline is not None:
+            return outline
+        return _unmatched(
+            grade=grade,
+            subject=subject,
+            chapter=chapter,
+            confidence=parsed.confidence,
+            failure_reason="lesson_missing",
+        )
+
     # Whole-lesson span (کل درس / بقیه درس / کلمات سخت کل درس)
     if parsed.wants_whole_lesson and grade and subject and (page or lesson):
         pages, lesson_no, start_page, end_page = get_lesson_pages(
@@ -703,6 +879,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             subject,
             lesson_number=lesson,
             page=page,
+            kind=kind,
         )
         if pages:
             return _build_lesson_span_response(
@@ -714,34 +891,100 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 confidence=max(parsed.confidence, 0.9),
                 prefer_page=page,
                 topic=topic_display,
+                unit_label=_unit_label(),
             )
 
-    # Chapter via TOC map (فصل ≠ درس; OCR header maps conflate them).
-    if grade and subject and chapter is not None and page is None:
-        toc_page = lookup_toc_start_page(grade, subject, chapter=chapter)
-        if toc_page is not None:
-            page = toc_page
-        elif lesson is None:
-            # Fall through to topic/title search when the query has usable text
-            # (e.g. «ارزش علم») instead of hard-failing lesson_missing.
-            if not _is_topic_search_query(
-                request.query,
-                parsed_topic=parsed.topic,
-                wants_topic_search=parsed.wants_topic_search,
-                search_text=parsed.search_text or (request.query or "").strip() or None,
-            ):
+    # Parent unit span (فصل/بخش) — full pages + child outline for exercises.
+    if grade and subject and chapter is not None and page is None and lesson is None:
+        book = get_catalog_book(grade, subject)
+        chapter_bounds = get_chapter_bounds(grade, subject)
+        lesson_bounds = get_lesson_bounds(grade, subject, kind=kind)
+
+        # Flat books have no فصل/بخش map — kids often say «فصل» for «درس».
+        if book is not None and not book.chapters and lesson_bounds is not None:
+            if lesson_bounds[0] <= chapter <= lesson_bounds[1]:
+                pages, lesson_no, start_page, end_page = get_lesson_pages(
+                    grade,
+                    subject,
+                    lesson_number=chapter,
+                    kind=kind,
+                )
+                if pages:
+                    return _build_lesson_span_response(
+                        pages,
+                        lesson_number=lesson_no or chapter,
+                        start_page=start_page,
+                        end_page=end_page,
+                        include_image=request.include_image,
+                        confidence=max(parsed.confidence, 0.85),
+                        prefer_page=start_page,
+                        topic=topic_display,
+                        unit_label=_unit_label(),
+                    )
+            return _unmatched(
+                grade=grade,
+                subject=subject,
+                chapter=chapter,
+                lesson=chapter,
+                confidence=max(parsed.confidence, 0.9),
+                failure_reason="lesson_out_of_range",
+                min_lesson=lesson_bounds[0],
+                max_lesson=lesson_bounds[1],
+            )
+
+        if chapter_bounds is not None:
+            min_ch, max_ch = chapter_bounds
+            if chapter < min_ch or chapter > max_ch:
                 return _unmatched(
                     grade=grade,
                     subject=subject,
                     chapter=chapter,
-                    confidence=parsed.confidence,
-                    failure_reason="lesson_missing",
+                    confidence=max(parsed.confidence, 0.9),
+                    failure_reason="chapter_out_of_range",
+                    min_chapter=min_ch,
+                    max_chapter=max_ch,
+                    min_lesson=lesson_bounds[0] if lesson_bounds else None,
+                    max_lesson=lesson_bounds[1] if lesson_bounds else None,
                 )
 
-    # Exact page lookup — stay on that page (+ neighbors). Do NOT expand to the
-    # whole lesson span: weak OCR chapter maps often glue several دروس together
-    # (e.g. pages 30–43) and the model then attributes later-lesson text to the
-    # child's page («صفحه ۳۴ چیه؟» → محتوای «ارزش علم» از صفحه ۳۶).
+        pages, ch_no, start_page, end_page = get_chapter_pages(
+            grade, subject, chapter_number=chapter
+        )
+        outline = format_catalog_outline(grade, subject, chapter=chapter)
+        if pages:
+            parent_label = (book.parent_label if book else None) or "فصل"
+            return _build_lesson_span_response(
+                pages,
+                lesson_number=None,
+                start_page=start_page,
+                end_page=end_page,
+                include_image=request.include_image,
+                confidence=max(parsed.confidence, 0.9),
+                prefer_page=start_page,
+                topic=topic_display,
+                chapter=ch_no or chapter,
+                unit_label=parent_label,
+                outline_prefix=outline,
+            )
+        if not _is_topic_search_query(
+            request.query,
+            parsed_topic=parsed.topic,
+            wants_topic_search=parsed.wants_topic_search,
+            search_text=parsed.search_text or (request.query or "").strip() or None,
+        ):
+            return _unmatched(
+                grade=grade,
+                subject=subject,
+                chapter=chapter,
+                confidence=parsed.confidence,
+                failure_reason="lesson_missing",
+                min_chapter=chapter_bounds[0] if chapter_bounds else None,
+                max_chapter=chapter_bounds[1] if chapter_bounds else None,
+                min_lesson=lesson_bounds[0] if lesson_bounds else None,
+                max_lesson=lesson_bounds[1] if lesson_bounds else None,
+            )
+
+    # Exact page lookup — stay on that page (+ neighbors).
     if grade and subject and page:
         bounds = _resolve_page_bounds(grade, subject)
         if bounds is not None:
@@ -771,7 +1014,6 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
         if exact is not None:
             return exact
 
-        # Inside printed range but missing from index — do not guess content.
         min_page = bounds[0] if bounds else None
         max_page = bounds[1] if bounds else None
         return _unmatched(
@@ -786,9 +1028,10 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             max_page=max_page,
         )
 
-    # Lesson lookup — OCR header map first, then TOC fallback.
+    # Child unit lookup via catalog (درس/جلسه/مهارت/پروژه).
     if grade and subject and lesson:
-        lesson_bounds = get_lesson_bounds(grade, subject)
+        lesson_bounds = get_lesson_bounds(grade, subject, kind=kind)
+        chapter_bounds = get_chapter_bounds(grade, subject)
         if lesson_bounds is not None:
             min_lesson, max_lesson = lesson_bounds
             if lesson < min_lesson or lesson > max_lesson:
@@ -800,12 +1043,15 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                     failure_reason="lesson_out_of_range",
                     min_lesson=min_lesson,
                     max_lesson=max_lesson,
+                    min_chapter=chapter_bounds[0] if chapter_bounds else None,
+                    max_chapter=chapter_bounds[1] if chapter_bounds else None,
                 )
 
         pages, lesson_no, start_page, end_page = get_lesson_pages(
             grade,
             subject,
             lesson_number=lesson,
+            kind=kind,
         )
         if pages:
             return _build_lesson_span_response(
@@ -817,57 +1063,16 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                 confidence=max(parsed.confidence, 0.85),
                 prefer_page=start_page,
                 topic=topic_display,
+                unit_label=_unit_label(),
             )
-        # Fallback to start page only (legacy behavior) — but never a TOC page
-        # that only lists many دروس (would make the model invent the lesson body).
-        center = lesson_search(grade, subject, lesson)
-        if center and _lesson_marker_count(center.text or "") < _LESSON_TOC_THRESHOLD:
-            neighbors = get_neighbor_pages(
-                grade, subject, center.printed_page, request.include_neighbors
-            )
-            needs_image = _needs_image(center, request.include_image)
-            context_text, text_usable = _build_context_text(
-                center, neighbors, topic=topic_display
-            )
-            response = RetrieveResponse(
-                matched=True,
-                match_type="lesson",
-                grade=grade,
-                subject=subject,
-                subject_title=_book_title(center),
-                page=center.printed_page,
-                context_text=context_text,
-                text_usable=text_usable,
-                confidence=max(parsed.confidence, 0.8),
-                detected_topic=parsed.topic,
-                detected_topic_label=topic_display,
-                lesson=lesson,
-            )
-            _attach_image(response, center, needs_image=needs_image)
-            return response
 
-        # OCR header miss / TOC-only hit → resolve via cached فهرست map.
-        toc_page = lookup_toc_start_page(grade, subject, lesson=lesson)
-        if toc_page is not None:
-            exact = _build_exact_page_response(
-                grade=grade,
-                subject=subject,
-                page=toc_page,
-                include_neighbors=request.include_neighbors,
-                include_image=request.include_image,
-                confidence=max(parsed.confidence, 0.85),
-                topic=topic_display,
-                detected_topic=parsed.topic,
-                lesson=lesson,
-            )
-            if exact is not None:
-                return exact
-
-        # In-range (or unknown bounds) but OCR header not found / only TOC hit.
         extra: dict[str, int] = {}
         if lesson_bounds is not None:
             extra["min_lesson"] = lesson_bounds[0]
             extra["max_lesson"] = lesson_bounds[1]
+        if chapter_bounds is not None:
+            extra["min_chapter"] = chapter_bounds[0]
+            extra["max_chapter"] = chapter_bounds[1]
         return _unmatched(
             grade=grade,
             subject=subject,
@@ -878,14 +1083,28 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
         )
 
     # Topic / named-content FTS search — expand to full lesson when possible.
+    # If the leftover looks like a structure ask («فصول»، «درس‌ها»)، prefer outline.
     if _is_topic_search_query(
         request.query,
         parsed_topic=parsed.topic,
         wants_topic_search=parsed.wants_topic_search,
         search_text=parsed.search_text,
     ):
-        # Prefer having at least one of grade/subject; still allow global search
-        # for distinctive names like «میرزا کوچک خان».
+        outline_like = bool(
+            re.search(
+                r"(?:فصول|دروس|جلسات|فصل[\u200c\s]*ها|درس[\u200c\s]*ها|ساختار|فهرست)",
+                (parsed.search_text or request.query or ""),
+            )
+        )
+        if outline_like and grade and subject:
+            outline = _build_outline_response(
+                grade=grade,
+                subject=subject,
+                chapter=chapter,
+                confidence=max(parsed.confidence, 0.85),
+            )
+            if outline is not None:
+                return outline
         if grade or subject or (parsed.search_text and len(parsed.search_text) >= 4):
             hits = _run_topic_search(
                 query=request.query,
@@ -899,10 +1118,30 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                     hits,
                     include_neighbors=request.include_neighbors,
                     include_image=request.include_image,
-                    confidence=parsed.confidence,
+                    confidence=max(parsed.confidence, 0.7),
                     topic=parsed.topic,
                     topic_label=topic_display,
-                    search_label=parsed.search_text,
+                    search_label=parsed.search_text or topic_display,
                 )
 
-    return _unmatched(confidence=0.0)
+    # Known book but nothing matched — not a missing grade/subject.
+    if grade and subject:
+        return _unmatched(
+            grade=grade,
+            subject=subject,
+            page=page,
+            lesson=lesson,
+            chapter=chapter,
+            confidence=parsed.confidence,
+            failure_reason="lesson_missing",
+        )
+
+    return _unmatched(
+        grade=grade,
+        subject=subject,
+        page=page,
+        lesson=lesson,
+        chapter=chapter,
+        confidence=parsed.confidence,
+        failure_reason="need_grade_or_subject",
+    )

@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import DummyLLM
+from api.core.messages import strip_persona_markers
 
 
 def test_health(client: TestClient) -> None:
@@ -132,7 +133,7 @@ def test_chat_endpoint_non_stream(client: TestClient) -> None:
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["response"] == "سلام!"
+    assert strip_persona_markers(body["response"]) == "سلام!"
     assert body["persona"] == "creative"
 
 
@@ -150,7 +151,7 @@ def test_openai_chat_completions(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["object"] == "chat.completion"
-    assert body["choices"][0]["message"]["content"] == "Hello from Yar Kids"
+    assert strip_persona_markers(body["choices"][0]["message"]["content"]) == "Hello from Yar Kids"
     assert "yarkids" in body
 
 
@@ -168,5 +169,5 @@ def test_openai_responses(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["object"] == "response"
-    assert body["output_text"] == "Hi there"
+    assert strip_persona_markers(body["output_text"]) == "Hi there"
     assert "yarkids" in body

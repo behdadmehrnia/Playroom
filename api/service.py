@@ -192,13 +192,26 @@ async def _resolve_textbook_context(
     # Topic-only path still needs free text. When the child named a lesson
     # title, prefer that over chapter-start lookup (فصل ۳ ≠ درس «ارزش علم»).
     # Never let a topic query override an explicit page number.
+    # Single leftover tokens from book names («آسمان») must not suppress فصل N.
     retrieve_query = scope.topic_query or ""
-    prefer_named_topic = bool(retrieve_query.strip()) and scope.page is None
+    prefer_named_topic = (
+        bool(retrieve_query.strip())
+        and scope.page is None
+        and (scope.chapter is None or len(retrieve_query.split()) >= 2)
+    )
 
+    # Strong catalog lookups must run even if persona sticky lagged (creative/gamer).
+    # Outline / فصل / درس / صفحه are enough; persona prompts still apply after fetch.
+    strong_catalog = (
+        scope.has_outline_lookup()
+        or scope.has_chapter_lookup()
+        or scope.has_lesson_lookup()
+        or scope.has_page_lookup()
+    )
     should_fetch = bool(
         ctx_enabled
         and scope.can_retrieve()
-        and persona in TEXTBOOK_PERSONAS
+        and (persona in TEXTBOOK_PERSONAS or strong_catalog)
     )
 
     if should_fetch:
@@ -221,6 +234,8 @@ async def _resolve_textbook_context(
                 if prefer_named_topic
                 else (scope.chapter if scope.page is None else None)
             ),
+            kind=scope.kind if scope.page is None else None,
+            wants_outline=scope.wants_outline,
             llm_client=llm_client,
             backend_model=backend_model,
         )
@@ -246,6 +261,7 @@ async def _resolve_textbook_context(
             elif reason in {
                 "lesson_missing",
                 "lesson_out_of_range",
+                "chapter_out_of_range",
             }:
                 textbook_context.page_query_failed = True
             elif reason == "book_unavailable":
@@ -258,22 +274,49 @@ async def _resolve_textbook_context(
                 textbook_context.need_info = True
             if not settings.textbook_debug:
                 await emit(status_textbook_unavailable())
+        # Remember grade/subject even on miss so «صفحه ۱۵» follow-ups keep the book.
         if (
-            textbook_context
-            and textbook_context.matched
-            and isinstance(body, dict)
+            isinstance(body, dict)
+            and scope.grade is not None
+            and scope.subject_id
         ):
             metadata = body.get("metadata")
             if not isinstance(metadata, dict):
                 metadata = {}
                 body["metadata"] = metadata
-            metadata[ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY] = {
-                "grade": textbook_context.grade,
-                "subject": textbook_context.subject,
-                "page": textbook_context.page,
-                "lesson": textbook_context.lesson or scope.lesson,
-                "chapter": textbook_context.chapter or scope.chapter,
+            sticky_payload: dict[str, int | str] = {
+                "grade": (
+                    textbook_context.grade
+                    if textbook_context and textbook_context.grade is not None
+                    else scope.grade
+                ),
+                "subject": (
+                    textbook_context.subject
+                    if textbook_context and textbook_context.subject
+                    else scope.subject_id
+                ),
             }
+            if textbook_context and textbook_context.matched:
+                if textbook_context.page is not None:
+                    sticky_payload["page"] = textbook_context.page
+                lesson_no = textbook_context.lesson or scope.lesson
+                if lesson_no is not None:
+                    sticky_payload["lesson"] = lesson_no
+                chapter_no = textbook_context.chapter or scope.chapter
+                if chapter_no is not None:
+                    sticky_payload["chapter"] = chapter_no
+            else:
+                if scope.lesson is not None:
+                    sticky_payload["lesson"] = scope.lesson
+                if scope.chapter is not None:
+                    sticky_payload["chapter"] = scope.chapter
+                if scope.page is not None and not (
+                    textbook_context and textbook_context.page_out_of_range
+                ):
+                    sticky_payload["page"] = scope.page
+            if scope.kind:
+                sticky_payload["kind"] = scope.kind
+            metadata[ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY] = sticky_payload
         return textbook_context, textbook_query or None
 
     if (
@@ -478,11 +521,16 @@ async def run_chat(
         backend_model=backend_model,
     )
 
-    from api.core.generation import compose_textbook_failure_reply
-
-    canned_textbook = (
-        compose_textbook_failure_reply(textbook_context) if textbook_context else None
+    from api.core.generation import (
+        compose_textbook_failure_reply,
+        compose_textbook_outline_reply,
     )
+
+    canned_textbook = None
+    if textbook_context:
+        canned_textbook = compose_textbook_failure_reply(textbook_context)
+        if canned_textbook is None:
+            canned_textbook = compose_textbook_outline_reply(textbook_context)
     if canned_textbook:
         response = canned_textbook
         if resolved_persona and resolved_persona != "none":
