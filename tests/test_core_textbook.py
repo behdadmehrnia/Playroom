@@ -9,6 +9,8 @@ from api.core.textbook import (
     _extract_grade_token,
     _extract_page_number,
     _extract_subject_token,
+    _grade_token_to_int,
+    _subject_keyword_to_id,
     _textbook_context_from_payload,
     _use_embedded_textbook,
     looks_like_textbook_followup,
@@ -262,6 +264,7 @@ def test_named_lesson_title_sets_topic_even_with_chapter() -> None:
     assert _extract_named_lesson_title("درس ارزش علم") == "ارزش علم"
     assert _extract_named_lesson_title("درس چهارم ارزش علم") == "ارزش علم"
     assert _extract_named_lesson_title("کلاس ششم") is None
+    assert _extract_named_lesson_title("کتاب فارسی پایه چهارم") is None
     assert _extract_named_lesson_title("فصل سوم کتاب فارسی رو توضیح بده") is None
 
     messages = [
@@ -300,3 +303,76 @@ def test_followup_about_named_lesson_keeps_topic() -> None:
     assert scope.grade == 6
     assert scope.subject_id == "persian"
     assert scope.topic_query == "ارزش علم"
+
+
+def test_page_with_yeh_sticky_across_grade_subject_reply() -> None:
+    """«صفحه ی ۴۰» then «کتاب فارسی پایه چهارم» must retrieve that page."""
+    assert _extract_page_number("درک مطلب صفحه ی ۴۰ کتاب رو حل کنم") == 40
+    assert _extract_page_number("صفحه‌ی ۴۰") == 40
+    assert _extract_page_number("صفحهٔ ۴۰") == 40
+
+    messages = [
+        ChatMessage(
+            role="user",
+            content="سلام، میخوام که درک مطلب صفحه ی ۴۰ کتاب رو حل کنم",
+        ),
+        ChatMessage(
+            role="assistant",
+            content="کلاس چندمی و این تمرین مربوط به کدوم کتابه؟",
+        ),
+        ChatMessage(role="user", content="کتاب فارسی پایه چهارم"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.page == 40
+    assert scope.grade == 4
+    assert scope.subject_id == "persian"
+    assert scope.topic_query is None
+    assert scope.can_retrieve() is True
+    assert scope.has_page_lookup() is True
+
+
+@pytest.mark.parametrize(
+    ("text", "grade", "subject_id"),
+    [
+        ("چمدونم ریاضی چهارم", 4, "math"),
+        ("کتابم ریاضی چهارم", 4, "math"),
+        ("ریاضی چهارم", 4, "math"),
+        ("فارسی پنجم", 5, "persian"),
+        ("علوم ششم", 6, "science"),
+        ("نگارش سوم", 3, "writing"),
+        ("چهارم ریاضی", 4, "math"),
+        ("ریاضی 4", 4, "math"),
+        ("فارسی۴", 4, "persian"),
+        ("فارسی۵", 5, "persian"),
+        ("ریاضی‌ام چهارمه", 4, "math"),
+        ("هدیه های آسمان پنجم", 5, "gifts"),
+    ],
+)
+def test_informal_book_grade_phrases(text: str, grade: int, subject_id: str) -> None:
+    """Colloquial «کتاب+پایه» replies must resolve without «پایه/کلاس» keywords."""
+    from api.textbook.app.parser import parse_persian_query
+
+    assert _extract_grade_token(text) is not None
+    assert _grade_token_to_int(_extract_grade_token(text)) == grade
+    assert _subject_keyword_to_id(_extract_subject_token(text)) == subject_id
+
+    scope = resolve_textbook_scope([ChatMessage(role="user", content=text)])
+    assert scope.grade == grade
+    assert scope.subject_id == subject_id
+
+    parsed = parse_persian_query(text)
+    assert parsed.grade == grade
+    assert parsed.subject == subject_id
+
+
+def test_informal_book_reply_keeps_sticky_page() -> None:
+    messages = [
+        ChatMessage(role="user", content="درک مطلب صفحه ی ۴۰ رو حل کنیم"),
+        ChatMessage(role="assistant", content="کلاس چندمی و کدوم کتاب؟"),
+        ChatMessage(role="user", content="چمدونم ریاضی چهارم"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.page == 40
+    assert scope.grade == 4
+    assert scope.subject_id == "math"
+    assert scope.has_page_lookup() is True

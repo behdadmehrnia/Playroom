@@ -309,7 +309,7 @@ def parse_persian_query(text: str) -> ParsedQuery:
 
     # Page
     page_match = re.search(
-        r"(?:صفحه|صفحهٔ|ص\.?)\s*(\d{1,4})",
+        r"(?:صفحه[\s\u200c]*[ٔةهی]?|ص\.?)\s*(\d{1,4})",
         normalized,
         flags=re.IGNORECASE,
     )
@@ -317,7 +317,7 @@ def parse_persian_query(text: str) -> ParsedQuery:
         result.page = int(page_match.group(1))
     else:
         page_words_match = re.search(
-            r"(?:صفحه|صفحهٔ|ص\.?)\s+([^\n.!؟?,،]{1,40})",
+            r"(?:صفحه[\s\u200c]*[ٔةهی]?|ص\.?)\s+([^\n.!؟?,،]{1,40})",
             text,
             flags=re.IGNORECASE,
         )
@@ -404,9 +404,43 @@ def parse_persian_query(text: str) -> ParsedQuery:
         result.topic_alias = topic_alias
         result.topic = resolve_topic_id(topic_subject, topic_alias or "")
 
-    # Standalone grade ordinal fallback (e.g. "ششم" without پایه/کلاس).
-    # Only applied when a subject or page is present, to avoid confusing
-    # lesson ordinals ("درس سوم") with grade in generic chat.
+    # Standalone / informal grade («فارسی پنجم»، «ریاضی 4»، «ششم» with a book).
+    # Prefer subject-anchored forms so «فصل سوم … فارسی چهارم» keeps grade 4.
+    if result.grade is None:
+        subject_phrases = {
+            key
+            for key in BOOK_SUBJECT_SYNONYMS
+            if key and not key.isascii() and key not in {"کتاب"}
+        } | {title for title in SUBJECT_TITLES.values() if title}
+        for phrase in sorted(subject_phrases, key=len, reverse=True):
+            escaped = re.escape(phrase)
+            match = re.search(
+                rf"{escaped}(?:[\u200c]*ا?م)?\s*"
+                rf"([3-6۳-۶]|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش)[هة]?م?"
+                rf"(?!\s*(?:درس|فصل))",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if not match:
+                match = re.search(
+                    rf"(?<!(?:درس|فصل)\s)([3-6۳-۶]|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش)[هة]?م?"
+                    rf"\s*{escaped}",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+            if match:
+                token = match.group(1)
+                digit = normalize_digits(token)
+                if digit.isdigit():
+                    value = int(digit)
+                    if 3 <= value <= 6:
+                        result.grade = value
+                        break
+                grade = GRADE_WORDS.get(token)
+                if grade is not None:
+                    result.grade = grade
+                    break
+
     if result.grade is None and (
         result.subject or result.page or result.lesson or result.chapter
     ):
@@ -496,7 +530,7 @@ def _extract_search_text(normalized: str, parsed: ParsedQuery) -> str | None:
     cleaned = normalized
     # Remove page / lesson / grade / subject scaffolding.
     cleaned = re.sub(
-        r"(?:صفحه|صفحهٔ|ص\.?)\s*\d{1,4}",
+        r"(?:صفحه[\s\u200c]*[ٔةهی]?|ص\.?)\s*\d{1,4}",
         " ",
         cleaned,
         flags=re.IGNORECASE,

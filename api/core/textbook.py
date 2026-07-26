@@ -20,12 +20,15 @@ from .messages import (
 from .types import ChatMessage, TextbookContext, TextbookQueryDiag, TextbookScope
 
 _TEXTBOOK_PAGE_QUERY_RE = re.compile(
-    r"(?:صفحه|صفحهٔ|ص\.?)\s*[\d۰-۹٠-٩]+",
+    r"(?:صفحه[\s\u200c]*[ٔةهی]?|ص\.?)\s*[\d۰-۹٠-٩]+",
     re.IGNORECASE,
 )
 # Anchor detection for Persian number-words like «بیست و یکم»:
 # we only need to detect the presence of the page marker keyword.
-_TEXTBOOK_PAGE_MARKER_RE = re.compile(r"(?:صفحه|صفحهٔ|ص\.?)", re.IGNORECASE)
+_TEXTBOOK_PAGE_MARKER_RE = re.compile(
+    r"(?:صفحه[\s\u200c]*[ٔةهی]?|ص\.?)",
+    re.IGNORECASE,
+)
 # Lesson reference only (درس دوازدهم، درس ۱۲) — not فصل.
 _TEXTBOOK_LESSON_ONLY_RE = re.compile(
     r"درس\s*(?:[\d۰-۹٠-٩]+|اول|یکم|یک|دوم|دو|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش|"
@@ -48,8 +51,9 @@ _TEXTBOOK_LESSON_RE = re.compile(
     re.IGNORECASE,
 )
 # Explicit page number after a page marker (Persian or ASCII digits).
+# Accepts common spoken forms: «صفحه ۴۰»، «صفحه‌ی ۴۰»، «صفحه ی ۴۰»، «صفحهٔ ۴۰».
 _TEXTBOOK_PAGE_NUMBER_RE = re.compile(
-    r"(?:صفحه|صفحهٔ|صفحه‌ی|ص\.?)\s*([\d۰-۹٠-٩]+)",
+    r"(?:صفحه[\s\u200c]*[ٔةهی]?|ص\.?)\s*([\d۰-۹٠-٩]+)",
     re.IGNORECASE,
 )
 # Bare reply like «۳۷» / «37» / «صفحه ۳۷» when the child answers a page ask.
@@ -100,7 +104,7 @@ _TEXTBOOK_PAGE_NUMBER_WORDS: frozenset[str] = frozenset({
     "هشتاد", "نود", "صد",
 })
 _TEXTBOOK_PAGE_WORD_AFTER_RE = re.compile(
-    r"(?:صفحه|صفحهٔ|صفحه‌ی|ص\.?)\s+(\S+)",
+    r"(?:صفحه[\s\u200c]*[ٔةهی]?|ص\.?)\s+(\S+)",
     re.IGNORECASE,
 )
 _TEXTBOOK_GRADE_QUERY_RE = re.compile(
@@ -357,10 +361,13 @@ def looks_like_textbook_followup(text: str) -> bool:
 
 
 def _grade_token_to_int(token: str) -> int | None:
-    cleaned = token.strip()
+    cleaned = (token or "").strip()
     for key in ("پایه", "کلاس"):
         if cleaned.startswith(key):
             cleaned = cleaned[len(key) :].strip()
+    cleaned = _normalize_grade_ordinal_token(cleaned)
+    if not cleaned:
+        return None
     if cleaned.isdigit():
         value = int(cleaned)
         return value if 3 <= value <= 6 else None
@@ -371,12 +378,16 @@ def _subject_keyword_to_id(keyword: str | None) -> str | None:
     if not keyword:
         return None
     return _SUBJECT_KEYWORD_TO_ID.get(keyword.strip())
+
+
 def _textbook_has_topic_intent(text: str) -> bool:
     return any(marker in text for marker in _TEXTBOOK_TOPIC_INTENT_MARKERS)
 
 
 def _textbook_wants_whole_lesson(text: str) -> bool:
     return bool(_TEXTBOOK_WHOLE_LESSON_RE.search(text))
+
+
 def _textbook_has_page(text: str) -> bool:
     return bool(_TEXTBOOK_PAGE_MARKER_RE.search(text))
 
@@ -403,7 +414,10 @@ def _textbook_has_anchor(text: str) -> bool:
 
 
 def _textbook_has_grade(text: str) -> bool:
-    return bool(_TEXTBOOK_GRADE_TOKEN_RE.search(text))
+    return (
+        bool(_TEXTBOOK_GRADE_TOKEN_RE.search(text))
+        or _extract_grade_after_subject(text) is not None
+    )
 
 
 def _textbook_has_subject(text: str) -> bool:
@@ -468,17 +482,57 @@ def _extract_grade_token(text: str) -> str | None:
     return None
 
 
+# Ordinal / digit forms used right after a book name («فارسی پنجم»، «ریاضی 4»).
+_GRADE_AFTER_SUBJECT_ALT = (
+    r"[3-6۳-۶٣-٦]|سوم|سه|چهارم|چهار|پنجم|پنج|ششم|شش"
+)
+# Optional spoken tails: «چهارمه»، «ششمی»، «چهارمم».
+_GRADE_SPOKEN_TAIL = r"[هة]?م?"
+
+
+def _normalize_grade_ordinal_token(token: str) -> str:
+    """Map «۴»/«4»/«چهارمه» style tokens toward map keys / digits."""
+    cleaned = (token or "").strip()
+    # Spoken tails only — keep canonical «چهارم» intact.
+    cleaned = re.sub(r"(?:مه|می|مم|[هةیي])$", "", cleaned)
+    digit = cleaned.translate(_PERSIAN_DIGIT_MAP)
+    if digit.isdigit():
+        return digit
+    return cleaned
+
+
 def _extract_grade_after_subject(text: str) -> str | None:
-    """Parse grade from «فارسی چهارم» / «ریاضی ششم» (no کلاس/پایه required)."""
+    """Parse grade from informal book+grade phrases.
+
+    Examples:
+      - «فارسی پنجم» / «ریاضی چهارم»
+      - «چمدونم ریاضی چهارم» / «کتابم فارسی پنجم»
+      - «ریاضی 4» / «فارسی۴»
+      - «چهارم ریاضی» (grade before subject)
+      - «ریاضی‌ام چهارمه»
+    """
     # Longest book names first so «هدیه های آسمان» beats bare «هدیه».
     for phrase in sorted(_TEXTBOOK_SUBJECT_PHRASES, key=len, reverse=True):
+        escaped = re.escape(phrase)
+        # subject (+ optional «‌ام/م») then grade
         match = re.search(
-            rf"{re.escape(phrase)}\s*([3-6۳-۶٣-٦]|سوم|چهارم|پنجم|ششم)(?!\s*(?:درس|فصل))",
+            rf"{escaped}(?:[\u200c]*ا?م)?"
+            rf"\s*({_GRADE_AFTER_SUBJECT_ALT}){_GRADE_SPOKEN_TAIL}"
+            rf"(?!\s*(?:درس|فصل))",
             text,
             flags=re.IGNORECASE,
         )
         if match:
-            return match.group(1)
+            return _normalize_grade_ordinal_token(match.group(1))
+        # grade then subject («چهارم ریاضی»، «۵ فارسی»)
+        match = re.search(
+            rf"(?<!(?:درس|فصل)\s)({_GRADE_AFTER_SUBJECT_ALT}){_GRADE_SPOKEN_TAIL}"
+            rf"\s*{escaped}",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return _normalize_grade_ordinal_token(match.group(1))
     return None
 
 
@@ -638,9 +692,15 @@ def _extract_named_lesson_title(text: str) -> str | None:
     if not (1 <= len(words) <= 6):
         return None
 
-    # Grade-only / subject-only replies.
+    # Grade-only / subject-only / book+grade replies are never lesson titles.
     grade_token = _extract_grade_token(candidate)
     subject_token = _extract_subject_token(candidate)
+    if "کتاب" in candidate:
+        return None
+    if re.search(r"(?:پایه|کلاس)", candidate):
+        return None
+    if grade_token and subject_token:
+        return None
     if grade_token and len(words) <= 3 and not subject_token:
         # «کلاس ششم» / «ششم»
         if re.fullmatch(
@@ -667,6 +727,9 @@ def _extract_named_lesson_title(text: str) -> str | None:
         "ریاضی",
         "علوم",
         "نگارش",
+        "درک",
+        "مطلب",
+        "درک مطلب",
     }
     if candidate in banned_alone:
         return None

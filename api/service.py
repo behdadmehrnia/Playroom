@@ -191,8 +191,9 @@ async def _resolve_textbook_context(
     )
     # Topic-only path still needs free text. When the child named a lesson
     # title, prefer that over chapter-start lookup (فصل ۳ ≠ درس «ارزش علم»).
+    # Never let a topic query override an explicit page number.
     retrieve_query = scope.topic_query or ""
-    prefer_named_topic = bool(retrieve_query.strip())
+    prefer_named_topic = bool(retrieve_query.strip()) and scope.page is None
 
     should_fetch = bool(
         ctx_enabled
