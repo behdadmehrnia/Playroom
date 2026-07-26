@@ -44,6 +44,10 @@ class HealthResponse(BaseModel):
     web_search_enabled: bool
     web_search_provider: str
     reflection_enabled: bool
+    # Textbook catalog diagnostics (makes empty/stale Docker volumes obvious).
+    catalog_books: int = 0
+    catalog_books_with_lessons: int = 0
+    catalog_lesson_entries: int = 0
     warnings: list[str] = Field(default_factory=list)
 
 

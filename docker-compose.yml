@@ -16,8 +16,8 @@ services:
       TEXTBOOK_DATA_DIR: /app/api/textbook/data
       TEXTBOOK_API_KEY: ${TEXTBOOK_API_KEY:-}
     volumes:
-      # Survives image rebuilds and container recreation.
-      # Holds catalog.json, subject_topics.json, index.sqlite, pages/, pdfs/
+      # Survives rebuilds: pages/, pdfs/, index.sqlite.
+      # catalog.json is refreshed from the image on every start (see entrypoint).
       - textbook-data:/app/api/textbook/data
     restart: unless-stopped
 

@@ -549,3 +549,36 @@ def test_flat_gifts_chapter_word_maps_to_lesson_or_oor() -> None:
     scope, resp = _ask("فصل ۳۰ هدیه های آسمان پایه سوم")
     assert resp.matched is False
     assert resp.failure_reason == "lesson_out_of_range"
+
+
+def test_fusul_ketab_persian_grade4_outline() -> None:
+    """Exact failing production prompt must return catalog outline."""
+    scope, resp = _ask("فصول کتاب فارسی پایه چهارم چیه ؟")
+    assert scope.wants_outline is True
+    assert scope.grade == 4
+    assert scope.subject_id == "persian"
+    assert resp.matched is True
+    assert resp.match_type == "catalog_outline"
+    text = resp.context_text or ""
+    assert "فصل" in text
+    canned = compose_textbook_outline_reply(
+        TextbookContext(
+            matched=True,
+            match_type="catalog_outline",
+            grade=4,
+            subject="persian",
+            subject_title="فارسی",
+            context_text=text,
+        )
+    )
+    assert canned
+    assert "فصل" in canned
+
+
+def test_catalog_health_stats_see_lesson_maps() -> None:
+    from api.textbook.app.store import catalog_health_stats
+
+    stats = catalog_health_stats()
+    assert int(stats["catalog_books"]) >= 20
+    assert int(stats["catalog_books_with_lessons"]) >= 20
+    assert int(stats["catalog_lesson_entries"]) >= 100

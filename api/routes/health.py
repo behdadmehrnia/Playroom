@@ -28,6 +28,26 @@ async def health(
 
     textbook_mode = "embedded" if settings.uses_embedded_textbook() else "external"
 
+    catalog_books = 0
+    catalog_books_with_lessons = 0
+    catalog_lesson_entries = 0
+    try:
+        from api.textbook.app.store import catalog_health_stats
+
+        stats = catalog_health_stats()
+        catalog_books = int(stats["catalog_books"])
+        catalog_books_with_lessons = int(stats["catalog_books_with_lessons"])
+        catalog_lesson_entries = int(stats["catalog_lesson_entries"])
+        if catalog_books == 0:
+            warnings.append("catalog.json missing or empty")
+        elif catalog_books_with_lessons == 0:
+            warnings.append(
+                "catalog.json has no lesson maps — Docker volume may be stale; "
+                "restart so entrypoint refreshes catalog from image seed"
+            )
+    except Exception as exc:  # noqa: BLE001 — health must stay up
+        warnings.append(f"catalog stats unavailable: {type(exc).__name__}")
+
     llm_ready = bool(
         settings.backend_model and settings.llm_api_key and settings.llm_base_url
     )
@@ -43,6 +63,9 @@ async def health(
         web_search_enabled=settings.enable_web_search,
         web_search_provider=settings.normalized_web_search_provider(),
         reflection_enabled=settings.enable_reflection,
+        catalog_books=catalog_books,
+        catalog_books_with_lessons=catalog_books_with_lessons,
+        catalog_lesson_entries=catalog_lesson_entries,
         warnings=warnings,
     )
 

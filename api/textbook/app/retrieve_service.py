@@ -662,8 +662,36 @@ def _build_topic_search_response(
     return response
 
 
+def _best_catalog_title_hit(
+    *,
+    grade: int,
+    subject: str,
+    needles: list[str],
+):
+    """Return the highest-scoring catalog title hit across candidate needles."""
+    best = None
+    for needle in needles:
+        cleaned = (needle or "").strip()
+        if not cleaned:
+            continue
+        hit = lookup_catalog_entry_by_title(grade, subject, cleaned)
+        if hit is None:
+            continue
+        if best is None or hit.score > best.score:
+            best = hit
+    return best
+
+
 def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
-    # Structured fields from chat scope win; query is only for topic / legacy NL.
+    """Resolve textbook context in a fixed order (easy to debug):
+
+    1. Merge structured request fields with NL parse
+    2. Catalog title → lesson/chapter span
+    3. Need grade/subject / book unavailable
+    4. Outline (فهرست / فصول / لیست درس‌ها)
+    5. Whole-lesson / chapter / lesson number / page
+    6. Topic FTS fallback
+    """
     parsed = (
         parse_persian_query(request.query)
         if (request.query or "").strip()
@@ -685,13 +713,8 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
 
         return KIND_LABELS.get(kind or "lesson", "درس")
 
-    # Named lesson/chapter title («ارزش علم»، «هفت خان رستم»، «کسر») —
-    # prefer full unit span so exercise / "کل درس" style asks get every page.
-    # When the user already named فصل/درس N, don't let a weak leftover topic
-    # (book-name fragment) override the numeric unit.
+    # --- Stage: named title (ارزش علم / هفت خان رستم / کسر) ---
     title_needle = (parsed.search_text or request.query or "").strip()
-    title_hit = None
-    # Allow short catalog titles («کسر») once grade+subject are known.
     can_title_lookup = bool(title_needle) and (
         parsed.wants_topic_search
         or parsed.topic
@@ -704,9 +727,11 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             search_text=parsed.search_text or title_needle,
         )
     )
+    # Don't let a weak leftover topic override an explicit فصل/درس N.
     strong_title = bool(title_needle) and (
         (lesson is None and chapter is None) or len(title_needle.split()) >= 2
     )
+    title_hit = None
     if (
         grade
         and subject
@@ -715,21 +740,14 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
         and strong_title
         and can_title_lookup
     ):
-        # Try cleaned search_text first, then raw query — stopwords can drop
-        # connectors that are part of real titles («تقسیم با باقی‌مانده»).
         needles: list[str] = []
         for candidate in (parsed.search_text, request.query, title_needle):
             cleaned = (candidate or "").strip()
             if cleaned and cleaned not in needles:
                 needles.append(cleaned)
-        best_hit = None
-        for needle in needles:
-            hit = lookup_catalog_entry_by_title(grade, subject, needle)
-            if hit is None:
-                continue
-            if best_hit is None or hit.score > best_hit.score:
-                best_hit = hit
-        title_hit = best_hit
+        title_hit = _best_catalog_title_hit(
+            grade=grade, subject=subject, needles=needles
+        )
         if title_hit is not None and not topic_display:
             topic_display = title_hit.title or title_needle
 
@@ -770,8 +788,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             if not topic_display:
                 topic_display = title_needle
 
-    # Page + book without grade: still catch impossible page numbers against
-    # the subject's printed-page range across grades (existing MinerU index).
+    # --- Stage: gates ---
     if page and subject and not grade:
         bounds = _resolve_page_bounds(None, subject)
         if bounds is not None:
@@ -795,7 +812,6 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             failure_reason="need_grade_or_subject",
         )
 
-    # A page/lesson/chapter/outline is only meaningful with a specific book + grade.
     if (page or lesson or chapter or wants_outline) and not (grade and subject):
         return _unmatched(
             grade=grade,
@@ -807,8 +823,6 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             failure_reason="need_grade_or_subject",
         )
 
-    # Known book+grade that is not offered in the catalog/index
-    # (e.g. کار و فناوری / تفکر و پژوهش فقط پایه ششم).
     if grade is not None and subject and not book_exists_for_grade(grade, subject):
         return _unmatched(
             grade=grade,
@@ -821,7 +835,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
             available_grades=grades_for_subject(subject) or None,
         )
 
-    # Catalog structure outline («لیست فصل‌ها / فهرست مهارت‌ها»)
+    # --- Stage: outline (فهرست / فصول / لیست درس‌ها) ---
     if wants_outline and grade and subject:
         if chapter is not None:
             chapter_bounds = get_chapter_bounds(grade, subject)
@@ -841,7 +855,6 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
                         max_lesson=lesson_bounds[1] if lesson_bounds else None,
                     )
             elif get_catalog_book(grade, subject) is not None:
-                # Flat book: no parent units — report child bounds instead.
                 lesson_bounds = get_lesson_bounds(grade, subject, kind=kind)
                 if lesson_bounds is not None and (
                     chapter < lesson_bounds[0] or chapter > lesson_bounds[1]
@@ -864,6 +877,7 @@ def retrieve_context(request: RetrieveRequest) -> RetrieveResponse:
         )
         if outline is not None:
             return outline
+        # Book known but catalog maps empty (stale Docker volume is the usual cause).
         return _unmatched(
             grade=grade,
             subject=subject,

@@ -118,6 +118,11 @@ async def retrieve_textbook_endpoint(
             else settings.textbook_neighbor_pages
         )
         if use_scope and scope is not None:
+            # Named lesson titles beat chapter-start lookup; keep chapter when
+            # topic is empty or only a weak leftover token.
+            prefer_named = bool(scope.topic_query and scope.topic_query.strip()) and (
+                scope.chapter is None or len(scope.topic_query.split()) >= 2
+            )
             context = await fetch_textbook_context(
                 scope.topic_query or "",
                 api_url=settings.textbook_api_url,
@@ -129,7 +134,11 @@ async def retrieve_textbook_endpoint(
                 subject=scope.subject_id,
                 page=scope.page,
                 lesson=scope.lesson if scope.page is None else None,
-                chapter=scope.chapter if scope.page is None else None,
+                chapter=(
+                    None
+                    if prefer_named
+                    else (scope.chapter if scope.page is None else None)
+                ),
                 kind=scope.kind if scope.page is None else None,
                 wants_outline=scope.wants_outline,
                 llm_client=llm_client,

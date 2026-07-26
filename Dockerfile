@@ -35,7 +35,7 @@ RUN pip install --compile -r /tmp/requirements-runtime.txt \
 # Application package (prompts + textbook code)
 COPY api/ /app/api/
 
-# Seed catalog metadata for first-time volume init (entrypoint copies if missing)
+# Seed catalog metadata; entrypoint always refreshes these onto the volume
 RUN mkdir -p /opt/yarkids/textbook-seed \
     && cp /app/api/textbook/data/catalog.json /opt/yarkids/textbook-seed/ \
     && cp /app/api/textbook/data/subject_topics.json /opt/yarkids/textbook-seed/ \

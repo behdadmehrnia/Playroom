@@ -264,6 +264,13 @@ def compose_textbook_failure_reply(context: TextbookContext) -> str | None:
         # Without a known book, ask for info instead of a fake «این کتاب» miss.
         if not (context.subject_title or context.subject):
             return None
+        grade_bit = f" پایه {grade}" if grade is not None else ""
+        # Outline / bare book ask with empty catalog maps — not a page miss.
+        if page is None and context.lesson is None and context.chapter is None:
+            return (
+                f"فهرست درس‌های کتاب «{title}»{grade_bit} الان در دسترس نیست. "
+                "یک شمارهٔ درس یا صفحه بگو، یا عکس/متن سوال را بفرست 📚"
+            )
         where = ""
         if page is not None:
             where = f"صفحهٔ {page} "
@@ -271,7 +278,6 @@ def compose_textbook_failure_reply(context: TextbookContext) -> str | None:
             where = f"درس {context.lesson} "
         elif context.chapter is not None:
             where = f"فصل {context.chapter} "
-        grade_bit = f" پایه {grade}" if grade is not None else ""
         return (
             f"الان نتونستم {where}از کتاب «{title}»{grade_bit} رو دقیق پیدا کنم. "
             "اگر می‌تونی عکس همون صفحه رو بفرست، یا متن سوال/درک مطلب رو اینجا بنویس "

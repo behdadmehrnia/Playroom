@@ -262,6 +262,19 @@ def get_catalog_book(grade: int, subject: str) -> CatalogBook | None:
     return None
 
 
+def catalog_health_stats() -> dict[str, int | str]:
+    """Counts for /health — empty lesson maps mean the volume catalog is stale."""
+    books = load_catalog()
+    with_lessons = sum(1 for book in books if book.lessons)
+    lesson_entries = sum(len(book.lessons) for book in books)
+    return {
+        "catalog_books": len(books),
+        "catalog_books_with_lessons": with_lessons,
+        "catalog_lesson_entries": lesson_entries,
+        "catalog_path": str(CATALOG_PATH),
+    }
+
+
 def lookup_catalog_start_page(
     grade: int,
     subject: str,
