@@ -561,6 +561,9 @@ def test_fusul_ketab_persian_grade4_outline() -> None:
     assert resp.match_type == "catalog_outline"
     text = resp.context_text or ""
     assert "فصل" in text
+    assert "آفرینش" in text
+    assert "دانایی" in text
+    assert "بستان" not in text
     canned = compose_textbook_outline_reply(
         TextbookContext(
             matched=True,
@@ -573,6 +576,17 @@ def test_fusul_ketab_persian_grade4_outline() -> None:
     )
     assert canned
     assert "فصل" in canned
+    assert "آفرینش" in canned
+    assert "بستان" not in canned
+
+
+def test_short_fusul_farsi_chaharom_outline() -> None:
+    """«فصول فارسی چهارم» must not invent بستان — catalog فصل/درس only."""
+    scope, resp = _ask("فصول فارسی چهارم")
+    assert scope.wants_outline and scope.grade == 4 and scope.subject_id == "persian"
+    assert resp.matched and resp.match_type == "catalog_outline"
+    text = resp.context_text or ""
+    assert "آفرینش" in text and "بستان" not in text
 
 
 def test_catalog_health_stats_see_lesson_maps() -> None:
