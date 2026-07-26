@@ -287,6 +287,59 @@ def compose_textbook_failure_reply(context: TextbookContext) -> str | None:
     return None
 
 
+def compose_textbook_need_info_reply(context: TextbookContext) -> str | None:
+    """Deterministic ask for missing پایه/کتاب — don't let the LLM skip it."""
+    if not (
+        context.need_info or context.failure_reason == "need_grade_or_subject"
+    ):
+        return None
+
+    title = context.subject_title or context.subject
+    grade = context.grade
+    bits: list[str] = []
+    if title and grade is not None:
+        bits.append(f"کتاب «{title}» پایه {grade} را فهمیدم")
+    elif title:
+        bits.append(f"کتاب «{title}» را فهمیدم")
+    elif grade is not None:
+        bits.append(f"پایه {grade} را فهمیدم")
+
+    if context.chapter is not None:
+        bits.append(f"فصل {context.chapter}")
+    if context.lesson is not None:
+        bits.append(f"درس {context.lesson}")
+    if context.page is not None:
+        bits.append(f"صفحه {context.page}")
+
+    known = "؛ ".join(bits) + ". " if bits else ""
+
+    missing: list[str] = []
+    if not title:
+        missing.append("اسم کتاب (مثلاً ریاضی یا فارسی)")
+    if grade is None:
+        missing.append("پایه/کلاس چندم")
+    if (
+        context.page is None
+        and context.lesson is None
+        and context.chapter is None
+        and title
+        and grade is not None
+    ):
+        missing.append("شمارهٔ صفحه یا فصل/درس")
+
+    if not missing:
+        return None
+
+    if len(missing) == 1 and grade is None and title:
+        ask = f"کلاس چندمی هستی تا فصل/درس درست کتاب «{title}» را باز کنم؟"
+    elif len(missing) == 1:
+        ask = f"فقط بگو {missing[0]}؟"
+    else:
+        ask = "بگو " + " و ".join(missing) + "؟"
+
+    return f"{known}{ask} 📚"
+
+
 def format_need_info_instruction(context: TextbookContext) -> str:
     """Ask only for slots still missing — prefer page, accept chapter/lesson."""
     known: list[str] = []

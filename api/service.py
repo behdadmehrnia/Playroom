@@ -192,12 +192,13 @@ async def _resolve_textbook_context(
     # Topic-only path still needs free text. When the child named a lesson
     # title, prefer that over chapter-start lookup (فصل ۳ ≠ درس «ارزش علم»).
     # Never let a topic query override an explicit page number.
-    # Single leftover tokens from book names («آسمان») must not suppress فصل N.
+    # Never let conversational leftovers suppress an explicit فصل/درس N.
     retrieve_query = scope.topic_query or ""
     prefer_named_topic = (
         bool(retrieve_query.strip())
         and scope.page is None
-        and (scope.chapter is None or len(retrieve_query.split()) >= 2)
+        and scope.chapter is None
+        and scope.lesson is None
     )
 
     # Strong catalog lookups must run even if persona sticky lagged (creative/gamer).
@@ -523,12 +524,15 @@ async def run_chat(
 
     from api.core.generation import (
         compose_textbook_failure_reply,
+        compose_textbook_need_info_reply,
         compose_textbook_outline_reply,
     )
 
     canned_textbook = None
     if textbook_context:
         canned_textbook = compose_textbook_failure_reply(textbook_context)
+        if canned_textbook is None:
+            canned_textbook = compose_textbook_need_info_reply(textbook_context)
         if canned_textbook is None:
             canned_textbook = compose_textbook_outline_reply(textbook_context)
     if canned_textbook:

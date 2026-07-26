@@ -118,10 +118,12 @@ async def retrieve_textbook_endpoint(
             else settings.textbook_neighbor_pages
         )
         if use_scope and scope is not None:
-            # Named lesson titles beat chapter-start lookup; keep chapter when
-            # topic is empty or only a weak leftover token.
-            prefer_named = bool(scope.topic_query and scope.topic_query.strip()) and (
-                scope.chapter is None or len(scope.topic_query.split()) >= 2
+            # Named lesson titles beat chapter-start lookup only when no unit
+            # number was given. Conversational leftovers must not clear فصل N.
+            prefer_named = (
+                bool(scope.topic_query and scope.topic_query.strip())
+                and scope.chapter is None
+                and scope.lesson is None
             )
             context = await fetch_textbook_context(
                 scope.topic_query or "",

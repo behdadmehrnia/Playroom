@@ -113,10 +113,11 @@ class TextbookScope:
         )
 
     def can_retrieve(self) -> bool:
-        """True when structured fields (or a topic query) can hit the index.
+        """True when structured fields can hit a specific book.
 
-        Page lookup is preferred (most precise). Lesson/chapter is also enough
-        to attempt retrieve when the child gave a chapter instead of a page.
+        Page/lesson/chapter/outline already require grade+subject.
+        Free-text topic search also needs both — never guess across grades
+        (e.g. «فصل ۳ ریاضی» without پایه must ask, not open پایه ۳ by FTS).
         """
         if (
             self.has_page_lookup()
@@ -126,7 +127,7 @@ class TextbookScope:
         ):
             return True
         if self.topic_query and self.topic_query.strip():
-            return True
+            return self.grade is not None and bool(self.subject_id)
         return False
 
     def debug_label(self) -> str:

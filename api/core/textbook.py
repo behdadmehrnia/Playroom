@@ -683,6 +683,19 @@ _NAMED_LESSON_CONVERSATIONAL: tuple[str, ...] = (
     "میخوام",
     "می خواهم",
     "می‌خوام",
+    "میتونی",
+    "می‌تونی",
+    "می تونی",
+    "میخوای",
+    "می‌خوای",
+    "لطفا",
+    "لطفاً",
+    "برام",
+    "برایم",
+    "حل کن",
+    "حلش",
+    "فعالیت",
+    "فعالیت‌ها",
     "توضیح",
     "کمک کن",
     "سلام",
@@ -1230,9 +1243,12 @@ def resolve_textbook_scope(
         topic_query = latest
 
     # Parser leftover / cleaned title (e.g. «هفت خان رستم») — prefer over raw latest.
+    # Skip when فصل/درس N already locates the unit — leftovers like «میتونی حل کنی»
+    # must not become a topic search that guesses a grade.
     if (
         not current_page
         and not lesson
+        and not chapter
         and not wants_outline
         and grade is not None
         and subject_id
@@ -1249,6 +1265,16 @@ def resolve_textbook_scope(
             # Prefer cleaned search_text when we only had the raw utterance.
             if not topic_query or topic_query == latest:
                 topic_query = parsed_latest.search_text
+
+    # Unit number without grade → clear weak topic so we ask پایه, not FTS-guess.
+    if (chapter is not None or lesson is not None) and grade is None:
+        if topic_query and any(
+            m in topic_query for m in _NAMED_LESSON_CONVERSATIONAL
+        ):
+            topic_query = None
+        # Bare conversational leftovers after stripping unit labels.
+        if topic_query and len(topic_query.split()) >= 4:
+            topic_query = None
 
     return TextbookScope(
         grade=grade,

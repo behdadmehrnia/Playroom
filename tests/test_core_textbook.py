@@ -529,6 +529,34 @@ def test_list_then_chapter_clears_outline_sticky() -> None:
     assert resp.chapter == 4
 
 
+def test_chapter_without_grade_asks_not_guesses() -> None:
+    """«فصل سوم ریاضی» without پایه must not retrieve / invent a grade."""
+    text = "میتونی فعالیت های فصل سوم کتاب ریاضی رو حل کنی برام"
+    scope = resolve_textbook_scope([ChatMessage(role="user", content=text)])
+    assert scope.subject_id == "math"
+    assert scope.chapter == 3
+    assert scope.grade is None
+    assert scope.can_retrieve() is False
+    # Conversational leftovers are not a lesson title.
+    assert not scope.topic_query or "میتونی" not in (scope.topic_query or "")
+
+    from api.core.generation import compose_textbook_need_info_reply
+    from api.core.types import TextbookContext
+
+    canned = compose_textbook_need_info_reply(
+        TextbookContext(
+            need_info=True,
+            failure_reason="need_grade_or_subject",
+            subject="math",
+            subject_title="ریاضی",
+            chapter=3,
+        )
+    )
+    assert canned is not None
+    assert "کلاس" in canned or "پایه" in canned
+    assert "ریاضی" in canned
+
+
 def test_named_lesson_title_with_book_grade_sets_topic() -> None:
     scope = resolve_textbook_scope(
         [ChatMessage(role="user", content="درس ارزش علم فارسی پایه چهارم")]
