@@ -35,8 +35,7 @@ def get_intent_detection_prompt() -> str:
 
 
 def get_reflection_prompt() -> str:
-    template = _load_prompt("reflection.md")
-    return template.replace("{{CORE_PROMPT}}", get_core_prompt())
+    return _load_prompt("reflection.md")
 
 
 def get_chat_title_prompt() -> str:

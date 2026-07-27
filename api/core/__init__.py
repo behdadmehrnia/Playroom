@@ -32,6 +32,7 @@ from .constants import (
     WEB_SEARCH_PERSONAS,
     PersonaId,
     ReflectionStatus,
+    safe_fallback_response,
 )
 from .generation import (
     build_prompt_messages,
@@ -178,6 +179,7 @@ __all__ = [
     "ReflectionResult",
     "ReflectionStatus",
     "SAFE_FALLBACK_RESPONSE",
+    "safe_fallback_response",
     "STATUS_DISPLAY_PAUSE_SEC",
     "STREAM_CHUNK_SIZE",
     "SUPPORTED_PERSONAS",

@@ -14,7 +14,6 @@ from typing import Any, Awaitable, Callable
 
 from api.core import (
     MAX_GENERATION_ATTEMPTS,
-    SAFE_FALLBACK_RESPONSE,
     STATUS_DISPLAY_PAUSE_SEC,
     STREAM_CHUNK_SIZE,
     ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY,
@@ -46,6 +45,7 @@ from api.core import (
     resolve_textbook_scope,
     resolve_web_search_context,
     run_math_tool_for_message,
+    safe_fallback_response,
     status_calculating_math,
     status_detecting_persona,
     status_fetching_textbook,
@@ -418,13 +418,14 @@ async def _run_response_loop(
     math_tool_usages: list[MathToolUsage] | None,
     enable_reflection: bool,
     emit: Callable[[str], Awaitable[None]],
+    status_debug: bool = False,
 ) -> tuple[str, int, ReflectionResult | None, bool, bool]:
     """Generate (and optionally reflect on) the response."""
     user_message = _get_latest_user_message(conversation_messages)
 
     if not enable_reflection:
         await emit(status_reflection_disabled())
-        await emit(status_generating_response(1, 1))
+        await emit(status_generating_response(1, 1, debug=status_debug))
         response = await generate_response(
             llm_client,
             backend_model=backend_model,
@@ -441,12 +442,16 @@ async def _run_response_loop(
     revision_reasons: list[str] = []
     attempts = 0
     final_reflection: ReflectionResult | None = None
-    response = SAFE_FALLBACK_RESPONSE
+    response = safe_fallback_response(persona)
     used_fallback = True
 
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         attempts = attempt
-        await emit(status_generating_response(attempt, MAX_GENERATION_ATTEMPTS))
+        await emit(
+            status_generating_response(
+                attempt, MAX_GENERATION_ATTEMPTS, debug=status_debug
+            )
+        )
 
         candidate = await generate_response(
             llm_client,
@@ -609,6 +614,7 @@ async def run_chat(
         math_tool_usages=math_tool_usages,
         enable_reflection=refl_enabled,
         emit=emit,
+        status_debug=bool(settings.textbook_debug or settings.web_search_debug),
     )
 
     if resolved_persona and resolved_persona != "none":

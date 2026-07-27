@@ -22,8 +22,19 @@ def status_persona_selected(persona: PersonaId) -> str:
     return f"🎭 شخصیت {label} انتخاب شد! بزن بریم..."
 
 
-def status_generating_response(attempt: int, max_attempts: int) -> str:
-    return f"✨ دارم جوابت رو مینویسم... ({attempt} از {max_attempts})"
+def status_generating_response(
+    attempt: int = 1,
+    max_attempts: int = 1,
+    *,
+    debug: bool = False,
+) -> str:
+    """Progress status while writing a reply.
+
+    Attempt counters like «(۱ از ۳)» only appear when ``debug`` is on.
+    """
+    if debug:
+        return f"✨ دارم جوابت رو مینویسم... ({attempt} از {max_attempts})"
+    return "✨ دارم جوابت رو مینویسم..."
 
 
 def status_reviewing_response() -> str:

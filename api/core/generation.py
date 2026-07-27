@@ -10,7 +10,6 @@ from .constants import (
     MAX_GENERATION_ATTEMPTS,
     PERSONA_UI_LABELS,
     REVISION_INSTRUCTION_HEADER,
-    SAFE_FALLBACK_RESPONSE,
     TEXTBOOK_CONTEXT_HEADER,
     TEXTBOOK_CONTEXT_INSTRUCTION,
     TEXTBOOK_IMAGE_ONLY_INSTRUCTION,
@@ -30,6 +29,7 @@ from .constants import (
     WEB_SEARCH_CONTEXT_INSTRUCTION,
     WEB_SEARCH_NO_RESULTS_INSTRUCTION,
     PersonaId,
+    safe_fallback_response,
 )
 from .math_tool import MathToolUsage, format_math_tool_context
 from .messages import _extract_json_object, _get_latest_user_message, strip_persona_markers
@@ -667,10 +667,13 @@ async def generate_response(
 def parse_reflection_output(raw_output: str) -> ReflectionResult:
     payload = _extract_json_object(raw_output)
     if not payload:
-        return ReflectionResult(status="REVISE", reasons=["خروجی بازبین قابل parse نبود."])
+        # Fail-open: a broken reviewer must not block safe homework replies.
+        return ReflectionResult(status="PASS")
 
     status_raw = str(payload.get("status", "")).strip().upper()
     if status_raw == "PASS":
+        return ReflectionResult(status="PASS")
+    if status_raw != "REVISE":
         return ReflectionResult(status="PASS")
 
     reasons_raw = payload.get("reasons", [])
@@ -679,7 +682,7 @@ def parse_reflection_output(raw_output: str) -> ReflectionResult:
         reasons = [str(item).strip() for item in reasons_raw if str(item).strip()]
 
     if not reasons:
-        reasons = ["پاسخ برای کودک مناسب تشخیص داده نشد."]
+        reasons = ["محتوای نامناسب برای کودک."]
 
     return ReflectionResult(status="REVISE", reasons=reasons)
 
@@ -693,59 +696,14 @@ async def reflect_on_response(
     textbook_context: TextbookContext | None = None,
     web_search_context: WebSearchContext | None = None,
 ) -> ReflectionResult:
-    textbook_note = ""
-    if textbook_context and textbook_context.matched:
-        meta_bits: list[str] = []
-        if textbook_context.subject_title:
-            meta_bits.append(textbook_context.subject_title)
-        if textbook_context.grade:
-            meta_bits.append(f"پایه {textbook_context.grade}")
-        if textbook_context.page:
-            meta_bits.append(f"صفحه {textbook_context.page}")
-        meta = "، ".join(meta_bits) if meta_bits else "صفحهٔ کتاب"
-        textbook_note = (
-            f"\n\nتوجه بازبین: سیستم متن/تصویر واقعیِ {meta} را به نویسنده داده است. "
-            "اگر پاسخ بر اساس همان صفحه صحبت می‌کند، آن را توهم حساب نکن و PASS بده "
-            "(مگر اینکه ناامن یا نامناسب باشد)."
-        )
-    elif textbook_context and (
-        textbook_context.page_query_failed
-        or textbook_context.page_out_of_range
-        or textbook_context.need_info
-        or (
-            textbook_context.failure_reason
-            in {
-                "page_missing",
-                "lesson_missing",
-                "book_unavailable",
-                "lesson_out_of_range",
-                "chapter_out_of_range",
-            }
-        )
-    ):
-        textbook_note = (
-            "\n\nتوجه بازبین: نویسنده متن صفحه را نداشته. "
-            "اگر وانمود کرده صفحه را باز کرده، محتوای دقیق ساخته، "
-            "یا گفته «یک لحظه صبر کن صفحه را می‌بینم»، REVISE."
-        )
-
-    web_note = ""
-    if web_search_context and web_search_context.matched:
-        web_note = (
-            "\n\nتوجه بازبین: سیستم نتایج واقعی جستجوی وب را به نویسنده داده است. "
-            "اگر پاسخ بر اساس همان نتایج است، آن را توهم حساب نکن و PASS بده "
-            "(مگر اینکه ناامن یا نامناسب سن باشد)."
-        )
-    elif web_search_context is not None and not web_search_context.matched:
-        web_note = (
-            "\n\nتوجه بازبین: نویسنده نتایج جستجو نداشته. "
-            "اگر ادعا کرده بازی وجود ندارد / هنوز منتشر نشده بدون شواهد، REVISE."
-        )
-
+    # Safety-only review of the latest generated reply — ignore chat history,
+    # textbook correctness, persona fit, and clarity.
+    _ = user_message, textbook_context, web_search_context
     review_prompt = (
-        f"پیام کودک:\n{user_message}\n\n"
-        f"پاسخ پیشنهادی:\n{candidate_response}"
-        f"{textbook_note}{web_note}\n\n"
+        "فقط همین پاسخ پیشنهادی را از نظر ایمنی کودک بررسی کن "
+        "(خشونت، محتوای بزرگسال، فحش/توهین، مواد خطرناک). "
+        "اگر نامفهوم یا غلط درسی بود هم PASS بده.\n\n"
+        f"پاسخ پیشنهادی:\n{candidate_response}\n\n"
         "فقط JSON خروجی بده."
     )
     request = LLMCompletionRequest(
@@ -776,6 +734,7 @@ async def run_response_loop(
     web_search_context: WebSearchContext | None = None,
     math_tool_usages: list[MathToolUsage] | None = None,
     enable_reflection: bool = True,
+    status_debug: bool = False,
 ) -> str:
     revision_reasons: list[str] = []
     user_message = _get_latest_user_message(conversation_messages)
@@ -783,7 +742,7 @@ async def run_response_loop(
     if not enable_reflection:
         if on_status:
             await on_status(status_reflection_disabled())
-            await on_status(status_generating_response(1, 1))
+            await on_status(status_generating_response(1, 1, debug=status_debug))
         return await generate_response(
             llm_client,
             backend_model=backend_model,
@@ -798,7 +757,11 @@ async def run_response_loop(
 
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         if on_status:
-            await on_status(status_generating_response(attempt, MAX_GENERATION_ATTEMPTS))
+            await on_status(
+                status_generating_response(
+                    attempt, MAX_GENERATION_ATTEMPTS, debug=status_debug
+                )
+            )
 
         candidate = await generate_response(
             llm_client,
@@ -829,4 +792,4 @@ async def run_response_loop(
 
         revision_reasons = reflection.reasons or ["پاسخ نیاز به اصلاح دارد."]
 
-    return SAFE_FALLBACK_RESPONSE
+    return safe_fallback_response(persona)

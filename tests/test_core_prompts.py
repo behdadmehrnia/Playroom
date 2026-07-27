@@ -34,8 +34,12 @@ def test_persona_none_returns_none() -> None:
     assert get_persona_prompt("none") is None
 
 
-def test_reflection_prompt_includes_core() -> None:
+def test_reflection_prompt_is_safety_only() -> None:
     reflection = get_reflection_prompt()
-    core = get_core_prompt()
     assert "{{CORE_PROMPT}}" not in reflection
-    assert core[:80] in reflection
+    assert "ایمنی" in reflection or "ناامن" in reflection
+    # Must not embed the full core prompt anymore.
+    core = get_core_prompt()
+    assert core[:80] not in reflection
+    assert "PASS" in reflection
+    assert "خشونت" in reflection or "فحش" in reflection

@@ -246,6 +246,40 @@ WEB_SEARCH_NO_RESULTS_INSTRUCTION = (
 )
 DEFAULT_WEB_SEARCH_TIMEOUT_SEC = 8.0
 DEFAULT_WEB_SEARCH_MAX_RESULTS = 5
+
+
+def safe_fallback_response(persona: PersonaId | str | None = None) -> str:
+    """Child-facing fallback after failed generation/reflection, tuned to persona."""
+    base = "متأسفم، الان نتوانستم پاسخ مناسبی برایت بدهم. "
+    key = str(persona or "none")
+    if key in {"teacher", "homework"}:
+        return (
+            f"{base}"
+            "می‌تونی ازم یه سوال درسی بپرسی تا با هم روش کار کنیم! 📚"
+        )
+    if key == "gamer":
+        return (
+            f"{base}"
+            "بیا یه موضوع دیگه رو امتحان کنیم، یا یه بازی دیگه پیشنهاد بده! 🎮"
+        )
+    if key == "storyteller":
+        return (
+            f"{base}"
+            "بیا دربارهٔ یه داستان دیگه حرف بزنیم؛ دوست داری قصه چی باشه؟ 📖"
+        )
+    if key == "creative":
+        return (
+            f"{base}"
+            "بیا یه ایدهٔ خلاقانه دیگه امتحان کنیم؛ دوست داری چی بسازیم؟ 🎨"
+        )
+    return (
+        f"{base}"
+        "بیایید با هم یک موضوع دیگر را امتحان کنیم! "
+        "می‌توانی دربارهٔ یک داستان، یک سوال درسی، یا یک ایدهٔ خلاقانه از من بپرسی."
+    )
+
+
+# Default (no persona / welcome) — kept for callers that still import the constant.
 SAFE_FALLBACK_RESPONSE = (
     "متأسفم، الان نتوانستم پاسخ مناسبی برایت بدهم. "
     "بیایید با هم یک موضوع دیگر را امتحان کنیم! "

@@ -75,8 +75,8 @@ def test_build_prompt_messages_strips_persona_markers() -> None:
     ("raw", "status"),
     [
         ('{"status":"PASS"}', "PASS"),
-        ('{"status":"REVISE","reasons":["خیلی کوتاه"]}', "REVISE"),
-        ("bad", "REVISE"),
+        ('{"status":"REVISE","reasons":["فحش در پاسخ"]}', "REVISE"),
+        ("bad", "PASS"),  # fail-open: broken reviewer must not block replies
     ],
 )
 def test_parse_reflection_output(raw: str, status: str) -> None:

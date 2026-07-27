@@ -1124,7 +1124,7 @@ async def resolve_web_search_context(
             from .constants import MAX_GENERATION_ATTEMPTS
             from .status import status_generating_response
 
-            await on_status(status_generating_response(1, MAX_GENERATION_ATTEMPTS))
+            await on_status(status_generating_response(1, MAX_GENERATION_ATTEMPTS, debug=debug))
 
     context = await fetch_web_search_context(
         query,
