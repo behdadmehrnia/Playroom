@@ -1116,7 +1116,15 @@ async def resolve_web_search_context(
         )
 
     if on_status:
-        await on_status(status_fetching_web_search())
+        # Only expose the internet-search status when debug is on; otherwise
+        # keep the child-facing progress the same as normal generation.
+        if debug:
+            await on_status(status_fetching_web_search())
+        else:
+            from .constants import MAX_GENERATION_ATTEMPTS
+            from .status import status_generating_response
+
+            await on_status(status_generating_response(1, MAX_GENERATION_ATTEMPTS))
 
     context = await fetch_web_search_context(
         query,
@@ -1134,7 +1142,7 @@ async def resolve_web_search_context(
             )
         )
         await asyncio.sleep(1.2)
-    if context and not context.matched and on_status and not debug:
+    if context and not context.matched and on_status and debug:
         await on_status(status_web_search_unavailable())
     return context
 def build_web_search_diag(

@@ -26,7 +26,10 @@ def test_get_persona_ui_label() -> None:
 def test_status_messages_non_empty() -> None:
     assert status_detecting_persona()
     assert status_persona_selected("gamer")
-    assert status_generating_response(1, MAX_GENERATION_ATTEMPTS)
+    generating = status_generating_response(1, MAX_GENERATION_ATTEMPTS)
+    assert generating
+    assert "قشنگت" not in generating
+    assert "جوابت رو مینویسم" in generating
     assert status_reviewing_response()
     assert status_reflection_disabled()
     assert status_fetching_textbook()

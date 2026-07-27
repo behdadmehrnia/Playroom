@@ -711,7 +711,7 @@ def status_persona_selected(persona: PersonaId) -> str:
 
 
 def status_generating_response(attempt: int, max_attempts: int) -> str:
-    return f"✨ دارم جواب قشنگت رو می‌نویسم... ({attempt} از {max_attempts})"
+    return f"✨ دارم جوابت رو مینویسم... ({attempt} از {max_attempts})"
 
 
 def status_reviewing_response() -> str:
@@ -2572,7 +2572,10 @@ async def resolve_web_search_context(
         return None
 
     if on_status:
-        await on_status(status_fetching_web_search())
+        if debug:
+            await on_status(status_fetching_web_search())
+        else:
+            await on_status(status_generating_response(1, MAX_GENERATION_ATTEMPTS))
 
     context = await fetch_web_search_context(
         query,
@@ -2590,7 +2593,7 @@ async def resolve_web_search_context(
             )
         )
         await asyncio.sleep(1.2)
-    if context and not context.matched and on_status and not debug:
+    if context and not context.matched and on_status and debug:
         await on_status(status_web_search_unavailable())
     return context
 

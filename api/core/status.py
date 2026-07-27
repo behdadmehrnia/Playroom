@@ -23,7 +23,7 @@ def status_persona_selected(persona: PersonaId) -> str:
 
 
 def status_generating_response(attempt: int, max_attempts: int) -> str:
-    return f"✨ دارم جواب قشنگت رو می‌نویسم... ({attempt} از {max_attempts})"
+    return f"✨ دارم جوابت رو مینویسم... ({attempt} از {max_attempts})"
 
 
 def status_reviewing_response() -> str:
