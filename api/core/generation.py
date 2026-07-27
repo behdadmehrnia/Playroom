@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from typing import Any, Awaitable, Callable
 
 from .constants import (
@@ -179,7 +180,9 @@ def compose_textbook_outline_reply(context: TextbookContext) -> str | None:
     )
 
 
-def compose_textbook_failure_reply(context: TextbookContext) -> str | None:
+def compose_textbook_failure_reply(
+    context: TextbookContext, user_message: str | None = None
+) -> str | None:
     """Deterministic child-facing reply for hard textbook failures (demo-safe).
 
     LLMs often ignore failure instructions and pretend the page opened; for these
@@ -188,6 +191,47 @@ def compose_textbook_failure_reply(context: TextbookContext) -> str | None:
     title = context.subject_title or "این کتاب"
     grade = context.grade
     page = context.page
+
+    # If the child asks about counts (e.g. "این کتاب چند درس دارد؟"),
+    # answer directly using known bounds to avoid a loop of out-of-range nagging.
+    if user_message:
+        um = re.sub(r"\s+", " ", (user_message or "").strip())
+        asks_lesson_count = any(
+            s in um
+            for s in (
+                "چند درس",
+                "چند تا درس",
+                "چندتا درس",
+                "چند جلسه",
+                "چند تا جلسه",
+                "چندجلسه",
+            )
+        )
+        asks_chapter_count = any(
+            s in um
+            for s in (
+                "چند فصل",
+                "چند تا فصل",
+                "چندتا فصل",
+                "چند بخش",
+                "چند تا بخش",
+                "چندتا بخش",
+                "چند فصل/بخش",
+            )
+        )
+
+        if context.failure_reason in {"lesson_out_of_range", "chapter_out_of_range"}:
+            if asks_chapter_count and context.max_chapter is not None:
+                grade_bit = f" پایه {grade}" if grade is not None else ""
+                return (
+                    f"این کتاب «{title}»{grade_bit} تا فصل/بخش {context.max_chapter} دارد."
+                )
+            if asks_lesson_count and context.max_lesson is not None:
+                grade_bit = f" پایه {grade}" if grade is not None else ""
+                return (
+                    f"این کتاب «{title}»{grade_bit} تا درس {context.max_lesson} دارد."
+                    " اگر دوست داری، بگو از کدوم درس شروع کنیم؟ 📚"
+                )
 
     if context.failure_reason == "book_unavailable":
         avail = context.available_grades or []

@@ -522,6 +522,8 @@ async def run_chat(
         backend_model=backend_model,
     )
 
+    latest_user_message = _get_latest_user_message(messages)
+
     from api.core.generation import (
         compose_textbook_failure_reply,
         compose_textbook_need_info_reply,
@@ -530,7 +532,9 @@ async def run_chat(
 
     canned_textbook = None
     if textbook_context:
-        canned_textbook = compose_textbook_failure_reply(textbook_context)
+        canned_textbook = compose_textbook_failure_reply(
+            textbook_context, user_message=latest_user_message
+        )
         if canned_textbook is None:
             canned_textbook = compose_textbook_need_info_reply(textbook_context)
         if canned_textbook is None:
