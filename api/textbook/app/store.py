@@ -854,6 +854,51 @@ def lesson_search(
     return get_page(grade, subject, start)
 
 
+def find_chapter_containing_page(
+    grade: int,
+    subject: str,
+    page: int,
+) -> int | None:
+    """Return the catalog parent-unit number that contains ``page``."""
+    book = get_catalog_book(grade, subject)
+    if book is None or not book.chapters:
+        return None
+    chapters = sorted(book.chapters, key=lambda ch: ch.start_page)
+    chosen: int | None = None
+    for ch in chapters:
+        if ch.start_page <= page:
+            chosen = ch.number
+        else:
+            break
+    return chosen
+
+
+def find_chapter_for_lesson(
+    grade: int,
+    subject: str,
+    lesson_number: int,
+    *,
+    kind: str | None = None,
+) -> int | None:
+    """Return the parent chapter number for a catalog child unit."""
+    book = get_catalog_book(grade, subject)
+    if book is None:
+        return None
+    want = _parse_catalog_kind(kind) if kind else None
+    for entry in book.lessons:
+        if entry.number != lesson_number:
+            continue
+        if want is not None and entry.kind != want:
+            if not (
+                want in {"lesson", "session"}
+                and entry.kind in {"lesson", "session"}
+            ):
+                continue
+        if entry.chapter is not None:
+            return entry.chapter
+    return None
+
+
 def find_lesson_containing_page(
     grade: int,
     subject: str,

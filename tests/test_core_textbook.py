@@ -18,6 +18,9 @@ from api.core.textbook import (
     resolve_textbook_scope,
 )
 
+from api.textbook.app.models import RetrieveRequest
+from api.textbook.app.retrieve_service import retrieve_context
+
 
 @pytest.mark.parametrize(
     ("text", "expected"),
@@ -145,6 +148,54 @@ def test_resolve_textbook_scope_tracks_relative_navigation() -> None:
     assert scope.page == 34
 
 
+def test_resolve_textbook_scope_tracks_relative_chapter_navigation() -> None:
+    messages = [
+        ChatMessage(role="user", content="کلاس چهارم"),
+        ChatMessage(role="user", content="فارسی"),
+        ChatMessage(role="user", content="فصل ۳"),
+        ChatMessage(role="assistant", content="..."),
+        ChatMessage(role="user", content="بریم فصل بعدی"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.grade == 4
+    assert scope.subject_id == "persian"
+    assert scope.chapter == 4
+
+
+def test_relative_chapter_from_sticky_page_without_explicit_chapter() -> None:
+    """«فصل بعدی» after page navigation must infer parent unit from catalog."""
+    messages = [
+        ChatMessage(role="user", content="خب بریم فصل بعدی"),
+    ]
+    scope = resolve_textbook_scope(
+        messages,
+        sticky={"grade": 4, "subject": "persian", "page": 34, "lesson": 3},
+    )
+    assert scope.grade == 4
+    assert scope.subject_id == "persian"
+    # Page 34 is in فصل ۲ → next is فصل ۳
+    assert scope.chapter == 3
+    assert scope.page is None
+
+
+def test_sticky_page_next_page_uses_latest_not_history() -> None:
+    """Sticky page 34 + «صفحه بعد» must become 35, not regress via old «صفحه ۳۳»."""
+    messages = [
+        ChatMessage(role="user", content="کلاس چهارم"),
+        ChatMessage(role="assistant", content="..."),
+        ChatMessage(role="user", content="فارسی"),
+        ChatMessage(role="assistant", content="..."),
+        ChatMessage(role="user", content="صفحه ۳۳"),
+        ChatMessage(role="assistant", content="..."),
+        ChatMessage(role="user", content="خب بریم صفحه ی بعدی"),
+    ]
+    scope = resolve_textbook_scope(
+        messages,
+        sticky={"grade": 4, "subject": "persian", "page": 34, "lesson": 3},
+    )
+    assert scope.page == 35
+
+
 def test_build_textbook_query_followup_after_next_page() -> None:
     """«چه داستانیه؟» after «بریم صفحه بعد» must stay on page 34, not regress to 33."""
     messages = [
@@ -175,6 +226,54 @@ def test_resolve_textbook_scope_uses_sticky_metadata() -> None:
     assert scope.subject_id == "persian"
     assert scope.page == 34
     assert scope.has_page_lookup()
+
+
+def test_subject_switch_with_chapter_after_other_math() -> None:
+    """«ریاضی بسه، تمرین فصل ۳ فارسی» باید فصل ۳ کتاب فارسی را بگیرد."""
+    scope = resolve_textbook_scope(
+        [ChatMessage(role="user", content="خب ریاضی بسه، بریم تمرین های فصل ۳ فارسی رو حل کنیم")],
+        sticky={"grade": 4, "subject": "math"},
+    )
+    assert scope.grade == 4
+    assert scope.subject_id == "persian"
+    assert scope.chapter == 3
+
+    resp = retrieve_context(
+        RetrieveRequest(
+            query="",
+            grade=scope.grade,
+            subject=scope.subject_id,
+            chapter=scope.chapter,
+            include_image="never",
+        )
+    )
+    assert resp.matched is True
+
+
+def test_retrieve_next_chapter_via_relative_navigation() -> None:
+    """«فصل ۳» → «فصل بعدی» باید فصل ۴ را retrieve کند."""
+    messages = [
+        ChatMessage(role="user", content="کلاس چهارم"),
+        ChatMessage(role="user", content="فارسی"),
+        ChatMessage(role="user", content="فصل ۳"),
+        ChatMessage(role="assistant", content="..."),
+        ChatMessage(role="user", content="بریم فصل بعدی"),
+    ]
+    scope = resolve_textbook_scope(messages)
+    assert scope.grade == 4
+    assert scope.subject_id == "persian"
+    assert scope.chapter == 4
+
+    resp = retrieve_context(
+        RetrieveRequest(
+            query="",
+            grade=scope.grade,
+            subject=scope.subject_id,
+            chapter=scope.chapter,
+            include_image="never",
+        )
+    )
+    assert resp.matched is True
 
 
 @pytest.mark.parametrize(

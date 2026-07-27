@@ -108,6 +108,14 @@ _TEXTBOOK_PREV_PAGE_RE = re.compile(
     r"(?:صفحه[\s\u200cٔی]*قبل(?:ی|ش)?|قبلش|صفحه‌ی?\s*قبل|بریم\s+(?:به\s+)?صفحه\s*قبل)",
     re.IGNORECASE,
 )
+_TEXTBOOK_NEXT_CHAPTER_RE = re.compile(
+    r"(?:فصل[\s\u200c]*بعد(?:ی|ش)?|بعدش\s*فصل|فصل[\s\u200c]*بعد)",
+    re.IGNORECASE,
+)
+_TEXTBOOK_PREV_CHAPTER_RE = re.compile(
+    r"(?:فصل[\s\u200c]*قبل(?:ی|ش)?|قبلش\s*فصل|فصل[\s\u200c]*قبل)",
+    re.IGNORECASE,
+)
 # Persian number words that can follow «صفحه» to form a page reference.
 _TEXTBOOK_PAGE_NUMBER_WORDS: frozenset[str] = frozenset({
     "اول", "یکم", "یک", "دوم", "دو", "سوم", "سه", "چهارم", "چهار", "پنجم", "پنج",
@@ -905,6 +913,148 @@ def _relative_page_delta(text: str) -> int:
     return 0
 
 
+def _relative_chapter_delta(text: str) -> int:
+    """+1 for «فصل بعد/بعدی»، -1 for «فصل قبل/قبلی»، 0 otherwise."""
+    if _TEXTBOOK_NEXT_CHAPTER_RE.search(text):
+        return 1
+    if _TEXTBOOK_PREV_CHAPTER_RE.search(text):
+        return -1
+    return 0
+
+
+def _infer_current_chapter(
+    grade: int,
+    subject_id: str,
+    *,
+    page: int | None,
+    lesson: int | None,
+    chapter: int | None,
+    kind: str | None,
+) -> int | None:
+    """Resolve the active parent unit from catalog when only page/lesson is known."""
+    if chapter is not None:
+        return chapter
+    from api.textbook.app.store import (
+        find_chapter_containing_page,
+        find_chapter_for_lesson,
+    )
+
+    if page is not None:
+        return find_chapter_containing_page(grade, subject_id, page)
+    if lesson is not None:
+        return find_chapter_for_lesson(
+            grade, subject_id, lesson, kind=kind
+        )
+    return None
+
+
+def _process_position_from_text(
+    text: str,
+    *,
+    grade: int | None,
+    subject_id: str | None,
+    current_page: int | None,
+    lesson: int | None,
+    chapter: int | None,
+    kind: str | None,
+    wants_outline: bool,
+    last_assistant: str | None,
+) -> tuple[int | None, int | None, int | None, str | None, bool]:
+    """Apply one user turn's locator intent onto the current textbook position."""
+    chapter_no = _extract_chapter_number(text)
+    if chapter_no is not None:
+        chapter = chapter_no
+        wants_outline = False
+        if (
+            _extract_page_number(text) is None
+            and _extract_bare_page_number(text) is None
+            and _extract_page_word_phrase(text) is None
+        ):
+            current_page = None
+
+    lesson_no = _extract_lesson_number(text)
+    if lesson_no is not None:
+        lesson = lesson_no
+        wants_outline = False
+        unit_kind = _extract_unit_kind(text)
+        if unit_kind is not None:
+            kind = unit_kind
+        if (
+            _extract_page_number(text) is None
+            and _extract_bare_page_number(text) is None
+            and _extract_page_word_phrase(text) is None
+        ):
+            current_page = None
+
+    if _textbook_wants_outline(text):
+        wants_outline = True
+        current_page = None
+        if _extract_chapter_number(text) is None:
+            chapter = None
+        if _extract_lesson_number(text) is None:
+            lesson = None
+            kind = None
+    elif (
+        chapter_no is not None
+        or lesson_no is not None
+        or _extract_page_number(text) is not None
+        or _extract_bare_page_number(text) is not None
+    ):
+        wants_outline = False
+
+    explicit_page = _extract_page_number(text)
+    if explicit_page is not None:
+        return explicit_page, lesson, chapter, kind, wants_outline
+
+    bare_page = _extract_bare_page_number(text)
+    if bare_page is not None:
+        if (
+            _assistant_asked_for_grade(last_assistant)
+            and grade is None
+            and 3 <= bare_page <= 6
+        ):
+            return current_page, lesson, chapter, kind, wants_outline
+        if (
+            _assistant_asked_for_page(last_assistant)
+            or grade is not None
+            or (
+                subject_id is not None
+                and (lesson is not None or chapter is not None)
+            )
+        ):
+            return bare_page, lesson, chapter, kind, wants_outline
+
+    page_words = _extract_page_word_phrase(text)
+    if page_words:
+        from api.textbook.app.parser import _parse_persian_number_phrase
+
+        parsed = _parse_persian_number_phrase(page_words)
+        if parsed is not None:
+            return parsed, lesson, chapter, kind, wants_outline
+
+    page_delta = _relative_page_delta(text)
+    if page_delta and current_page is not None:
+        current_page += page_delta
+
+    chap_delta = _relative_chapter_delta(text)
+    if chap_delta and grade is not None and subject_id:
+        base_chapter = _infer_current_chapter(
+            grade,
+            subject_id,
+            page=current_page,
+            lesson=lesson,
+            chapter=chapter,
+            kind=kind,
+        )
+        if base_chapter is not None:
+            chapter = base_chapter + chap_delta
+            current_page = None
+            lesson = None
+            kind = None
+
+    return current_page, lesson, chapter, kind, wants_outline
+
+
 def _resolve_relative_page(recent_user_texts: list[str]) -> int | None:
     """Resolve «صفحه بعد/قبل» into a concrete page from earlier explicit pages.
 
@@ -1085,6 +1235,12 @@ def resolve_textbook_scope(
         if isinstance(raw_kind, str) and raw_kind.strip():
             kind = raw_kind.strip()
 
+    has_sticky_position = (
+        isinstance(current_page, int)
+        or isinstance(lesson, int)
+        or isinstance(chapter, int)
+    )
+
     last_assistant: str | None = None
     user_texts: list[str] = []
 
@@ -1094,9 +1250,17 @@ def resolve_textbook_scope(
             continue
         if message.role != "user" or not message.content.strip():
             continue
+        user_texts.append(message.content.strip())
 
+    latest_user = user_texts[-1] if user_texts else ""
+
+    # Carry grade/subject from earlier turns (latest handled again below).
+    for message in recent_messages:
+        if message.role != "user" or not message.content.strip():
+            continue
         text = message.content.strip()
-        user_texts.append(text)
+        if text == latest_user:
+            continue
 
         grade_token = _extract_grade_token(text)
         if grade_token:
@@ -1109,97 +1273,82 @@ def resolve_textbook_scope(
             subject_kw = subject_token
             subject_id = _subject_keyword_to_id(subject_token)
 
-        chapter_no = _extract_chapter_number(text)
-        if chapter_no is not None:
-            chapter = chapter_no
-            wants_outline = False
-            if (
-                _extract_page_number(text) is None
-                and _extract_bare_page_number(text) is None
-                and _extract_page_word_phrase(text) is None
-            ):
-                current_page = None
-
-        lesson_no = _extract_lesson_number(text)
-        if lesson_no is not None:
-            lesson = lesson_no
-            wants_outline = False
-            unit_kind = _extract_unit_kind(text)
-            if unit_kind is not None:
-                kind = unit_kind
-            # «درس پنجم منظورم بود» after a wrong page must drop the old page,
-            # otherwise page lookup wins and we keep returning out_of_range.
-            if (
-                _extract_page_number(text) is None
-                and _extract_bare_page_number(text) is None
-                and _extract_page_word_phrase(text) is None
-            ):
-                current_page = None
-
-        # Outline is a per-turn intent (do not stick after «فصل چهارم» follow-ups).
         if _textbook_wants_outline(text):
             wants_outline = True
-            current_page = None
-            # Full-book outline unless this same turn names a parent unit.
-            if _extract_chapter_number(text) is None:
-                chapter = None
-            # Drop child number so outline isn't treated as unit retrieve.
-            if _extract_lesson_number(text) is None:
-                lesson = None
-                kind = None
+
+    # Position from history only when sticky did not already pin page/lesson/chapter.
+    if not has_sticky_position:
+        walk_assistant: str | None = None
+        for message in recent_messages:
+            if message.role == "assistant" and message.content.strip():
+                walk_assistant = message.content.strip()
+                continue
+            if message.role != "user" or not message.content.strip():
+                continue
+            text = message.content.strip()
+            if text == latest_user:
+                continue
+            (
+                current_page,
+                lesson,
+                chapter,
+                kind,
+                wants_outline,
+            ) = _process_position_from_text(
+                text,
+                grade=grade,
+                subject_id=subject_id,
+                current_page=current_page,
+                lesson=lesson,
+                chapter=chapter,
+                kind=kind,
+                wants_outline=wants_outline,
+                last_assistant=walk_assistant,
+            )
+
+    # Latest user message is authoritative for navigation / locator changes.
+    if latest_user:
+        grade_token = _extract_grade_token(latest_user)
+        if grade_token:
+            parsed_grade = _grade_token_to_int(grade_token)
+            if parsed_grade is not None:
+                grade = parsed_grade
+
+        subject_token = _extract_subject_token(latest_user)
+        if subject_token:
+            subject_kw = subject_token
+            subject_id = _subject_keyword_to_id(subject_token)
+
+        bare_page = _extract_bare_page_number(latest_user)
+        if (
+            bare_page is not None
+            and _assistant_asked_for_grade(last_assistant)
+            and grade is None
+            and 3 <= bare_page <= 6
+            and _extract_page_number(latest_user) is None
+        ):
+            grade = bare_page
         else:
-            # Later concrete turns cancel a previous outline ask.
-            if (
-                chapter_no is not None
-                or lesson_no is not None
-                or _extract_page_number(text) is not None
-                or _extract_bare_page_number(text) is not None
-            ):
-                wants_outline = False
-
-        explicit_page = _extract_page_number(text)
-        if explicit_page is not None:
-            current_page = explicit_page
-            wants_outline = False
-            continue
-
-        bare_page = _extract_bare_page_number(text)
-        if bare_page is not None:
-            # «۶» after «کلاس چندمی؟» is grade, not page.
-            if (
-                _assistant_asked_for_grade(last_assistant)
-                and grade is None
-                and 3 <= bare_page <= 6
-            ):
-                grade = bare_page
-                continue
-            # «۳۷» after page ask, or once grade is known in a homework thread.
-            if (
-                _assistant_asked_for_page(last_assistant)
-                or grade is not None
-                or (
-                    subject_id is not None
-                    and (lesson is not None or chapter is not None)
-                )
-            ):
-                current_page = bare_page
-                continue
-
-        page_words = _extract_page_word_phrase(text)
-        if page_words:
-            from api.textbook.app.parser import _parse_persian_number_phrase
-
-            parsed = _parse_persian_number_phrase(page_words)
-            if parsed is not None:
-                current_page = parsed
-            continue
-
-        delta = _relative_page_delta(text)
-        if delta and current_page is not None:
-            current_page += delta
+            (
+                current_page,
+                lesson,
+                chapter,
+                kind,
+                wants_outline,
+            ) = _process_position_from_text(
+                latest_user,
+                grade=grade,
+                subject_id=subject_id,
+                current_page=current_page,
+                lesson=lesson,
+                chapter=chapter,
+                kind=kind,
+                wants_outline=wants_outline,
+                last_assistant=last_assistant,
+            )
 
     topic_query: str | None = None
-    latest = user_texts[-1] if user_texts else ""
+    latest = latest_user
     asked_for_locator = _assistant_asked_for_page(
         last_assistant
     ) or _assistant_asked_for_lesson(last_assistant)
