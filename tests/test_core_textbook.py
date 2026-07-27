@@ -196,6 +196,30 @@ def test_sticky_page_next_page_uses_latest_not_history() -> None:
     assert scope.page == 35
 
 
+def test_soft_turn_after_page_oor_does_not_renag() -> None:
+    """After «صفحه ۷۰۰» OOR, soft turns like «عجب» must not re-fetch or canned-loop."""
+    from api.core.generation import compose_textbook_failure_reply
+    from api.core.textbook import latest_message_wants_textbook_retrieve
+    from api.core.types import TextbookContext
+
+    assert latest_message_wants_textbook_retrieve("عجب") is False
+    assert latest_message_wants_textbook_retrieve("بله برو") is False
+    assert latest_message_wants_textbook_retrieve("بریم صفحه ۷۰۰ اصلا") is True
+
+    ctx = TextbookContext(
+        matched=False,
+        failure_reason="page_out_of_range",
+        page_out_of_range=True,
+        page=700,
+        subject_title="فارسی",
+        grade=4,
+        max_page=152,
+    )
+    assert compose_textbook_failure_reply(ctx, user_message="عجب") is None
+    assert compose_textbook_failure_reply(ctx, user_message="بله برو") is None
+    assert compose_textbook_failure_reply(ctx, user_message="بریم صفحه ۷۰۰ اصلا") is not None
+
+
 def test_build_textbook_query_followup_after_next_page() -> None:
     """«چه داستانیه؟» after «بریم صفحه بعد» must stay on page 34, not regress to 33."""
     messages = [

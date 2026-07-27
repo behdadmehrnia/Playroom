@@ -617,6 +617,11 @@ async def resolve_active_persona(
         """Homework/teacher when the child clearly needs catalog/page tools."""
         if not latest_user_msg:
             return None
+        # Soft confirms («بله برو») are persona switches, not textbook asks.
+        if _CONFIRM_YES_RE.search(latest_user_msg.strip()) or _CONFIRM_NO_RE.search(
+            latest_user_msg.strip()
+        ):
+            return None
         if re.search(r"برای\s*تدریس|طرح\s*درس|ایده\s*(?:ی\s*)?تدریس", latest_user_msg):
             return "teacher"
         if looks_like_textbook_session_switch(latest_user_msg):
@@ -624,8 +629,7 @@ async def resolve_active_persona(
         # Clarifying follow-ups («خود کتاب فارسی») while list/unit scope is pending.
         from .textbook import (
             _extract_subject_token,
-            looks_like_textbook_followup,
-            looks_like_textbook_help_request,
+            latest_message_wants_textbook_retrieve,
         )
 
         scope = resolve_textbook_scope(messages, sticky=sticky_scope)
@@ -644,17 +648,17 @@ async def resolve_active_persona(
         )
         if not pending_book:
             return None
-        if looks_like_textbook_followup(latest_user_msg) or looks_like_textbook_help_request(
-            latest_user_msg
+        if latest_message_wants_textbook_retrieve(latest_user_msg):
+            return "homework"
+        # Clarifying book answers without a new locator.
+        if re.search(
+            r"خود\s*کتاب|همین\s*کتاب|کتاب\s*درسی|کتاب\s*اصلی",
+            latest_user_msg,
         ):
             return "homework"
         if _extract_subject_token(latest_user_msg):
             return "homework"
-        if re.search(
-            r"خود\s*کتاب|همین\s*کتاب|کتاب\s*درسی|کتاب\s*اصلی|آره|بله|باشه|همون",
-            latest_user_msg,
-        ):
-            return "homework"
+        # Do NOT treat bare «بله/آره» as textbook — that blocks persona confirms.
         return None
 
     textbook_persona = _textbook_force_persona()
@@ -687,6 +691,15 @@ async def resolve_active_persona(
                     current_persona = normalized
     if current_persona is None:
         current_persona = _infer_persona_from_history(messages)
+
+    # Answer a pending switch confirmation BEFORE textbook force can sticky-keep
+    # homework on a stale out-of-range page from earlier in the thread.
+    pending = _extract_pending_switch_from_history(messages)
+    if pending and latest_user_msg and current_persona and current_persona != "none":
+        if _CONFIRM_YES_RE.search(latest_user_msg.strip()):
+            return PersonaResolution(persona=pending)
+        if _CONFIRM_NO_RE.search(latest_user_msg.strip()):
+            return PersonaResolution(persona=current_persona)
 
     # «سلام» alone: stay on none until the child actually picks an activity.
     if (
@@ -721,14 +734,6 @@ async def resolve_active_persona(
         or _last_assistant_is_welcome(messages)
     ):
         return PersonaResolution(persona=menu_pick)
-
-    # Answer a pending switch confirmation from the previous assistant turn.
-    pending = _extract_pending_switch_from_history(messages)
-    if pending and latest_user_msg and current_persona and current_persona != "none":
-        if _CONFIRM_YES_RE.search(latest_user_msg.strip()):
-            return PersonaResolution(persona=pending)
-        if _CONFIRM_NO_RE.search(latest_user_msg.strip()):
-            return PersonaResolution(persona=current_persona)
 
     # Sticky keep without calling the LLM when appropriate.
     if (

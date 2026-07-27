@@ -399,6 +399,61 @@ def looks_like_textbook_followup(text: str) -> bool:
     return any(marker in lowered for marker in _TEXTBOOK_FOLLOWUP_MARKERS)
 
 
+def latest_message_wants_textbook_retrieve(
+    text: str,
+    *,
+    last_assistant: str | None = None,
+) -> bool:
+    """True when the *latest* user turn itself asks to open/use textbook context.
+
+    Prevents stale locators from earlier turns (e.g. an out-of-range «صفحه ۷۰۰»)
+    from re-fetching and spamming canned OOR replies on soft messages like
+    «عجب» or persona confirms like «بله برو».
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if _relative_page_delta(raw) != 0 or _relative_chapter_delta(raw) != 0:
+        return True
+    if _textbook_wants_outline(raw):
+        return True
+    if _extract_page_number(raw) is not None or _extract_page_word_phrase(raw):
+        return True
+    if _extract_lesson_number(raw) is not None or _extract_chapter_number(raw) is not None:
+        return True
+    if looks_like_textbook_followup(raw) or looks_like_textbook_help_request(raw):
+        return True
+    if _textbook_has_topic_intent(raw):
+        return True
+    # Named titles only when the assistant asked for a lesson/title, or the
+    # child explicitly framed it as a lesson («درس ارزش علم»). Bare words like
+    # «عجب» must not count as textbook retrieve intent.
+    if _extract_named_lesson_title(raw) and (
+        _assistant_asked_for_lesson(last_assistant)
+        or _textbook_has_lesson(raw)
+        or any(m in raw for m in ("درس", "فصل", "جلسه", "مهارت"))
+    ):
+        return True
+    # Child answering «کلاس چندمی؟» / «کدوم صفحه؟» after we asked.
+    if _assistant_asked_for_grade(last_assistant) and (
+        _extract_grade_token(raw) is not None
+        or (_extract_bare_page_number(raw) is not None and 3 <= int(_extract_bare_page_number(raw) or 0) <= 6)
+    ):
+        return True
+    if _assistant_asked_for_page(last_assistant) and (
+        _extract_page_number(raw) is not None
+        or _extract_bare_page_number(raw) is not None
+        or _extract_page_word_phrase(raw)
+    ):
+        return True
+    if _assistant_asked_for_lesson(last_assistant) and (
+        _extract_lesson_number(raw) is not None
+        or _extract_named_lesson_title(raw)
+    ):
+        return True
+    return False
+
+
 def _grade_token_to_int(token: str) -> int | None:
     cleaned = (token or "").strip()
     for key in ("پایه", "کلاس"):
@@ -1235,6 +1290,7 @@ def resolve_textbook_scope(
         if isinstance(raw_kind, str) and raw_kind.strip():
             kind = raw_kind.strip()
 
+    has_sticky = bool(sticky)
     has_sticky_position = (
         isinstance(current_page, int)
         or isinstance(lesson, int)
@@ -1276,8 +1332,11 @@ def resolve_textbook_scope(
         if _textbook_wants_outline(text):
             wants_outline = True
 
-    # Position from history only when sticky did not already pin page/lesson/chapter.
-    if not has_sticky_position:
+    # Position from history only when sticky metadata is absent.
+    # If sticky exists (even grade+subject only after an OOR miss), do not
+    # re-apply a stale «صفحه ۷۰۰» from earlier turns — only the latest message
+    # may change position.
+    if not has_sticky and not has_sticky_position:
         walk_assistant: str | None = None
         for message in recent_messages:
             if message.role == "assistant" and message.content.strip():

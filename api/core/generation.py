@@ -194,8 +194,8 @@ def compose_textbook_failure_reply(
 
     # If the child asks about counts (e.g. "این کتاب چند درس دارد؟"),
     # answer directly using known bounds to avoid a loop of out-of-range nagging.
-    if user_message:
-        um = re.sub(r"\s+", " ", (user_message or "").strip())
+    um = re.sub(r"\s+", " ", (user_message or "").strip()) if user_message else ""
+    if um:
         asks_lesson_count = any(
             s in um
             for s in (
@@ -232,6 +232,22 @@ def compose_textbook_failure_reply(
                     f"این کتاب «{title}»{grade_bit} تا درس {context.max_lesson} دارد."
                     " اگر دوست داری، بگو از کدوم درس شروع کنیم؟ 📚"
                 )
+
+    # Soft turns («عجب»، «بله برو»، «بریم بازی») must not re-nag about a stale
+    # out-of-range locator left over from an earlier message in the thread.
+    locator_failures = {
+        "page_out_of_range",
+        "lesson_out_of_range",
+        "chapter_out_of_range",
+        "lesson_missing",
+    }
+    if (
+        context.failure_reason in locator_failures or context.page_out_of_range
+    ) and um:
+        from api.core.textbook import latest_message_wants_textbook_retrieve
+
+        if not latest_message_wants_textbook_retrieve(um):
+            return None
 
     if context.failure_reason == "book_unavailable":
         avail = context.available_grades or []

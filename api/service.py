@@ -209,10 +209,24 @@ async def _resolve_textbook_context(
         or scope.has_lesson_lookup()
         or scope.has_page_lookup()
     )
+    from api.core.textbook import latest_message_wants_textbook_retrieve
+
+    last_assistant = next(
+        (
+            m.content.strip()
+            for m in reversed(messages)
+            if m.role == "assistant" and m.content.strip()
+        ),
+        None,
+    )
+    latest_wants = latest_message_wants_textbook_retrieve(
+        user_message, last_assistant=last_assistant
+    )
     should_fetch = bool(
         ctx_enabled
         and scope.can_retrieve()
         and (persona in TEXTBOOK_PERSONAS or strong_catalog)
+        and latest_wants
     )
 
     if should_fetch:
