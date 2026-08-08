@@ -393,8 +393,12 @@ def _format_web_search_results(results: list[WebSearchResult]) -> str:
 
 
 def _parse_external_web_search_payload(
-    data: dict[str, Any], *, query: str, provider: str
+    data: dict[str, Any] | list[Any], *, query: str, provider: str
 ) -> WebSearchContext:
+    # Some providers (e.g. Gerdoo GET /search) return a bare results array.
+    if isinstance(data, list):
+        data = {"results": data}
+
     results: list[WebSearchResult] = []
 
     def _append_item(
@@ -510,6 +514,136 @@ def _normalize_perplexity_search_url(perplexity_url: str) -> str:
     if base.endswith("/api"):
         return f"{base}/v1/search"
     return f"{base}/api/v1/search"
+
+
+# Named search backends. ``auto`` expands to the default ordered chain.
+WEB_SEARCH_PROVIDER_NAMES: frozenset[str] = frozenset(
+    {"api", "gerdoo", "perplexity", "duckduckgo"}
+)
+WEB_SEARCH_PROVIDER_ALIASES: dict[str, str] = {
+    "simple": "gerdoo",  # legacy name from early integration
+}
+# Preferred order when YARKIDS_WEB_SEARCH_PROVIDER=auto
+WEB_SEARCH_AUTO_ORDER: tuple[str, ...] = (
+    "api",
+    "perplexity",
+    "duckduckgo",
+    "gerdoo",
+)
+
+
+def parse_web_search_provider_chain(raw: str) -> list[str]:
+    """Parse a provider setting into an ordered fallback chain.
+
+    Accepts:
+      - ``auto`` / empty → default order (``WEB_SEARCH_AUTO_ORDER``)
+      - a single name, e.g. ``gerdoo``
+      - a comma/semicolon-separated list, e.g. ``api,perplexity,duckduckgo,gerdoo``
+    """
+    text = (raw or "").strip().lower()
+    if not text or text == "auto":
+        return list(WEB_SEARCH_AUTO_ORDER)
+
+    parts = [
+        part.strip()
+        for part in text.replace(";", ",").split(",")
+        if part.strip()
+    ]
+    chain: list[str] = []
+    for part in parts:
+        if part == "auto":
+            for name in WEB_SEARCH_AUTO_ORDER:
+                if name not in chain:
+                    chain.append(name)
+            continue
+        name = WEB_SEARCH_PROVIDER_ALIASES.get(part, part)
+        if name in WEB_SEARCH_PROVIDER_NAMES and name not in chain:
+            chain.append(name)
+    return chain or list(WEB_SEARCH_AUTO_ORDER)
+
+
+def format_web_search_provider_setting(raw: str) -> str:
+    """Normalize for display/health: ``auto`` or a comma-joined chain."""
+    text = (raw or "").strip().lower()
+    if not text or text == "auto":
+        return "auto"
+    return ",".join(parse_web_search_provider_chain(text))
+
+
+def _normalize_gerdoo_search_url(gerdoo_url: str) -> str:
+    """Accept a base host or a full ``/search`` URL (Gerdoo / gerdoo.me style)."""
+    raw = (gerdoo_url or "").strip()
+    if not raw:
+        return ""
+    base = raw.rstrip("/")
+    if base.endswith("/search"):
+        return base
+    return f"{base}/search"
+
+
+def _search_via_gerdoo(
+    query: str,
+    *,
+    gerdoo_url: str,
+    max_results: int,
+    timeout_sec: float,
+) -> WebSearchContext:
+    """GET ``{base}/search?query=...`` returning ``[{link,title,snippet}, ...]``."""
+    endpoint = _normalize_gerdoo_search_url(gerdoo_url)
+    if not endpoint:
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="gerdoo",
+            error="no_gerdoo_url",
+        )
+
+    url = f"{endpoint}?{urllib.parse.urlencode({'query': query})}"
+    try:
+        data = _http_get_json(url, timeout_sec=timeout_sec)
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+            payload = json.loads(body)
+            if isinstance(payload, (dict, list)):
+                parsed = _parse_external_web_search_payload(
+                    payload, query=query, provider="gerdoo"
+                )
+                if parsed.matched:
+                    return parsed
+                if parsed.error:
+                    return parsed
+        except Exception:
+            pass
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="gerdoo",
+            error=f"HTTP {exc.code} از Gerdoo",
+        )
+    except urllib.error.URLError as exc:
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="gerdoo",
+            error=f"اتصال ناموفق به Gerdoo: {exc.reason}",
+        )
+    except (json.JSONDecodeError, TimeoutError, ValueError) as exc:
+        return WebSearchContext(
+            matched=False,
+            query=query,
+            provider="gerdoo",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+    if not data:
+        return WebSearchContext(matched=False, query=query, provider="gerdoo")
+    ctx = _parse_external_web_search_payload(data, query=query, provider="gerdoo")
+    if ctx.results and len(ctx.results) > max_results:
+        ctx.results = ctx.results[:max_results]
+        ctx.context_text = _format_web_search_results(ctx.results)
+    return ctx
+
 
 def _search_via_perplexity(
     query: str,
@@ -955,6 +1089,7 @@ async def fetch_web_search_context(
     provider: str = "auto",
     api_url: str = "",
     api_key: str | None = None,
+    gerdoo_url: str = "",
     perplexity_url: str = "",
     max_results: int = DEFAULT_WEB_SEARCH_MAX_RESULTS,
     timeout_sec: float = DEFAULT_WEB_SEARCH_TIMEOUT_SEC,
@@ -962,23 +1097,26 @@ async def fetch_web_search_context(
     """
     Fetch web search snippets for creative/storyteller/gamer personas.
 
-    Providers:
+    Providers (``provider`` may be a single name, ``auto``, or a comma-separated
+    fallback chain such as ``api,perplexity,duckduckgo,gerdoo``):
+      - ``gerdoo``: GET ``{WEB_SEARCH_GERDOO_URL}/search?query=...``
       - ``api``: POST ``{WEB_SEARCH_API_URL}/v1/search``
       - ``perplexity``: GET ``{PERPLEXITY_URL}?query=...``
       - ``duckduckgo``: web search (Wikipedia as backup)
-      - ``auto``: first available among api → perplexity → duckduckgo → wikipedia
+      - ``auto``: configured sources in default order
+        (api → perplexity → duckduckgo → gerdoo)
     """
     cleaned = query.strip()
     if not cleaned:
         return None
 
     max_results = max(1, min(int(max_results), 10))
-    normalized = (provider or "auto").strip().lower()
-    if normalized not in {"auto", "api", "duckduckgo", "perplexity"}:
-        normalized = "auto"
+    chain = parse_web_search_provider_chain(provider)
+    is_auto = (provider or "auto").strip().lower() in {"", "auto"}
 
     variants = _web_search_query_variants(cleaned)
     has_api = bool(_normalize_api_base_url(api_url))
+    has_gerdoo = bool(_normalize_gerdoo_search_url(gerdoo_url))
     has_perplexity = bool(_normalize_perplexity_search_url(perplexity_url))
 
     def _try_api() -> WebSearchContext | None:
@@ -990,6 +1128,23 @@ async def fetch_web_search_context(
                 variant,
                 api_url=api_url,
                 api_key=api_key,
+                max_results=max_results,
+                timeout_sec=timeout_sec,
+            )
+            last = ctx
+            if ctx.matched:
+                ctx.query = cleaned
+                return ctx
+        return last
+
+    def _try_gerdoo() -> WebSearchContext | None:
+        if not has_gerdoo:
+            return None
+        last: WebSearchContext | None = None
+        for variant in variants:
+            ctx = _search_via_gerdoo(
+                variant,
+                gerdoo_url=gerdoo_url,
                 max_results=max_results,
                 timeout_sec=timeout_sec,
             )
@@ -1044,32 +1199,59 @@ async def fetch_web_search_context(
             *ddg_hits, *wiki_hits, query=cleaned, max_results=max_results
         )
 
-    def _run() -> WebSearchContext:
-        if normalized == "api":
-            ctx = _try_api()
-            return ctx or WebSearchContext(
-                matched=False, query=cleaned, provider="api", error="no_api_url"
-            )
-
-        if normalized == "perplexity":
-            ctx = _try_perplexity()
-            return ctx or WebSearchContext(
-                matched=False,
-                query=cleaned,
-                provider="perplexity",
-                error="no_perplexity_url",
-            )
-
-        if normalized == "duckduckgo":
+    def _try_named(name: str) -> WebSearchContext | None:
+        if name == "api":
+            return _try_api()
+        if name == "gerdoo":
+            return _try_gerdoo()
+        if name == "perplexity":
+            return _try_perplexity()
+        if name == "duckduckgo":
             return _try_duckduckgo_wiki()
+        return None
 
-        # auto: try whatever is configured, then local fallbacks
-        for attempt in (_try_api, _try_perplexity):
-            ctx = attempt()
-            if ctx and ctx.matched:
+    def _missing_config_error(name: str) -> str:
+        return {
+            "api": "no_api_url",
+            "gerdoo": "no_gerdoo_url",
+            "perplexity": "no_perplexity_url",
+        }.get(name, "unavailable")
+
+    def _run() -> WebSearchContext:
+        # In auto mode, skip backends that are not configured so we do not
+        # waste the chain on known-empty attempts.
+        effective_chain = list(chain)
+        if is_auto:
+            available = {
+                "api": has_api,
+                "gerdoo": has_gerdoo,
+                "perplexity": has_perplexity,
+                "duckduckgo": True,
+            }
+            effective_chain = [name for name in chain if available.get(name)]
+            if not effective_chain:
+                effective_chain = ["duckduckgo"]
+
+        last: WebSearchContext | None = None
+        for name in effective_chain:
+            ctx = _try_named(name)
+            if ctx is None:
+                last = WebSearchContext(
+                    matched=False,
+                    query=cleaned,
+                    provider=name,
+                    error=_missing_config_error(name),
+                )
+                continue
+            last = ctx
+            if ctx.matched:
                 return ctx
 
-        return _try_duckduckgo_wiki()
+        return last or WebSearchContext(
+            matched=False,
+            query=cleaned,
+            provider=effective_chain[0] if effective_chain else "auto",
+        )
 
     return await asyncio.to_thread(_run)
 
@@ -1082,6 +1264,7 @@ async def resolve_web_search_context(
     provider: str = "auto",
     api_url: str = "",
     api_key: str | None = None,
+    gerdoo_url: str = "",
     perplexity_url: str = "",
     max_results: int = DEFAULT_WEB_SEARCH_MAX_RESULTS,
     timeout_sec: float = DEFAULT_WEB_SEARCH_TIMEOUT_SEC,
@@ -1131,6 +1314,7 @@ async def resolve_web_search_context(
         provider=provider,
         api_url=api_url,
         api_key=api_key,
+        gerdoo_url=gerdoo_url,
         perplexity_url=perplexity_url,
         max_results=max_results,
         timeout_sec=timeout_sec,

@@ -148,10 +148,18 @@ Chat Controls → Valves → **شخصیت یار کودک**
 برای پرسوناهای **خلاق**، **داستان‌گو** و **بازی و سرگرمی**، وقتی سؤال کودک واقعی/به‌روز به نظر برسد، سیستم قبل از تولید پاسخ در اینترنت جستجو می‌کند و خلاصهٔ نتایج را به پرامپت تزریق می‌کند.
 
 - `WEB_SEARCH_PROVIDER` (env API):
-  - `duckduckgo` — DuckDuckGo داخلی (+ Wikipedia)
   - `api` — `POST {WEB_SEARCH_API_URL}/v1/search`
   - `perplexity` — `GET {WEB_SEARCH_PERPLEXITY_URL}/api/v1/search?query=...`
-  - `auto` — هر منبعی که در دسترس باشد، به ترتیب: api → perplexity → duckduckgo
+  - `duckduckgo` — DuckDuckGo داخلی (+ Wikipedia)
+  - `gerdoo` — `GET {WEB_SEARCH_GERDOO_URL}/search?query=...` (آرایهٔ `{link,title,snippet}`؛ [gerdoo.me](https://gerdoo.me))
+  - `auto` — منابع پیکربندی‌شده به ترتیب پیش‌فرض: api → perplexity → duckduckgo → gerdoo
+  - لیست ترتیبی با کاما برای fallback صریح، مثلاً `api,perplexity,duckduckgo,gerdoo`
+- تست مستقیم هر provider (بدون gate پرسونا):
+  - `POST /v1/web-search/providers/api`
+  - `POST /v1/web-search/providers/perplexity`
+  - `POST /v1/web-search/providers/duckduckgo`
+  - `POST /v1/web-search/providers/gerdoo`
+  - body: `{"query":"...", "max_results":5}`
 - در API: `POST /v1/web-search/query` و `POST /v1/web-search/retrieve`
 - اگر جستجو شکست بخورد، چت بدون نتایج ادامه می‌یابد (حدس نمی‌زند)
 

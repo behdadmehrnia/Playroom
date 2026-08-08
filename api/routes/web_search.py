@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.config import Settings
 from api.core import (
@@ -15,7 +15,10 @@ from api.core import (
     rewrite_web_search_query,
 )
 from api.core.types import LLMClient
+from api.core.web_search import WEB_SEARCH_PROVIDER_NAMES
 from api.models import (
+    WebSearchProviderTestRequest,
+    WebSearchProviderTestResponse,
     WebSearchQueryRequest,
     WebSearchQueryResponse,
     WebSearchRetrieveRequest,
@@ -119,8 +122,8 @@ async def retrieve_web_search_endpoint(
     debug: str | None = None
 
     if should_fetch:
-        provider = (req.provider or settings.normalized_web_search_provider()).strip().lower()
-        if provider not in {"auto", "api", "duckduckgo", "perplexity"}:
+        provider = (req.provider or settings.web_search_provider).strip().lower()
+        if not provider:
             provider = "auto"
         timeout = (
             req.timeout_sec
@@ -137,6 +140,7 @@ async def retrieve_web_search_endpoint(
             provider=provider,
             api_url=settings.web_search_api_url,
             api_key=settings.web_search_api_key or None,
+            gerdoo_url=settings.web_search_gerdoo_url,
             perplexity_url=settings.web_search_perplexity_url,
             max_results=max_results,
             timeout_sec=timeout,
@@ -159,3 +163,100 @@ async def retrieve_web_search_endpoint(
         web_search_context=context,
         debug=debug,
     )
+
+
+async def _run_provider_test(
+    *,
+    provider: str,
+    req: WebSearchProviderTestRequest,
+    settings: Settings,
+) -> WebSearchProviderTestResponse:
+    name = provider.strip().lower()
+    if name not in WEB_SEARCH_PROVIDER_NAMES:
+        raise HTTPException(status_code=404, detail=f"unknown provider: {provider}")
+
+    query = req.query.strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="query is required")
+
+    timeout = (
+        req.timeout_sec
+        if req.timeout_sec is not None
+        else settings.web_search_request_timeout_sec
+    )
+    max_results = (
+        req.max_results
+        if req.max_results is not None
+        else settings.web_search_max_results
+    )
+    context = await fetch_web_search_context(
+        query,
+        provider=name,
+        api_url=settings.web_search_api_url,
+        api_key=settings.web_search_api_key or None,
+        gerdoo_url=settings.web_search_gerdoo_url,
+        perplexity_url=settings.web_search_perplexity_url,
+        max_results=max_results,
+        timeout_sec=timeout,
+    )
+    matched = bool(context and context.matched)
+    return WebSearchProviderTestResponse(
+        provider=name,
+        query=query,
+        matched=matched,
+        results_count=len(context.results) if context else 0,
+        error=context.error if context else None,
+        web_search_context=context,
+    )
+
+
+@router.post(
+    "/v1/web-search/providers/api",
+    response_model=WebSearchProviderTestResponse,
+    tags=["Web Search"],
+    summary="Test api provider",
+)
+async def test_web_search_api_provider(
+    req: WebSearchProviderTestRequest,
+    settings: Settings = Depends(get_settings),
+) -> WebSearchProviderTestResponse:
+    return await _run_provider_test(provider="api", req=req, settings=settings)
+
+
+@router.post(
+    "/v1/web-search/providers/perplexity",
+    response_model=WebSearchProviderTestResponse,
+    tags=["Web Search"],
+    summary="Test perplexity provider",
+)
+async def test_web_search_perplexity_provider(
+    req: WebSearchProviderTestRequest,
+    settings: Settings = Depends(get_settings),
+) -> WebSearchProviderTestResponse:
+    return await _run_provider_test(provider="perplexity", req=req, settings=settings)
+
+
+@router.post(
+    "/v1/web-search/providers/duckduckgo",
+    response_model=WebSearchProviderTestResponse,
+    tags=["Web Search"],
+    summary="Test duckduckgo provider",
+)
+async def test_web_search_duckduckgo_provider(
+    req: WebSearchProviderTestRequest,
+    settings: Settings = Depends(get_settings),
+) -> WebSearchProviderTestResponse:
+    return await _run_provider_test(provider="duckduckgo", req=req, settings=settings)
+
+
+@router.post(
+    "/v1/web-search/providers/gerdoo",
+    response_model=WebSearchProviderTestResponse,
+    tags=["Web Search"],
+    summary="Test gerdoo provider",
+)
+async def test_web_search_gerdoo_provider(
+    req: WebSearchProviderTestRequest,
+    settings: Settings = Depends(get_settings),
+) -> WebSearchProviderTestResponse:
+    return await _run_provider_test(provider="gerdoo", req=req, settings=settings)

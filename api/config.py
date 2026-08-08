@@ -61,9 +61,22 @@ class Settings(BaseModel):
 
     # --- Web search — creative / storyteller / gamer ---
     enable_web_search: bool = Field(default=True)
-    web_search_provider: str = Field(default="auto")
+    web_search_provider: str = Field(
+        default="auto",
+        description=(
+            "یک provider، auto، یا لیست ترتیبی با کاما برای fallback "
+            "(مثل gerdoo,api,duckduckgo)."
+        ),
+    )
     web_search_api_url: str = Field(default="")
     web_search_api_key: str = Field(default="")
+    web_search_gerdoo_url: str = Field(
+        default="",
+        description=(
+            "آدرس پایه یا کامل سرویس جستجوی Gerdoo (gerdoo.me) "
+            "(GET .../search?query=...). خالی = غیرفعال."
+        ),
+    )
     web_search_perplexity_url: str = Field(
         default="",
         description=(
@@ -142,6 +155,10 @@ class Settings(BaseModel):
             web_search_provider=env("YARKIDS_WEB_SEARCH_PROVIDER", "auto").strip().lower(),
             web_search_api_url=env("YARKIDS_WEB_SEARCH_API_URL").strip(),
             web_search_api_key=env("YARKIDS_WEB_SEARCH_API_KEY").strip(),
+            web_search_gerdoo_url=(
+                env("YARKIDS_WEB_SEARCH_GERDOO_URL").strip()
+                or env("YARKIDS_WEB_SEARCH_SIMPLE_URL").strip()  # legacy alias
+            ),
             web_search_perplexity_url=env(
                 "YARKIDS_WEB_SEARCH_PERPLEXITY_URL"
             ).strip(),
@@ -162,10 +179,16 @@ class Settings(BaseModel):
         return value
 
     def normalized_web_search_provider(self) -> str:
-        value = self.web_search_provider.strip().lower()
-        if value not in {"auto", "api", "duckduckgo", "perplexity"}:
-            return "auto"
-        return value
+        """Display form: ``auto`` or a validated comma-joined fallback chain."""
+        from api.core.web_search import format_web_search_provider_setting
+
+        return format_web_search_provider_setting(self.web_search_provider)
+
+    def normalized_web_search_providers(self) -> list[str]:
+        """Ordered fallback chain parsed from ``web_search_provider``."""
+        from api.core.web_search import parse_web_search_provider_chain
+
+        return parse_web_search_provider_chain(self.web_search_provider)
 
     def uses_embedded_textbook(self) -> bool:
         value = self.textbook_api_url.strip().lower()

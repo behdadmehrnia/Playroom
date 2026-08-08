@@ -13,9 +13,11 @@ from api.core import (
 )
 from api.core.web_search import (
     _merge_web_search_results,
+    _normalize_gerdoo_search_url,
     _normalize_perplexity_search_url,
     _parse_external_web_search_payload,
     _web_search_query_variants,
+    parse_web_search_provider_chain,
 )
 
 
@@ -126,6 +128,41 @@ def test_normalize_perplexity_search_url() -> None:
     ).endswith("/search")
 
 
+def test_normalize_gerdoo_search_url() -> None:
+    assert (
+        _normalize_gerdoo_search_url("http://185.149.192.142:8888")
+        == "http://185.149.192.142:8888/search"
+    )
+    assert (
+        _normalize_gerdoo_search_url("http://185.149.192.142:8888/search")
+        == "http://185.149.192.142:8888/search"
+    )
+    assert _normalize_gerdoo_search_url("") == ""
+
+
+def test_parse_web_search_provider_chain() -> None:
+    assert parse_web_search_provider_chain("auto") == [
+        "api",
+        "perplexity",
+        "duckduckgo",
+        "gerdoo",
+    ]
+    assert parse_web_search_provider_chain("gerdoo") == ["gerdoo"]
+    assert parse_web_search_provider_chain("api,perplexity,duckduckgo,gerdoo") == [
+        "api",
+        "perplexity",
+        "duckduckgo",
+        "gerdoo",
+    ]
+    assert parse_web_search_provider_chain("simple,api") == ["gerdoo", "api"]
+    assert parse_web_search_provider_chain("nope,also-bad") == [
+        "api",
+        "perplexity",
+        "duckduckgo",
+        "gerdoo",
+    ]
+
+
 def test_parse_external_web_search_payload() -> None:
     ctx = _parse_external_web_search_payload(
         {
@@ -139,6 +176,107 @@ def test_parse_external_web_search_payload() -> None:
     assert ctx.matched is True
     assert len(ctx.results) == 1
     assert ctx.results[0].snippet == "Use iron pickaxe"
+
+
+def test_parse_external_web_search_list_payload() -> None:
+    """Gerdoo provider returns a bare JSON array with link/title/snippet."""
+    ctx = _parse_external_web_search_payload(
+        [
+            {
+                "link": "https://www.sargarme.com/god-of-war-gow-new-game-ps5-leaked/",
+                "title": "زمان رونمایی از بازی جدید God of War فاش شد",
+                "snippet": "گزارش‌ها نشان می‌دهد که شرکت سونی رونمایی می‌کند.",
+            },
+            {
+                "link": "https://www.zoomg.ir/playstation/2338-god-of-war-ps4-sony/",
+                "title": "نسخه‌ی جدید God of War در دست ساخت است",
+                "snippet": "کوری بالروگ یکی از کارگردانان استودیو سانتا مونیکا",
+            },
+        ],
+        query="New god of war release",
+        provider="gerdoo",
+    )
+    assert ctx.matched is True
+    assert ctx.provider == "gerdoo"
+    assert len(ctx.results) == 2
+    assert ctx.results[0].url == (
+        "https://www.sargarme.com/god-of-war-gow-new-game-ps5-leaked/"
+    )
+    assert "God of War" in ctx.results[0].title
+    assert ctx.context_text is not None
+    assert "منبع:" in ctx.context_text
+
+
+def test_search_via_gerdoo_fetches_list_results(monkeypatch: pytest.MonkeyPatch) -> None:
+    from api.core import web_search as web_search_mod
+
+    sample = [
+        {
+            "link": "https://example.com/gow",
+            "title": "God of War",
+            "snippet": "New release rumors",
+        }
+    ]
+
+    def fake_get_json(url: str, *, headers=None, timeout_sec: float):  # noqa: ANN001
+        assert url.startswith("http://185.149.192.142:8888/search?")
+        assert "query=" in url
+        return sample
+
+    monkeypatch.setattr(web_search_mod, "_http_get_json", fake_get_json)
+
+    ctx = web_search_mod._search_via_gerdoo(
+        "New god of war release",
+        gerdoo_url="http://185.149.192.142:8888",
+        max_results=5,
+        timeout_sec=8.0,
+    )
+    assert ctx.matched is True
+    assert ctx.provider == "gerdoo"
+    assert len(ctx.results) == 1
+    assert ctx.results[0].url == "https://example.com/gow"
+
+
+@pytest.mark.asyncio
+async def test_fetch_web_search_fallback_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    from api.core import web_search as web_search_mod
+
+    calls: list[str] = []
+
+    def fake_gerdoo(query, *, gerdoo_url, max_results, timeout_sec):  # noqa: ANN001
+        calls.append("gerdoo")
+        return WebSearchContext(
+            matched=False, query=query, provider="gerdoo", error="empty"
+        )
+
+    def fake_api(query, *, api_url, api_key, max_results, timeout_sec):  # noqa: ANN001
+        calls.append("api")
+        return WebSearchContext(
+            matched=True,
+            query=query,
+            provider="api",
+            results=[WebSearchResult(title="Hit", snippet="from api", url="https://a")],
+            context_text="1. Hit\nfrom api",
+        )
+
+    monkeypatch.setattr(web_search_mod, "_search_via_gerdoo", fake_gerdoo)
+    monkeypatch.setattr(web_search_mod, "_search_via_api", fake_api)
+
+    ctx = await web_search_mod.fetch_web_search_context(
+        "test query",
+        provider="gerdoo,api,duckduckgo",
+        gerdoo_url="http://gerdoo.test",
+        api_url="http://api.test",
+        max_results=3,
+        timeout_sec=5.0,
+    )
+    assert ctx is not None
+    assert ctx.matched is True
+    assert ctx.provider == "api"
+    assert "gerdoo" in calls
+    assert "api" in calls
+    assert calls.index("gerdoo") < calls.index("api")
+    assert "duckduckgo" not in calls
 
 
 def test_merge_web_search_results_deduplicates() -> None:

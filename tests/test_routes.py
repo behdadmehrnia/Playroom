@@ -60,6 +60,33 @@ def test_web_search_query_endpoint(client: TestClient) -> None:
     assert body["query"]
 
 
+def test_web_search_provider_endpoints_exist(client: TestClient, monkeypatch) -> None:  # noqa: ANN001
+    from api.core.types import WebSearchContext, WebSearchResult
+    import api.routes.web_search as web_search_routes
+
+    async def fake_fetch(query, *, provider, **kwargs):  # noqa: ANN001
+        return WebSearchContext(
+            matched=True,
+            query=query,
+            provider=provider,
+            results=[WebSearchResult(title="T", snippet="S", url="https://x")],
+            context_text="1. T\nS",
+        )
+
+    monkeypatch.setattr(web_search_routes, "fetch_web_search_context", fake_fetch)
+
+    for name in ("api", "perplexity", "duckduckgo", "gerdoo"):
+        r = client.post(
+            f"/v1/web-search/providers/{name}",
+            json={"query": "New god of war release", "max_results": 3},
+        )
+        assert r.status_code == 200, name
+        body = r.json()
+        assert body["provider"] == name
+        assert body["matched"] is True
+        assert body["results_count"] == 1
+        assert body["query"] == "New god of war release"
+
 def test_intent_endpoint(client: TestClient) -> None:
     client.app.state.llm_client = DummyLLM(
         responses=['{"persona":"homework","confidence":0.9}']

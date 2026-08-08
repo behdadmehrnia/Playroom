@@ -333,7 +333,7 @@ def _http_get_json(
     *,
     headers: dict[str, str] | None = None,
     timeout_sec: float,
-) -> dict[str, Any] | None:
+) -> dict[str, Any] | list[Any] | None:
     request = urllib.request.Request(
         url,
         headers=headers
@@ -346,4 +346,4 @@ def _http_get_json(
     with urllib.request.urlopen(request, timeout=timeout_sec) as response:
         raw = response.read().decode("utf-8")
         parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else None
+        return parsed if isinstance(parsed, (dict, list)) else None

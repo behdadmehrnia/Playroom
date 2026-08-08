@@ -165,6 +165,23 @@ class WebSearchRetrieveResponse(BaseModel):
     debug: str | None = None
 
 
+class WebSearchProviderTestRequest(BaseModel):
+    """Direct provider probe — skips persona/heuristic gates."""
+
+    query: str = Field(..., min_length=1)
+    max_results: int | None = Field(default=None, ge=1, le=10)
+    timeout_sec: float | None = Field(default=None, ge=1.0, le=30.0)
+
+
+class WebSearchProviderTestResponse(BaseModel):
+    provider: str
+    query: str
+    matched: bool = False
+    results_count: int = 0
+    error: str | None = None
+    web_search_context: WebSearchContext | None = None
+
+
 class GenerateRequest(BaseModel):
     model: str | None = None
     persona: str
