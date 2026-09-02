@@ -1,4 +1,4 @@
-"""Cross-cutting edge-case tests for Yar Kids subsystems."""
+"""Cross-cutting edge-case tests for Playroom subsystems."""
 
 from __future__ import annotations
 
@@ -326,7 +326,7 @@ async def test_resolve_persona_breaks_word_chain_for_textbook() -> None:
         llm_client=llm,
         backend_model="test",
         messages=messages,
-        body={"metadata": {"yarkids_active_persona": "gamer"}},
+        body={"metadata": {"playroom_active_persona": "gamer"}},
     )
     assert resolution.persona == "homework"
     assert resolution.ask_confirmation is False

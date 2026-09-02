@@ -8,7 +8,7 @@ from .prompts import get_chat_title_prompt
 from .types import ChatMessage, LLMClient, LLMCompletionRequest
 
 PLACEHOLDER_CHAT_TITLE = "گفتگوی تازه"
-CHAT_TITLE_METADATA_KEY = "yarkids_chat_title"
+CHAT_TITLE_METADATA_KEY = "playroom_chat_title"
 DEFAULT_MIN_USER_MESSAGES_FOR_TITLE = 2
 # When OpenWebUI title is unknown, re-emit through turns 2–3 so an early
 # English Greeting title can be overwritten once the topic is clear.
@@ -106,7 +106,7 @@ _CHAT_HISTORY_SPLIT_RE = re.compile(
     re.IGNORECASE,
 )
 _HISTORY_TURN_RE = re.compile(
-    r"^(?:User|Assistant|Human|AI|کودک|یار کودک)\s*:\s*(.*)$",
+    r"^(?:User|Assistant|Human|AI|کودک|Playroom)\s*:\s*(.*)$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -135,7 +135,7 @@ def _parse_embedded_chat_history(text: str) -> list[ChatMessage]:
 
     for line in history.splitlines():
         match = re.match(
-            r"^(User|Assistant|Human|AI|کودک|یار کودک)\s*:\s*(.*)$",
+            r"^(User|Assistant|Human|AI|کودک|Playroom)\s*:\s*(.*)$",
             line.strip(),
             flags=re.IGNORECASE,
         )
@@ -144,7 +144,7 @@ def _parse_embedded_chat_history(text: str) -> list[ChatMessage]:
             label = match.group(1).lower()
             current_role = (
                 "assistant"
-                if label in {"assistant", "ai", "یار کودک"}
+                if label in {"assistant", "ai", "Playroom"}
                 else "user"
             )
             rest = match.group(2).strip()
@@ -222,13 +222,13 @@ def format_title_conversation(messages: list[ChatMessage], *, limit: int = 8) ->
     lines: list[str] = []
     for message in messages[-limit:]:
         if message.role == "assistant" and _looks_like_welcome_or_menu(message.content):
-            role = "یار کودک"
+            role = "Playroom"
             content = "(خوش‌آمدگویی کوتاه)"
         elif message.role == "user":
             role = "کودک"
             content = message.content.strip()
         elif message.role == "assistant":
-            role = "یار کودک"
+            role = "Playroom"
             content = message.content.strip()
             if len(content) > 180:
                 content = content[:180] + "…"

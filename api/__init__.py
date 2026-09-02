@@ -1,5 +1,5 @@
 """
-    YarKids Standalone API
+    Playroom Standalone API
 """
 
 from __future__ import annotations

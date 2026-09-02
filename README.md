@@ -1,11 +1,11 @@
-# یار کودک (Yar Kids)
+# Playroom (Playroom)
 
-دستیار کودک‌دوست — سرویس FastAPI مستقل به‌همراه Pipe کلاینت برای OpenWebUI.
+دستPlayroom‌دوست — سرویس FastAPI مستقل به‌همراه Pipe کلاینت برای OpenWebUI.
 
 ## ساختار پروژه
 
 ```
-yarkids/
+playroom/
 ├── api/                        # سرویس FastAPI (منبع حقیقت منطق)
 │   ├── main.py                 # entrypoint: uvicorn api.main:app
 │   ├── config.py / llm.py      # env settings + LLM client
@@ -48,7 +48,7 @@ docker compose up -d --build
 uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-تنظیمات از env (مثلاً `YARKIDS_BACKEND_MODEL`, `YARKIDS_LLM_API_KEY`, …) — نمونه: `.env.example`.
+تنظیمات از env (مثلاً `PLAYROOM_BACKEND_MODEL`, `PLAYROOM_LLM_API_KEY`, …) — نمونه: `.env.example`.
 
 ## تست
 
@@ -66,13 +66,13 @@ pytest
 2. در **Admin → Functions** فایل `api/pipe/pipe.py` را import کنید.
 3. Function را فعال کنید و در Valves مقدار `API_BASE_URL` را به آدرس سرویس بزنید
    (مثلاً `http://host.docker.internal:8000`).
-4. مدل **یار کودک مستقل** در لیست مدل‌ها ظاهر می‌شود.
+4. مدل **Playroom مستقل** در لیست مدل‌ها ظاهر می‌شود.
 
 > منطق دیگر داخل Pipe اجرا نمی‌شود؛ همهٔ مراحل در API انجام می‌شود.
 
 ### عنوان گفتگو (Chat Title)
 
-عنوان سایدبار به‌صورت **فارسی و کودکانه** ساخته می‌شود و معمولاً بعد از کمی کانتکست (مثلاً پیام دوم کودک، نه فقط «سلام»). درخواست‌های title-generation اوپن‌وب‌یوآی هم همین پرامپت را می‌گیرند تا دیگر «Introduction to Yar Koodak» ساخته نشود.
+عنوان سایدبار به‌صورت **فارسی و کودکانه** ساخته می‌شود و معمولاً بعد از کمی کانتکست (مثلاً پیام دوم کودک، نه فقط «سلام»). درخواست‌های title-generation اوپن‌وب‌یوآی هم همین پرامپت را می‌گیرند تا دیگر «Introduction to Playroom» ساخته نشود.
 
 ## نسخهٔ منسوخ (منطق محلی)
 
@@ -94,7 +94,7 @@ python api/pipe/generate-logic-pipe.py
 | مسیر | مناسب برای |
 |------|------------|
 | **UserValves** | OpenWebUI استاندارد (Chat Controls → Valves) |
-| **`metadata.yarkids_persona`** | UI سفارشی «یار» (dropdown کنار چت) |
+| **`metadata.playroom_persona`** | UI سفارشی «یار» (dropdown کنار چت) |
 | **خودکار** | اگر چیزی انتخاب نشود → Intent Detection |
 
 ### اتصال UI سفارشی (dropdown کنار چت)
@@ -103,21 +103,21 @@ python api/pipe/generate-logic-pipe.py
 
 ```json
 {
-  "model": "yarkids_api",
+  "model": "playroom_api",
   "messages": [...],
   "metadata": {
-    "yarkids_persona": "creative"
+    "playroom_persona": "creative"
   }
 }
 ```
 
 مقادیر مجاز: `auto` | `creative` | `storyteller` | `teacher` | `homework` | `gamer`
 
-همچنین می‌توانید مستقیم روی body بفرستید: `body.yarkids_persona` یا `body.persona`
+همچنین می‌توانید مستقیم روی body بفرستید: `body.playroom_persona` یا `body.persona`
 
 ### UserValves (OpenWebUI خام)
 
-Chat Controls → Valves → **شخصیت یار کودک**
+Chat Controls → Valves → **شخصیت Playroom**
 
 ### Valves کلاینت API (`api/pipe/pipe.py`)
 
@@ -141,7 +141,7 @@ Chat Controls → Valves → **شخصیت یار کودک**
 
 جزئیات داده و ایندکس: زیر `api/textbook/`.
 
-اگر بازیابی در دسترس نباشد، یار کودک بدون کانتکست کتاب ادامه می‌دهد.
+اگر بازیابی در دسترس نباشد، Playroom بدون کانتکست کتاب ادامه می‌دهد.
 
 ## جستجوی وب
 
@@ -165,14 +165,14 @@ Chat Controls → Valves → **شخصیت یار کودک**
 
 ## API سازگار با OpenAI
 
-سرویس `api/` علاوه بر `/v1/chat` این اندپوینت‌ها را هم ارائه می‌دهد (مدل کلاینت نادیده گرفته می‌شود؛ از `YARKIDS_BACKEND_MODEL` استفاده می‌شود):
+سرویس `api/` علاوه بر `/v1/chat` این اندپوینت‌ها را هم ارائه می‌دهد (مدل کلاینت نادیده گرفته می‌شود؛ از `PLAYROOM_BACKEND_MODEL` استفاده می‌شود):
 
 | مسیر | توضیح |
 |------|--------|
 | `POST /v1/chat/completions` | Chat Completions استاندارد (+ alias: `/v1/chat/completion`) |
 | `POST /v1/responses` | Responses API |
 
-در پاسخ (و در آخرین chunk استریم) فیلد `yarkids` شامل پرسونای فعال، لاگ‌ها، کوئری/نتیجهٔ کتاب درسی، جستجوی وب، و استفاده از ابزار ریاضی است.
+در پاسخ (و در آخرین chunk استریم) فیلد `playroom` شامل پرسونای فعال، لاگ‌ها، کوئری/نتیجهٔ کتاب درسی، جستجوی وب، و استفاده از ابزار ریاضی است.
 
 ```bash
 curl -s http://localhost:8000/v1/chat/completions \

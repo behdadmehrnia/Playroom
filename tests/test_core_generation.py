@@ -62,7 +62,7 @@ def test_build_system_prompt_with_math_tool() -> None:
 def test_build_prompt_messages_strips_persona_markers() -> None:
     messages = [
         ChatMessage(role="user", content="سلام"),
-        ChatMessage(role="assistant", content="hi\n\n<!--yarkids:gamer-->"),
+        ChatMessage(role="assistant", content="hi\n\n<!--playroom:gamer-->"),
     ]
     built = build_prompt_messages(persona="gamer", conversation_messages=messages)
     assert built[0]["role"] == "system"

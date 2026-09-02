@@ -63,7 +63,7 @@ def test_normal_homework_message_is_not_title_task() -> None:
 def test_greeting_only_not_ready_for_title() -> None:
     messages = [
         ChatMessage(role="user", content="سلام"),
-        ChatMessage(role="assistant", content="سلام! من یار کودک هستم."),
+        ChatMessage(role="assistant", content="سلام! من Playroom هستم."),
     ]
     assert conversation_ready_for_title(messages) is False
 
@@ -88,11 +88,11 @@ def test_substantive_first_message_ready() -> None:
 
 
 def test_generic_english_intro_title() -> None:
-    assert is_generic_chat_title("👋 Introduction to Yar Koodak") is True
+    assert is_generic_chat_title("👋 Introduction to Playroom") is True
     assert is_generic_chat_title("Yar-e Koodak Greeting") is True
     assert is_generic_chat_title("Greeting Yarkoodak") is True
     assert is_generic_chat_title("Yar-e Koodak Intro") is True
-    assert is_generic_chat_title("سلام با یار کودک") is True
+    assert is_generic_chat_title("سلام با Playroom") is True
     assert is_generic_chat_title("God of War release") is True
     assert is_generic_chat_title("✏️ تمرین کسر ریاضی") is False
 
@@ -147,7 +147,7 @@ def test_should_emit_only_when_generic_current() -> None:
     ]
     assert should_emit_chat_title(messages, current_title=None) is True
     assert (
-        should_emit_chat_title(messages, current_title="👋 Introduction to Yar Koodak")
+        should_emit_chat_title(messages, current_title="👋 Introduction to Playroom")
         is True
     )
     assert (

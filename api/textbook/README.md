@@ -1,4 +1,4 @@
-# Textbook (embedded in Yar Kids API)
+# Textbook (embedded in Playroom API)
 
 Page-addressable retrieval for Iranian elementary textbooks (grades 3–6).
 This package lives under `api/textbook` and is mounted by the standalone API

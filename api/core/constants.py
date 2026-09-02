@@ -6,16 +6,16 @@ import re
 from pathlib import Path
 from typing import Literal
 
-MODEL_ID = "yarkids"
-MODEL_NAME = "یار کودک"
+MODEL_ID = "playroom"
+MODEL_NAME = "Playroom"
 MAX_GENERATION_ATTEMPTS = 3
 INTENT_CONFIDENCE_THRESHOLD = 0.7
-MANUAL_PERSONA_METADATA_KEY = "yarkids_persona"
-ACTIVE_PERSONA_METADATA_KEY = "yarkids_active_persona"
-PENDING_PERSONA_METADATA_KEY = "yarkids_pending_persona"
-ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY = "yarkids_textbook_scope"
+MANUAL_PERSONA_METADATA_KEY = "playroom_persona"
+ACTIVE_PERSONA_METADATA_KEY = "playroom_active_persona"
+PENDING_PERSONA_METADATA_KEY = "playroom_pending_persona"
+ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY = "playroom_textbook_scope"
 # Legacy HTML marker (may still appear in older chat history).
-_PERSONA_MARKER_RE = re.compile(r"<!--\s*yarkids:([a-z_]+)\s*-->", re.IGNORECASE)
+_PERSONA_MARKER_RE = re.compile(r"<!--\s*playroom:([a-z_]+)\s*-->", re.IGNORECASE)
 # Invisible sticky marker in assistant content (kept in history, stripped for LLM).
 # Digits are encoded with ZWSP / ZWNJ / ZWJ. Fence avoids U+2060 (Word Joiner),
 # which some clients (incl. Open WebUI) render as tofu boxes.
@@ -294,7 +294,7 @@ PERSONA_UI_LABELS: dict[str, str] = {
     "teacher": "📚 معلم",
     "homework": "✏️ کمک‌درس",
     "gamer": "🎮 بازی و سرگرمی",
-    "none": "😊 یار کودک",
+    "none": "😊 Playroom",
 }
 
 PERSONA_DROPDOWN_OPTIONS: list[dict[str, str]] = [

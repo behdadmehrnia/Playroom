@@ -1,4 +1,4 @@
-"""Request/response schemas for the Yar Kids API.
+"""Request/response schemas for the Playroom API.
 
 Domain models (``ChatMessage``, ``IntentDetectionResult``, ``ReflectionResult``,
 ``TextbookContext``, ``WebSearchContext``) live in ``api.core``. The models here
@@ -222,7 +222,7 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
-class YarKidsMeta(BaseModel):
+class PlayroomMeta(BaseModel):
     """Diagnostics embedded in OpenAI-compatible and custom chat responses."""
 
     persona: str

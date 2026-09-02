@@ -212,7 +212,7 @@ def _looks_like_welcome_or_menu(content: str) -> bool:
     """True for the first-turn persona picker / welcome message."""
     if "کدومش رو بیشتر دوست داری" in content:
         return True
-    if "با هم آشنا شدیم" in content or "من «یار کودک» هستم" in content:
+    if "با هم آشنا شدیم" in content or "من «Playroom» هستم" in content:
         # Welcome often lists all personas — do not treat as active session.
         hits = sum(
             1
@@ -338,7 +338,7 @@ def _http_get_json(
         url,
         headers=headers
         or {
-            "User-Agent": "YarKids/1.0 (child-assistant; web-search)",
+            "User-Agent": "Playroom/1.0 (child-assistant; web-search)",
             "Accept": "application/json",
         },
         method="GET",

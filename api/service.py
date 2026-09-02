@@ -1,4 +1,4 @@
-"""Core chat orchestration for the standalone Yar Kids API.
+"""Core chat orchestration for the standalone Playroom API.
 
 Parameterized by ``Settings`` (env vars) and driven by any ``api.core.LLMClient``.
 Reusable primitives (persona resolution, intent, textbook, prompts, generation,
@@ -138,7 +138,7 @@ async def _resolve_persona(
         # Encode confirmation ask into a special status; chat layer should short-circuit.
         body_flag = body if isinstance(body, dict) else None
         if body_flag is not None:
-            body_flag["_yarkids_confirmation_message"] = append_persona_marker(
+            body_flag["_playroom_confirmation_message"] = append_persona_marker(
                 format_persona_switch_confirmation(
                     resolved, resolution.pending_switch_to
                 ),
@@ -520,8 +520,8 @@ async def run_chat(
     )
 
     # Sticky switch confirmation: return the ask message without running tools/LLM.
-    if isinstance(body, dict) and body.get("_yarkids_confirmation_message"):
-        confirm_msg = str(body.pop("_yarkids_confirmation_message"))
+    if isinstance(body, dict) and body.get("_playroom_confirmation_message"):
+        confirm_msg = str(body.pop("_playroom_confirmation_message"))
         return ChatResult(
             response=confirm_msg,
             persona=resolved_persona,

@@ -133,7 +133,7 @@ PERSONA_FA_LABELS: dict[PersonaId, str] = {
     "teacher": "معلم",
     "homework": "کمک‌درس",
     "gamer": "بازی و سرگرمی",
-    "none": "یار کودک",
+    "none": "Playroom",
 }
 
 # Within these pairs, persona may switch immediately (no confirmation).
@@ -543,7 +543,7 @@ def resolve_manual_persona(
                 return manual
 
     # Custom frontend (e.g. Yar UI): send persona directly on the request body.
-    for key in ("yarkids_persona", "persona", "PERSONA"):
+    for key in ("playroom_persona", "persona", "PERSONA"):
         direct = body.get(key)
         if isinstance(direct, str):
             manual = _normalize_persona(direct)

@@ -523,7 +523,7 @@ WEB_SEARCH_PROVIDER_NAMES: frozenset[str] = frozenset(
 WEB_SEARCH_PROVIDER_ALIASES: dict[str, str] = {
     "simple": "gerdoo",  # legacy name from early integration
 }
-# Preferred order when YARKIDS_WEB_SEARCH_PROVIDER=auto
+# Preferred order when PLAYROOM_WEB_SEARCH_PROVIDER=auto
 WEB_SEARCH_AUTO_ORDER: tuple[str, ...] = (
     "api",
     "perplexity",
@@ -718,13 +718,13 @@ def _duckduckgo_instant_answer(
             "format": "json",
             "no_html": "1",
             "skip_disambig": "1",
-            "t": "yarkids",
+            "t": "playroom",
         }
     )
     url = f"https://api.duckduckgo.com/?{params}"
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "YarKids/1.0 (child-assistant)"},
+        headers={"User-Agent": "Playroom/1.0 (child-assistant)"},
         method="GET",
     )
     with urllib.request.urlopen(request, timeout=timeout_sec) as response:
@@ -777,7 +777,7 @@ def _duckduckgo_html_results(
         url,
         headers={
             "User-Agent": (
-                "Mozilla/5.0 (compatible; YarKids/1.0; +https://github.com/yarkids)"
+                "Mozilla/5.0 (compatible; Playroom/1.0; +https://github.com/playroom)"
             )
         },
         method="GET",
@@ -885,7 +885,7 @@ def _wikipedia_opensearch(
     url = f"https://{lang}.wikipedia.org/w/api.php?{params}"
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "YarKids/1.0 (child-assistant; web-search)"},
+        headers={"User-Agent": "Playroom/1.0 (child-assistant; web-search)"},
         method="GET",
     )
     with urllib.request.urlopen(request, timeout=timeout_sec) as response:
@@ -911,7 +911,7 @@ def _wikipedia_summary(
     url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{encoded}"
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "YarKids/1.0 (child-assistant; web-search)"},
+        headers={"User-Agent": "Playroom/1.0 (child-assistant; web-search)"},
         method="GET",
     )
     with urllib.request.urlopen(request, timeout=timeout_sec) as response:

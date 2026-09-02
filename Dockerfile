@@ -1,15 +1,15 @@
-# Yar Kids standalone API
+# Playroom standalone API
 # Build & run (preferred — named volume keeps textbook data across rebuilds):
 #   docker compose up -d --build
 #
 # Or plain docker (explicit volume):
-#   docker build -t yarkids-api .
+#   docker build -t playroom-api .
 #   docker run --rm -p 8000:8000 \
-#     -e YARKIDS_BACKEND_MODEL=… \
-#     -e YARKIDS_LLM_API_KEY=… \
-#     -e YARKIDS_LLM_BASE_URL=… \
-#     -v yarkids-textbook-data:/app/api/textbook/data \
-#     yarkids-api
+#     -e PLAYROOM_BACKEND_MODEL=… \
+#     -e PLAYROOM_LLM_API_KEY=… \
+#     -e PLAYROOM_LLM_BASE_URL=… \
+#     -v playroom-textbook-data:/app/api/textbook/data \
+#     playroom-api
 
 FROM python:3.12-slim
 
@@ -36,9 +36,9 @@ RUN pip install --compile -r /tmp/requirements-runtime.txt \
 COPY api/ /app/api/
 
 # Seed catalog metadata; entrypoint always refreshes these onto the volume
-RUN mkdir -p /opt/yarkids/textbook-seed \
-    && cp /app/api/textbook/data/catalog.json /opt/yarkids/textbook-seed/ \
-    && cp /app/api/textbook/data/subject_topics.json /opt/yarkids/textbook-seed/ \
+RUN mkdir -p /opt/playroom/textbook-seed \
+    && cp /app/api/textbook/data/catalog.json /opt/playroom/textbook-seed/ \
+    && cp /app/api/textbook/data/subject_topics.json /opt/playroom/textbook-seed/ \
     && mkdir -p \
         /app/api/textbook/data/pages \
         /app/api/textbook/data/pdfs \
@@ -53,10 +53,10 @@ VOLUME ["/app/api/textbook/data"]
 
 EXPOSE 8000
 
-# Embedded textbook is the default (empty YARKIDS_TEXTBOOK_API_URL).
-ENV YARKIDS_API_HOST=0.0.0.0 \
-    YARKIDS_API_PORT=8000 \
-    YARKIDS_ENABLE_TEXTBOOK_CONTEXT=true \
+# Embedded textbook is the default (empty PLAYROOM_TEXTBOOK_API_URL).
+ENV PLAYROOM_API_HOST=0.0.0.0 \
+    PLAYROOM_API_PORT=8000 \
+    PLAYROOM_ENABLE_TEXTBOOK_CONTEXT=true \
     TEXTBOOK_DATA_DIR=/app/api/textbook/data
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

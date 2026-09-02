@@ -1,4 +1,4 @@
-"""Landing page for the Yar Kids API."""
+"""Landing page for the Playroom API."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ LANDING_PAGE_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>یار کودک</title>
+    <title>Playroom</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 17'%3E%3Cpath d='M8.5 0.5C12.9183 0.5 16.5 4.08172 16.5 8.5C16.5 12.9183 12.9183 16.5 8.5 16.5C4.08172 16.5 0.5 12.9183 0.5 8.5C0.5 4.08172 4.08172 0.5 8.5 0.5Z' stroke='%23FFC828'/%3E%3Cpath d='M27.5 17C32.1944 17 36 13.1944 36 8.5C36 3.80558 32.1944 0 27.5 0C22.8056 0 19 3.80558 19 8.5C19 13.1944 22.8056 17 27.5 17Z' fill='%23FFC828'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -205,20 +205,20 @@ LANDING_PAGE_HTML = """
                 <path d="M8.5 0.5C12.9183 0.5 16.5 4.08172 16.5 8.5C16.5 12.9183 12.9183 16.5 8.5 16.5C4.08172 16.5 0.5 12.9183 0.5 8.5C0.5 4.08172 4.08172 0.5 8.5 0.5Z" stroke="#FFC828"/>
                 <path d="M27.5 17C32.1944 17 36 13.1944 36 8.5C36 3.80558 32.1944 0 27.5 0C22.8056 0 19 3.80558 19 8.5C19 13.1944 22.8056 17 27.5 17Z" fill="#FFC828"/>
             </svg>
-            یار کودک
+            Playroom
         </h1>
         <p class="subtitle">دستیار هوش مصنوعی اختصاصی کودکان — بخشی از اکوسیستم هوش مصنوعی  یار</p>
 
         <hr class="divider">
 
         <div class="section-title">قابلیت‌ها</div>
-        <p class="section-desc">امکاناتی که یار کودک را از سایر دستیارها متمایز می‌کند</p>
+        <p class="section-desc">امکاناتی که Playroom را از سایر دستیارها متمایز می‌کند</p>
 
         <div class="features">
             <div class="feature-card">
                 <div class="feature-icon">🧠</div>
                 <div class="feature-title">دانش به‌روز</div>
-                <div class="feature-desc">با دسترسی به جستجوی وب، همیشه آخرین اطلاعات را در اختیار کودکان قرار می‌دهد.</div>
+                <div class="feature-desc">با دسترسی به جستجوی وب، همیشه آخرین اطلاعات را در اختPlayroomان قرار می‌دهد.</div>
             </div>
 
             <div class="feature-card">
@@ -254,7 +254,7 @@ LANDING_PAGE_HTML = """
 
         <hr class="divider">
 
-        <div class="section-title">پرسوناهای یار کودک</div>
+        <div class="section-title">پرسوناهای Playroom</div>
         <p class="section-desc">هر پرسونا یک نقش متفاوت دارد تا کودک بهترین تجربه را داشته باشد</p>
 
         <div class="personas">
@@ -297,7 +297,7 @@ LANDING_PAGE_HTML = """
                 <a href="https://yarai.ir" target="_blank" class="cta-button">
                    رفتن به هوش مصنوعی یار
                 </a>
-                <a href="/chat" class="cta-link-secondary">امتحان کردن مستقیم یار کودک</a>
+                <a href="/chat" class="cta-link-secondary">امتحان کردن مستقیم Playroom</a>
             </div>
         </div>
 
@@ -319,7 +319,7 @@ CHAT_PAGE_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>چت مستقیم — یار کودک</title>
+    <title>چت مستقیم — Playroom</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 17'%3E%3Cpath d='M8.5 0.5C12.9183 0.5 16.5 4.08172 16.5 8.5C16.5 12.9183 12.9183 16.5 8.5 16.5C4.08172 16.5 0.5 12.9183 0.5 8.5C0.5 4.08172 4.08172 0.5 8.5 0.5Z' stroke='%23FFC828'/%3E%3Cpath d='M27.5 17C32.1944 17 36 13.1944 36 8.5C36 3.80558 32.1944 0 27.5 0C22.8056 0 19 3.80558 19 8.5C19 13.1944 22.8056 17 27.5 17Z' fill='%23FFC828'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -713,7 +713,7 @@ CHAT_PAGE_HTML = """
                         <path d="M8.5 0.5C12.9183 0.5 16.5 4.08172 16.5 8.5C16.5 12.9183 12.9183 16.5 8.5 16.5C4.08172 16.5 0.5 12.9183 0.5 8.5C0.5 4.08172 4.08172 0.5 8.5 0.5Z" stroke="#FFC828"/>
                         <path d="M27.5 17C32.1944 17 36 13.1944 36 8.5C36 3.80558 32.1944 0 27.5 0C22.8056 0 19 3.80558 19 8.5C19 13.1944 22.8056 17 27.5 17Z" fill="#FFC828"/>
                     </svg>
-                    یار کودک
+                    Playroom
                 </a>
                 <div class="persona-wrap" id="personaWrap">
                     <span class="persona-sep">·</span>
@@ -734,7 +734,7 @@ CHAT_PAGE_HTML = """
     </div>
 
     <script>
-        const STORAGE_KEY = 'yarkids_chat_v1';
+        const STORAGE_KEY = 'playroom_chat_v1';
         const COOKIE_PREFIX = 'ykc_';
         const COOKIE_META = 'ykc_n';
         const MAX_SESSIONS = 30;
@@ -802,13 +802,13 @@ CHAT_PAGE_HTML = """
             const n = nRaw ? parseInt(decodeURIComponent(nRaw), 10) || 0 : 0;
             for (let i = 0; i < Math.max(n, 40); i++) delCookie(COOKIE_PREFIX + i);
             delCookie(COOKIE_META);
-            delCookie('yarkids_chat');
+            delCookie('playroom_chat');
         }
         function readLegacyCookies() {
             const nRaw = getCookie(COOKIE_META);
             const n = nRaw ? parseInt(decodeURIComponent(nRaw), 10) || 0 : 0;
             if (!n) {
-                const legacy = getCookie('yarkids_chat');
+                const legacy = getCookie('playroom_chat');
                 return legacy ? decodeURIComponent(legacy) : '';
             }
             let encoded = '';
@@ -903,7 +903,7 @@ CHAT_PAGE_HTML = """
                         return;
                     } catch (_) { /* continue shrinking */ }
                 }
-                console.warn('yarkids chat storage full', err);
+                console.warn('playroom chat storage full', err);
             }
             renderSessionList();
         }
@@ -1110,7 +1110,7 @@ CHAT_PAGE_HTML = """
             const empty = document.createElement('div');
             empty.className = 'empty';
             empty.id = 'empty';
-            empty.innerHTML = 'با <strong>یار کودک</strong> مستقیم حرف بزن.<br>سوالت را بنویس تا شروع کنیم.';
+            empty.innerHTML = 'با <strong>Playroom</strong> مستقیم حرف بزن.<br>سوالت را بنویس تا شروع کنیم.';
             messagesEl.appendChild(empty);
         }
 
@@ -1225,7 +1225,7 @@ CHAT_PAGE_HTML = """
         function stripPersonaMarkers(text) {
             // Keep markers in stored history; strip only for on-screen rendering.
             return String(text || '')
-                .replace(/<!--\\s*yarkids:[a-z_]+\\s*-->/gi, '')
+                .replace(/<!--\\s*playroom:[a-z_]+\\s*-->/gi, '')
                 .replace(/\\u200b\\u200d\\u200c\\u200b[\\u200b\\u200c\\u200d]{2}\\u200b\\u200d\\u200c\\u200b/g, '')
                 .replace(/\\u2060[\\u200b\\u200c\\u200d]{2}\\u2060/g, '')
                 .replace(/[\\u2060\\ufeff]/g, '')
@@ -1300,11 +1300,11 @@ CHAT_PAGE_HTML = """
             if (personaForRequest && personaForRequest !== 'auto') {
                 payload.persona = personaForRequest;
                 payload.metadata = {
-                    yarkids_persona: personaForRequest,
-                    yarkids_active_persona: personaForRequest,
+                    playroom_persona: personaForRequest,
+                    playroom_active_persona: personaForRequest,
                 };
             } else if (stickyPersona && stickyPersona !== 'none') {
-                payload.metadata = { yarkids_active_persona: stickyPersona };
+                payload.metadata = { playroom_active_persona: stickyPersona };
             }
 
             const failRequest = (detail) => {
@@ -1446,7 +1446,7 @@ CHAT_PAGE_HTML = """
                         reply += delta;
                         scheduleReveal();
                     }
-                    const meta = chunk?.yarkids;
+                    const meta = chunk?.playroom;
                     if (meta && typeof meta === 'object') {
                         if (meta.persona) resolved = meta.persona;
                         if (meta.chat_title) chatTitle = meta.chat_title;
@@ -1530,11 +1530,11 @@ CHAT_PAGE_HTML = """
 
 @router.get("/", response_class=HTMLResponse)
 async def landing_page() -> HTMLResponse:
-    """صفحه اصلی Yar Kids — معرفی قابلیت‌ها و هدایت به yarai.ir"""
+    """صفحه اصلی Playroom — معرفی قابلیت‌ها و هدایت به yarai.ir"""
     return HTMLResponse(content=LANDING_PAGE_HTML)
 
 
 @router.get("/chat", response_class=HTMLResponse)
 async def chat_playground() -> HTMLResponse:
-    """اینترفیس ساده چت مستقیم با یار کودک (OpenAI-compatible)."""
+    """اینترفیس ساده چت مستقیم با Playroom (OpenAI-compatible)."""
     return HTMLResponse(content=CHAT_PAGE_HTML)

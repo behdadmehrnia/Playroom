@@ -1,1 +1,1 @@
-# Textbook package (embedded in the Yar Kids API)
+# Textbook package (embedded in the Playroom API)

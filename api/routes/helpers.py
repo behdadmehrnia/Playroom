@@ -12,7 +12,7 @@ from api.models import (
     ChatResultOut,
     MessageIn,
     OpenAIResponsesRequest,
-    YarKidsMeta,
+    PlayroomMeta,
 )
 
 def to_chat_messages(messages: list[MessageIn]) -> list[ChatMessage]:
@@ -27,7 +27,7 @@ def resolve_backend_model(settings: Settings, requested: str | None) -> str:
             status_code=400,
             detail=(
                 "هیچ مدل پشتیبانی تنظیم نشده. "
-                "YARKIDS_BACKEND_MODEL را تنظیم کنید یا «model» را در درخواست بفرستید."
+                "PLAYROOM_BACKEND_MODEL را تنظیم کنید یا «model» را در درخواست بفرستید."
             ),
         )
     return model
@@ -54,9 +54,9 @@ def chat_result_to_out(result: Any) -> ChatResultOut:
     )
 
 
-def chat_result_to_yarkids_meta(result: Any) -> YarKidsMeta:
+def chat_result_to_playroom_meta(result: Any) -> PlayroomMeta:
     out = chat_result_to_out(result)
-    return YarKidsMeta(
+    return PlayroomMeta(
         persona=out.persona,
         persona_source=out.persona_source,
         logs=out.logs,
@@ -154,7 +154,7 @@ def resolve_backend_model_optional(
             status_code=400,
             detail=(
                 "هیچ مدل پشتیبانی تنظیم نشده. "
-                "YARKIDS_BACKEND_MODEL را تنظیم کنید."
+                "PLAYROOM_BACKEND_MODEL را تنظیم کنید."
             ),
         )
     return model

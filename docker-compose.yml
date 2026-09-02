@@ -3,16 +3,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: yarkids-api
+    image: playroom-api
     ports:
-      - "${YARKIDS_API_PORT:-8000}:8000"
+      - "${PLAYROOM_API_PORT:-8000}:8000"
     environment:
-      YARKIDS_BACKEND_MODEL: ${YARKIDS_BACKEND_MODEL:-}
-      YARKIDS_LLM_BASE_URL: ${YARKIDS_LLM_BASE_URL:-https://api.openai.com/v1}
-      YARKIDS_LLM_API_KEY: ${YARKIDS_LLM_API_KEY:-}
-      YARKIDS_ENABLE_TEXTBOOK_CONTEXT: ${YARKIDS_ENABLE_TEXTBOOK_CONTEXT:-true}
-      YARKIDS_ENABLE_WEB_SEARCH: ${YARKIDS_ENABLE_WEB_SEARCH:-true}
-      YARKIDS_ENABLE_REFLECTION: ${YARKIDS_ENABLE_REFLECTION:-true}
+      PLAYROOM_BACKEND_MODEL: ${PLAYROOM_BACKEND_MODEL:-}
+      PLAYROOM_LLM_BASE_URL: ${PLAYROOM_LLM_BASE_URL:-https://api.openai.com/v1}
+      PLAYROOM_LLM_API_KEY: ${PLAYROOM_LLM_API_KEY:-}
+      PLAYROOM_ENABLE_TEXTBOOK_CONTEXT: ${PLAYROOM_ENABLE_TEXTBOOK_CONTEXT:-true}
+      PLAYROOM_ENABLE_WEB_SEARCH: ${PLAYROOM_ENABLE_WEB_SEARCH:-true}
+      PLAYROOM_ENABLE_REFLECTION: ${PLAYROOM_ENABLE_REFLECTION:-true}
       TEXTBOOK_DATA_DIR: /app/api/textbook/data
       TEXTBOOK_API_KEY: ${TEXTBOOK_API_KEY:-}
     volumes:
@@ -23,4 +23,4 @@ services:
 
 volumes:
   textbook-data:
-    name: yarkids-textbook-data
+    name: playroom-textbook-data

@@ -165,7 +165,7 @@ def test_chat_endpoint_non_stream(client: TestClient) -> None:
 
 
 def test_openai_chat_completions(client: TestClient) -> None:
-    client.app.state.llm_client = DummyLLM(responses=["Hello from Yar Kids"])
+    client.app.state.llm_client = DummyLLM(responses=["Hello from Playroom"])
     r = client.post(
         "/v1/chat/completions",
         json={
@@ -178,8 +178,8 @@ def test_openai_chat_completions(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["object"] == "chat.completion"
-    assert strip_persona_markers(body["choices"][0]["message"]["content"]) == "Hello from Yar Kids"
-    assert "yarkids" in body
+    assert strip_persona_markers(body["choices"][0]["message"]["content"]) == "Hello from Playroom"
+    assert "playroom" in body
 
 
 def test_openai_responses(client: TestClient) -> None:
@@ -197,4 +197,4 @@ def test_openai_responses(client: TestClient) -> None:
     body = r.json()
     assert body["object"] == "response"
     assert strip_persona_markers(body["output_text"]) == "Hi there"
-    assert "yarkids" in body
+    assert "playroom" in body

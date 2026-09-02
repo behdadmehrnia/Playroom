@@ -1,4 +1,4 @@
-"""HTTP routes for the standalone Yar Kids API.
+"""HTTP routes for the standalone Playroom API.
 
 Route modules are grouped by concern; this package composes a single ``router``
 for ``api.main`` and mounts the embedded textbook API under ``/v1``.

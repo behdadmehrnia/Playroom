@@ -44,7 +44,7 @@ def test_explicit_persona_triggers(text: str, expected: str | None) -> None:
 def test_manual_persona_sources() -> None:
     assert resolve_manual_persona(user_persona="teacher") == "teacher"
     assert (
-        resolve_manual_persona(body={"metadata": {"yarkids_persona": "gamer"}})
+        resolve_manual_persona(body={"metadata": {"playroom_persona": "gamer"}})
         == "gamer"
     )
     assert resolve_manual_persona(body={"persona": "creative"}) == "creative"
@@ -118,7 +118,7 @@ async def test_soft_switch_creative_to_storyteller_no_confirmation() -> None:
     llm = DummyLLM(default='{"persona":"storyteller","confidence":0.93}')
     messages = [
         ChatMessage(role="user", content="یه ایده خلاق بده"),
-        ChatMessage(role="assistant", content="ایده قشنگ: <!-- yarkids:creative -->"),
+        ChatMessage(role="assistant", content="ایده قشنگ: <!-- playroom:creative -->"),
         ChatMessage(role="user", content="قصه بگو"),
     ]
     body = {"metadata": {ACTIVE_PERSONA_METADATA_KEY: "creative"}}
@@ -132,7 +132,7 @@ async def test_soft_switch_teacher_to_homework_no_confirmation() -> None:
     llm = DummyLLM(default='{"persona":"homework","confidence":0.91}')
     messages = [
         ChatMessage(role="user", content="کسر یعنی چی؟"),
-        ChatMessage(role="assistant", content="کسر یعنی... <!-- yarkids:teacher -->"),
+        ChatMessage(role="assistant", content="کسر یعنی... <!-- playroom:teacher -->"),
         ChatMessage(role="user", content="کمک درس باش"),
     ]
     body = {"metadata": {ACTIVE_PERSONA_METADATA_KEY: "teacher"}}
@@ -146,7 +146,7 @@ async def test_cross_family_weak_intent_stays_put() -> None:
     llm = DummyLLM(default='{"persona":"teacher","confidence":0.75}')
     messages = [
         ChatMessage(role="user", content="بازی کنیم"),
-        ChatMessage(role="assistant", content="باشه بازی! <!-- yarkids:gamer -->"),
+        ChatMessage(role="assistant", content="باشه بازی! <!-- playroom:gamer -->"),
         ChatMessage(role="user", content="یه کم درباره کسر بگو"),
     ]
     body = {"metadata": {ACTIVE_PERSONA_METADATA_KEY: "gamer"}}
@@ -160,7 +160,7 @@ async def test_cross_family_explicit_asks_confirmation() -> None:
     llm = DummyLLM(default='{"persona":"teacher","confidence":0.98}')
     messages = [
         ChatMessage(role="user", content="بازی کنیم"),
-        ChatMessage(role="assistant", content="باشه بازی! <!-- yarkids:gamer -->"),
+        ChatMessage(role="assistant", content="باشه بازی! <!-- playroom:gamer -->"),
         ChatMessage(role="user", content="باش معلم"),
     ]
     body = {"metadata": {ACTIVE_PERSONA_METADATA_KEY: "gamer"}}
@@ -176,7 +176,7 @@ async def test_textbook_list_overrides_manual_creative() -> None:
     """Lesson-list asks must use homework tools even if Valves say creative."""
     llm = DummyLLM(default='{"persona":"creative","confidence":0.99}')
     welcome = (
-        "سلام! من یار کودک هستم. خلاق، داستان‌گو، معلم، کمک‌درسی، بازی. "
+        "سلام! من Playroom هستم. خلاق، داستان‌گو، معلم، کمک‌درسی، بازی. "
         "کدومش رو دوست داری؟"
     )
     messages = [

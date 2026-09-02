@@ -1,4 +1,4 @@
-# Runtime dependencies for the Yar Kids API (chat + embedded textbook retrieve).
+# Runtime dependencies for the Playroom API (chat + embedded textbook retrieve).
 # Heavy MinerU indexer deps are intentionally omitted — mount a prebuilt
 # index/pages volume, or install api/requirements.txt in a separate indexer image.
 fastapi>=0.115.0

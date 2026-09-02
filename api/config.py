@@ -1,4 +1,4 @@
-"""Configuration for the Yar Kids API.
+"""Configuration for the Playroom API.
 
 All settings are read from environment variables. Bool parsing reuses
 ``api.core.coerce_bool`` so the same tolerant semantics
@@ -124,51 +124,51 @@ class Settings(BaseModel):
                 return default
             return coerce_bool(raw, default=default)
 
-        cors_raw = env("YARKIDS_CORS_ORIGINS", "*").strip()
+        cors_raw = env("PLAYROOM_CORS_ORIGINS", "*").strip()
         if cors_raw:
             cors_origins = [item.strip() for item in cors_raw.split(",") if item.strip()]
         else:
             cors_origins = ["*"]
 
         return cls(
-            backend_model=env("YARKIDS_BACKEND_MODEL").strip(),
-            llm_base_url=env("YARKIDS_LLM_BASE_URL", "https://api.openai.com/v1").strip(),
-            llm_api_key=env("YARKIDS_LLM_API_KEY").strip(),
-            llm_timeout_sec=env_float("YARKIDS_LLM_TIMEOUT_SEC", 120.0),
-            temperature=env_float("YARKIDS_TEMPERATURE", 0.7),
-            enable_reflection=env_bool("YARKIDS_ENABLE_REFLECTION", True),
-            enable_status_updates=env_bool("YARKIDS_ENABLE_STATUS_UPDATES", True),
-            enable_chat_title=env_bool("YARKIDS_ENABLE_CHAT_TITLE", True),
+            backend_model=env("PLAYROOM_BACKEND_MODEL").strip(),
+            llm_base_url=env("PLAYROOM_LLM_BASE_URL", "https://api.openai.com/v1").strip(),
+            llm_api_key=env("PLAYROOM_LLM_API_KEY").strip(),
+            llm_timeout_sec=env_float("PLAYROOM_LLM_TIMEOUT_SEC", 120.0),
+            temperature=env_float("PLAYROOM_TEMPERATURE", 0.7),
+            enable_reflection=env_bool("PLAYROOM_ENABLE_REFLECTION", True),
+            enable_status_updates=env_bool("PLAYROOM_ENABLE_STATUS_UPDATES", True),
+            enable_chat_title=env_bool("PLAYROOM_ENABLE_CHAT_TITLE", True),
             chat_title_min_user_messages=env_int(
-                "YARKIDS_CHAT_TITLE_MIN_USER_MESSAGES", 2
+                "PLAYROOM_CHAT_TITLE_MIN_USER_MESSAGES", 2
             ),
-            enable_textbook_context=env_bool("YARKIDS_ENABLE_TEXTBOOK_CONTEXT", True),
-            textbook_api_url=env("YARKIDS_TEXTBOOK_API_URL", "").strip(),
-            textbook_api_key=env("YARKIDS_TEXTBOOK_API_KEY").strip(),
+            enable_textbook_context=env_bool("PLAYROOM_ENABLE_TEXTBOOK_CONTEXT", True),
+            textbook_api_url=env("PLAYROOM_TEXTBOOK_API_URL", "").strip(),
+            textbook_api_key=env("PLAYROOM_TEXTBOOK_API_KEY").strip(),
             textbook_request_timeout_sec=env_float(
-                "YARKIDS_TEXTBOOK_REQUEST_TIMEOUT_SEC", DEFAULT_TEXTBOOK_TIMEOUT_SEC
+                "PLAYROOM_TEXTBOOK_REQUEST_TIMEOUT_SEC", DEFAULT_TEXTBOOK_TIMEOUT_SEC
             ),
-            textbook_neighbor_pages=env_int("YARKIDS_TEXTBOOK_NEIGHBOR_PAGES", 2),
-            textbook_include_image=env("YARKIDS_TEXTBOOK_INCLUDE_IMAGE", "always").strip().lower(),
-            textbook_debug=env_bool("YARKIDS_TEXTBOOK_DEBUG", False),
-            enable_web_search=env_bool("YARKIDS_ENABLE_WEB_SEARCH", True),
-            web_search_provider=env("YARKIDS_WEB_SEARCH_PROVIDER", "auto").strip().lower(),
-            web_search_api_url=env("YARKIDS_WEB_SEARCH_API_URL").strip(),
-            web_search_api_key=env("YARKIDS_WEB_SEARCH_API_KEY").strip(),
+            textbook_neighbor_pages=env_int("PLAYROOM_TEXTBOOK_NEIGHBOR_PAGES", 2),
+            textbook_include_image=env("PLAYROOM_TEXTBOOK_INCLUDE_IMAGE", "always").strip().lower(),
+            textbook_debug=env_bool("PLAYROOM_TEXTBOOK_DEBUG", False),
+            enable_web_search=env_bool("PLAYROOM_ENABLE_WEB_SEARCH", True),
+            web_search_provider=env("PLAYROOM_WEB_SEARCH_PROVIDER", "auto").strip().lower(),
+            web_search_api_url=env("PLAYROOM_WEB_SEARCH_API_URL").strip(),
+            web_search_api_key=env("PLAYROOM_WEB_SEARCH_API_KEY").strip(),
             web_search_gerdoo_url=(
-                env("YARKIDS_WEB_SEARCH_GERDOO_URL").strip()
-                or env("YARKIDS_WEB_SEARCH_SIMPLE_URL").strip()  # legacy alias
+                env("PLAYROOM_WEB_SEARCH_GERDOO_URL").strip()
+                or env("PLAYROOM_WEB_SEARCH_SIMPLE_URL").strip()  # legacy alias
             ),
             web_search_perplexity_url=env(
-                "YARKIDS_WEB_SEARCH_PERPLEXITY_URL"
+                "PLAYROOM_WEB_SEARCH_PERPLEXITY_URL"
             ).strip(),
             web_search_request_timeout_sec=env_float(
-                "YARKIDS_WEB_SEARCH_REQUEST_TIMEOUT_SEC", DEFAULT_WEB_SEARCH_TIMEOUT_SEC
+                "PLAYROOM_WEB_SEARCH_REQUEST_TIMEOUT_SEC", DEFAULT_WEB_SEARCH_TIMEOUT_SEC
             ),
-            web_search_max_results=env_int("YARKIDS_WEB_SEARCH_MAX_RESULTS", 5),
-            web_search_debug=env_bool("YARKIDS_WEB_SEARCH_DEBUG", False),
-            host=env("YARKIDS_API_HOST", "0.0.0.0").strip(),
-            port=env_int("YARKIDS_API_PORT", 8000),
+            web_search_max_results=env_int("PLAYROOM_WEB_SEARCH_MAX_RESULTS", 5),
+            web_search_debug=env_bool("PLAYROOM_WEB_SEARCH_DEBUG", False),
+            host=env("PLAYROOM_API_HOST", "0.0.0.0").strip(),
+            port=env_int("PLAYROOM_API_PORT", 8000),
             cors_origins=cors_origins,
         )
 

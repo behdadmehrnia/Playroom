@@ -1,4 +1,4 @@
-"""Core Yar Kids domain logic (personas, intent, textbooks, web search, generation).
+"""Core Playroom domain logic (personas, intent, textbooks, web search, generation).
 
 Canonical implementation used by the standalone FastAPI service. Prefer importing
 from ``api.core``; submodules are organized by concern under this package.

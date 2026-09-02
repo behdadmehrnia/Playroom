@@ -1,4 +1,4 @@
-"""FastAPI application entry point for the Yar Kids API.
+"""FastAPI application entry point for the Playroom API.
 
 Run from the repo root::
 
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Yar Kids API",
+        title="Playroom API",
         version=__version__,
         lifespan=lifespan,
         openapi_tags=[

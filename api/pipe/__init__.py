@@ -1,4 +1,4 @@
-"""OpenWebUI Pipe packaging for Yar Kids.
+"""OpenWebUI Pipe packaging for Playroom.
 
 Preferred entry point for OpenWebUI:
     ``api/pipe/pipe.py`` — thin client that delegates to the standalone API.

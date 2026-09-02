@@ -18,7 +18,7 @@ from api.service import run_chat, run_chat_stream
 from .deps import get_llm_client, get_settings
 from .helpers import (
     build_resolve_body,
-    chat_result_to_yarkids_meta,
+    chat_result_to_playroom_meta,
     openai_messages_to_chat_messages,
     resolve_backend_model_optional,
     responses_input_to_messages,
@@ -40,7 +40,7 @@ def _build_chat_completion_payload(
     completion_id: str,
     created: int,
 ) -> dict[str, Any]:
-    meta = chat_result_to_yarkids_meta(result)
+    meta = chat_result_to_playroom_meta(result)
     return {
         "id": completion_id,
         "object": "chat.completion",
@@ -58,7 +58,7 @@ def _build_chat_completion_payload(
             "completion_tokens": 0,
             "total_tokens": 0,
         },
-        "yarkids": meta.model_dump(mode="json"),
+        "playroom": meta.model_dump(mode="json"),
     }
 
 
@@ -68,7 +68,7 @@ def _build_responses_payload(
     response_id: str,
     created: int,
 ) -> dict[str, Any]:
-    meta = chat_result_to_yarkids_meta(result)
+    meta = chat_result_to_playroom_meta(result)
     message_id = f"msg_{uuid.uuid4().hex[:20]}"
     return {
         "id": response_id,
@@ -91,7 +91,7 @@ def _build_responses_payload(
             }
         ],
         "output_text": result.response,
-        "yarkids": meta.model_dump(mode="json"),
+        "playroom": meta.model_dump(mode="json"),
     }
 
 
@@ -171,7 +171,7 @@ async def _openai_chat_completions_stream(
                             "finish_reason": "stop",
                         }
                     ],
-                    "yarkids": {"error": event["message"]},
+                    "playroom": {"error": event["message"]},
                 }
                 yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
@@ -191,7 +191,7 @@ async def _openai_chat_completions_stream(
                     "finish_reason": "stop",
                 }
             ],
-            "yarkids": chat_result_to_yarkids_meta(result).model_dump(mode="json")
+            "playroom": chat_result_to_playroom_meta(result).model_dump(mode="json")
             if result
             else None,
         }
@@ -417,7 +417,7 @@ async def _handle_chat_completions(
                 "completion_tokens": 0,
                 "total_tokens": 0,
             },
-            "yarkids": {"chat_title": title, "title_generation": True},
+            "playroom": {"chat_title": title, "title_generation": True},
         }
 
     body = build_resolve_body(req.metadata)

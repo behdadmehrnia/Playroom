@@ -1,4 +1,4 @@
-"""Shared fixtures for Yar Kids API tests."""
+"""Shared fixtures for Playroom API tests."""
 
 from __future__ import annotations
 
@@ -55,12 +55,12 @@ def test_settings() -> Settings:
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch, test_settings: Settings) -> TestClient:
     """FastAPI TestClient with lifespan and overridden LLM."""
-    monkeypatch.setenv("YARKIDS_BACKEND_MODEL", test_settings.backend_model)
-    monkeypatch.setenv("YARKIDS_LLM_API_KEY", test_settings.llm_api_key)
-    monkeypatch.setenv("YARKIDS_LLM_BASE_URL", test_settings.llm_base_url)
-    monkeypatch.setenv("YARKIDS_ENABLE_REFLECTION", "false")
-    monkeypatch.setenv("YARKIDS_ENABLE_TEXTBOOK_CONTEXT", "false")
-    monkeypatch.setenv("YARKIDS_ENABLE_WEB_SEARCH", "false")
+    monkeypatch.setenv("PLAYROOM_BACKEND_MODEL", test_settings.backend_model)
+    monkeypatch.setenv("PLAYROOM_LLM_API_KEY", test_settings.llm_api_key)
+    monkeypatch.setenv("PLAYROOM_LLM_BASE_URL", test_settings.llm_base_url)
+    monkeypatch.setenv("PLAYROOM_ENABLE_REFLECTION", "false")
+    monkeypatch.setenv("PLAYROOM_ENABLE_TEXTBOOK_CONTEXT", "false")
+    monkeypatch.setenv("PLAYROOM_ENABLE_WEB_SEARCH", "false")
 
     from api.main import create_app
 
@@ -88,7 +88,7 @@ def word_chain_messages() -> list[ChatMessage]:
 @pytest.fixture
 def welcome_menu_message() -> str:
     return (
-        "سلام! من «یار کودک» هستم.\n\n"
+        "سلام! من «Playroom» هستم.\n\n"
         "🎨 خلاق: ایده‌های نقاشی\n"
         "📖 داستان‌گو: قصه‌های جذاب\n"
         "📚 معلم: مفاهیم علمی\n"

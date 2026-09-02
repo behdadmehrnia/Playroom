@@ -22,9 +22,9 @@ async def health(
 ) -> HealthResponse:
     warnings: list[str] = []
     if not settings.backend_model:
-        warnings.append("YARKIDS_BACKEND_MODEL not set")
+        warnings.append("PLAYROOM_BACKEND_MODEL not set")
     if not settings.llm_api_key:
-        warnings.append("YARKIDS_LLM_API_KEY not set")
+        warnings.append("PLAYROOM_LLM_API_KEY not set")
 
     textbook_mode = "embedded" if settings.uses_embedded_textbook() else "external"
 

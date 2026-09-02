@@ -1,4 +1,4 @@
-# راهنمای تست دستی یار کودک
+# راهنمای تست دستی Playroom
 
 این سند **پرامپت‌هایی** است که می‌توانید در چت (OpenWebUI) یا از طریق API بفرستید، همراه **توضیح** و **رفتار/جواب مورد انتظار**. هر مورد به unittest متناظر در `tests/test_*.py` وصل است تا همان چیزی را که تست خودکار چک می‌کند، بتوانید دستی هم ببینید.
 
@@ -149,7 +149,7 @@ pytest tests/ -q
 | # | تنظیم | پرامپت | انتظار | unittest |
 |---|--------|--------|--------|----------|
 | 26 | `PERSONA=teacher` در Valves | «سلام» | `teacher`, source=`manual` | `test_manual_persona_sources`, `test_persona_resolve_manual` |
-| 27 | `metadata.yarkids_persona=gamer` | هر متن | `gamer` | `test_manual_persona_sources` |
+| 27 | `metadata.playroom_persona=gamer` | هر متن | `gamer` | `test_manual_persona_sources` |
 | 28 | `body.persona=creative` | «ایده بده» | `creative` | `test_manual_persona_sources` |
 | 30 | `PERSONA=auto` | «داستان بگو» | intent detection → `storyteller` | `test_manual_persona_sources` |
 
@@ -276,7 +276,7 @@ pytest tests/ -q
 |---------|--------|----------|
 | `GET /health` | `status: ok`, `llm_ready: true` (با env درست) | `test_health` |
 | `GET /v1/personas` | لیست شامل `teacher`, `gamer`; textbook_personas شامل teacher | `test_personas_catalog` |
-| `POST /v1/chat/completions` | `object: chat.completion` + فیلد `yarkids` | `test_openai_chat_completions` |
+| `POST /v1/chat/completions` | `object: chat.completion` + فیلد `playroom` | `test_openai_chat_completions` |
 | `POST /v1/responses` | `object: response`, `output_text` پر | `test_openai_responses` |
 
 ---

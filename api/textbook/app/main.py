@@ -8,7 +8,7 @@ from api.textbook.app.routes import router
 from api.textbook.app.store import index_exists, load_catalog, page_count
 
 app = FastAPI(
-    title="Yar Kids Textbook Service",
+    title="Playroom Textbook Service",
     description="Page-addressable retrieval for Iranian elementary textbooks (grades 3-6)",
     version="1.0.0",
     openapi_tags=[

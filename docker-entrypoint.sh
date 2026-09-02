@@ -8,7 +8,7 @@
 set -e
 
 DATA_DIR="${TEXTBOOK_DATA_DIR:-/app/api/textbook/data}"
-SEED_DIR="/opt/yarkids/textbook-seed"
+SEED_DIR="/opt/playroom/textbook-seed"
 
 mkdir -p "$DATA_DIR/pages" "$DATA_DIR/pdfs"
 

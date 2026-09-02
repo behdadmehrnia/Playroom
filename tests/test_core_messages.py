@@ -71,7 +71,7 @@ def test_persona_markers_roundtrip_invisible() -> None:
 
 
 def test_persona_markers_legacy_html_and_word_joiner() -> None:
-    legacy_html = "ادامه بازی\n\n<!--yarkids:gamer-->"
+    legacy_html = "ادامه بازی\n\n<!--playroom:gamer-->"
     assert strip_persona_markers(legacy_html) == "ادامه بازی"
     assert extract_persona_marker(legacy_html) == "gamer"
 

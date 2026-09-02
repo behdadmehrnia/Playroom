@@ -1,8 +1,8 @@
 """
-title: یار کودک (API Client)
-author: Yar Kids
+title: Playroom (API Client)
+author: Playroom
 version: 0.6.8
-description: Pipe کلاینت OpenWebUI — منطق یار کودک را از طریق API مستقل (api/) اجرا می‌کند
+description: Pipe کلاینت OpenWebUI — منطق Playroom را از طریق API مستقل (api/) اجرا می‌کند
 required_open_webui_version: 0.5.0
 """
 
@@ -22,11 +22,11 @@ from pydantic import BaseModel, Field
 # Configuration
 # ---------------------------------------------------------------------------
 
-MODEL_ID = "yarkids_api"
-MODEL_NAME = "یار کودک مستقل"
-MANUAL_PERSONA_METADATA_KEY = "yarkids_persona"
-ACTIVE_PERSONA_METADATA_KEY = "yarkids_active_persona"
-CHAT_TITLE_METADATA_KEY = "yarkids_chat_title"
+MODEL_ID = "playroom_api"
+MODEL_NAME = "Playroom مستقل"
+MANUAL_PERSONA_METADATA_KEY = "playroom_persona"
+ACTIVE_PERSONA_METADATA_KEY = "playroom_active_persona"
+CHAT_TITLE_METADATA_KEY = "playroom_chat_title"
 SUPPORTED_PERSONAS = ("creative", "storyteller", "teacher", "homework", "gamer")
 DEFAULT_API_TIMEOUT_SEC = 300.0
 _TITLE_TASK_MARKERS: tuple[str, ...] = (
@@ -44,7 +44,7 @@ _TITLE_TASK_MARKERS: tuple[str, ...] = (
 # Invisible persona tags embedded in assistant content by the API (must be
 # forwarded unchanged in chat history). Keep encoding in sync with api.core.
 _PERSONA_HTML_MARKER_RE = re.compile(
-    r"<!--\s*yarkids:([a-z_]+)\s*-->", re.IGNORECASE
+    r"<!--\s*playroom:([a-z_]+)\s*-->", re.IGNORECASE
 )
 _ZW_DIGIT = {"0": "\u200b", "1": "\u200c", "2": "\u200d"}
 _ZW_DIGIT_INV = {v: k for k, v in _ZW_DIGIT.items()}
@@ -168,7 +168,7 @@ def resolve_persona_to_forward(
         if manual:
             return manual
 
-    for key in ("yarkids_persona", "persona", "PERSONA"):
+    for key in ("playroom_persona", "persona", "PERSONA"):
         direct = body.get(key)
         if isinstance(direct, str):
             manual = _normalize_persona(direct)
@@ -311,7 +311,7 @@ async def clear_status_message(
 
 
 class Pipe:
-    """OpenWebUI Pipe that delegates the full Yar Kids logic to the API.
+    """OpenWebUI Pipe that delegates the full Playroom logic to the API.
 
     Same Valves / UserValves / streaming shape as the deprecated local Pipe
     (``pipe_logic.py``), so it is the drop-in replacement. Every stage —
@@ -323,7 +323,7 @@ class Pipe:
     class Valves(BaseModel):
         API_BASE_URL: str = Field(
             default="http://host.docker.internal:8090",
-            description="آدرس پایهٔ API مستقل یار کودک (api/main.py) — بدون / در انتها.",
+            description="آدرس پایهٔ API مستقل Playroom (api/main.py) — بدون / در انتها.",
         )
         API_KEY: str = Field(
             default="",
@@ -373,7 +373,7 @@ class Pipe:
     class UserValves(BaseModel):
         PERSONA: str = Field(
             default="auto",
-            title="شخصیت یار کودک",
+            title="شخصیت Playroom",
             description="از این منو شخصیت دوستت رو انتخاب کن! 😊",
             json_schema_extra={
                 "input": {"type": "select", "options": PERSONA_DROPDOWN_OPTIONS}

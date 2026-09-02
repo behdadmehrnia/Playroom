@@ -1,26 +1,27 @@
-# عنوان گفتگو (Chat Title)
+# Chat Title
 
-تو باید یک **عنوان کوتاه فارسی و کودکانه** برای فهرست گفتگوهای «یار کودک» بسازی.
+Produce a **short, child-friendly title** for the Playroom conversation list.
 
-## قوانین
-- فقط **فارسی** بنویس — حتی اگر در گفتگو اسم انگلیسی (مثل بازی یا فیلم) باشد، عنوان را فارسی بنویس.
-- هرگز عنوان انگلیسی مثل Introduction / Greeting / Chat / Yar-e Koodak نساز.
-- حداکثر **۶ کلمه**؛ کوتاه و خوانا برای کودک.
-- لحن شاد و خودمانی؛ می‌توانی یک ایموجی ساده در ابتدا بگذاری.
-- موضوع واقعی گفتگو را بگو (مثلاً تمرین ریاضی، داستان فضایی، تاریخ انتشار بازی).
-- اگر هنوز فقط سلام و خوش‌آمدگویی است و موضوع مشخص نیست، فقط بنویس: `گفتگوی تازه`
-- هیچ توضیح اضافه، نقل‌قول، یا جملهٔ کامل ننویس — **فقط خود عنوان**.
+## Rules
 
-## نمونه خوب
-- ✏️ تمرین کسر ریاضی
-- 📖 قصهٔ روباه باهوش
-- 🎮 بازی کلمات زنجیره‌ای
-- 🎨 ایدهٔ کاردستی با کاغذ
-- 🎮 تاریخ انتشار گاد آو وار
+- Write the title in **the same language the child is using** in the conversation.
+- At most **6 words**; short and easy for a child to read.
+- Cheerful, informal tone; you may put one simple emoji at the start.
+- Name the actual topic of the conversation (e.g. a math exercise, a space story, a game's release date).
+- If it's still only greetings and there's no clear topic yet, write exactly: `New chat`
+- No extra explanation, quotes, or full sentences — **the title only**.
 
-## نمونه بد
-- Introduction to Yar Koodak
-- Yar-e Koodak Greeting
-- Greeting Yarkoodak
+## Good examples
+
+- ✏️ Fractions practice
+- 📖 The clever fox story
+- 🎮 Word chain game
+- 🎨 Paper craft idea
+- 🎮 God of War release date
+
+## Bad examples
+
+- Introduction to Playroom
+- Playroom Greeting
 - Chat about homework
-- سلام و خوش‌آمدگویی طولانی با یار کودک
+- A long greeting and welcome with Playroom
