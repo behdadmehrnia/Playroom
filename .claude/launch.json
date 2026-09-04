@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "playroom-api",
-      "runtimeExecutable": "/opt/anaconda3/bin/python3",
-      "runtimeArgs": ["-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": ["api.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
       "port": 8000
     }
   ]
