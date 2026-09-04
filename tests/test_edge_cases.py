@@ -211,11 +211,11 @@ def test_lesson_missing_system_prompt_is_specific() -> None:
         page_query_failed=True,
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "درس" in prompt or "فصل" in prompt
+    assert "lesson" in prompt or "chapter" in prompt
     assert "ریاضی" in prompt
-    assert "از خودت نساز" in prompt or "حدس نزن" in prompt
-    assert "عکس" in prompt
-    assert "صفحه" in prompt
+    assert "invent" in prompt or "guess" in prompt
+    assert "photo" in prompt
+    assert "page" in prompt
 
 
 def test_need_info_asks_only_missing_grade_when_chapter_known() -> None:
@@ -228,12 +228,12 @@ def test_need_info_asks_only_missing_grade_when_chapter_known() -> None:
         chapter=3,
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "کلاس چندمی" in prompt or "کلاس چندم" in prompt
+    assert "Which grade are you in?" in prompt
     assert "ریاضی" in prompt
-    assert "فصل: 3" in prompt
-    assert "هنوز لازم است بپرسی" in prompt
+    assert "Chapter: 3" in prompt
+    assert "Still needed" in prompt
     # Chapter already known — only ask for missing grade, not page/chapter again.
-    assert "شمارهٔ صفحه؟ (ترجیح) یا شمارهٔ فصل/درس؟" not in prompt
+    assert "A page number? (preferred)" not in prompt
 
 
 def test_need_info_prefers_page_but_accepts_chapter() -> None:
@@ -245,9 +245,12 @@ def test_need_info_prefers_page_but_accepts_chapter() -> None:
         grade=6,
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "هنوز لازم است بپرسی: شمارهٔ صفحه؟ (ترجیح) یا شمارهٔ فصل/درس؟" in prompt
-    assert "هنوز لازم است بپرسی: کلاس چندمی؟" not in prompt
-    assert "هنوز لازم است بپرسی: کدام کتاب" not in prompt
+    assert (
+        "Still needed: A page number? (preferred) or a chapter/lesson number?"
+        in prompt
+    )
+    assert "Still needed: Which grade are you in?" not in prompt
+    assert "Still needed: Which book?" not in prompt
 
 
 def test_need_info_does_not_reask_locator_when_lesson_known() -> None:
@@ -260,8 +263,8 @@ def test_need_info_does_not_reask_locator_when_lesson_known() -> None:
         lesson=3,
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "درس: 3" in prompt
-    assert "شمارهٔ صفحه؟ (ترجیح) یا شمارهٔ فصل/درس؟" not in prompt
+    assert "Lesson: 3" in prompt
+    assert "A page number? (preferred)" not in prompt
 
 
 def test_lookup_failed_asks_for_photo_or_question_text() -> None:
@@ -274,9 +277,9 @@ def test_lookup_failed_asks_for_photo_or_question_text() -> None:
         page=42,
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "پیدا" in prompt
-    assert "عکس" in prompt
-    assert "سوال" in prompt
+    assert "couldn't find" in prompt
+    assert "photo" in prompt
+    assert "question" in prompt
 
 
 def test_math_tool_rejects_dunder_and_handles_div_zero() -> None:

@@ -20,21 +20,22 @@ from api.core import (
 
 def test_get_persona_ui_label() -> None:
     assert get_persona_ui_label("teacher") != "teacher"
-    assert "معلم" in get_persona_ui_label("teacher") or "📚" in get_persona_ui_label("teacher")
+    assert "Teacher" in get_persona_ui_label("teacher") or "📚" in get_persona_ui_label(
+        "teacher"
+    )
 
 
 def test_status_messages_non_empty() -> None:
     assert status_detecting_persona()
     assert status_persona_selected("gamer")
     generating = status_generating_response(1, MAX_GENERATION_ATTEMPTS)
-    assert generating == "✨ دارم جوابت رو مینویسم..."
-    assert "از" not in generating or "(1 از" not in generating
-    assert "قشنگت" not in generating
-    assert "جوابت رو مینویسم" in generating
+    assert generating == "✨ Writing your answer..."
+    assert "(1 of" not in generating
+    assert "Writing your answer" in generating
     debug_generating = status_generating_response(
         1, MAX_GENERATION_ATTEMPTS, debug=True
     )
-    assert "(1 از 3)" in debug_generating or "(1 از" in debug_generating
+    assert "(1 of 3)" in debug_generating
     assert status_reviewing_response()
     assert status_reflection_disabled()
     assert status_fetching_textbook()
@@ -54,11 +55,11 @@ def test_safe_fallback_varies_by_persona() -> None:
     storyteller = safe_fallback_response("storyteller")
     none = safe_fallback_response("none")
 
-    assert "سوال درسی" in homework
-    assert "سوال درسی" in teacher
-    assert "بازی" in gamer
-    assert "داستان" in storyteller
-    assert "خلاقانه" in creative or "بسازیم" in creative
-    assert "سوال درسی" in none or "داستان" in none
+    assert "school question" in homework
+    assert "school question" in teacher
+    assert "game" in gamer
+    assert "story" in storyteller
+    assert "creative idea" in creative
+    assert "school question" in none or "story" in none
     assert homework != gamer
     assert gamer != creative

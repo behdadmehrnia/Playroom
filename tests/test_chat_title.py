@@ -18,14 +18,14 @@ from api.core.chat_title import (
 )
 
 
-def test_chat_title_prompt_is_persian_and_child_friendly() -> None:
+def test_chat_title_prompt_is_child_friendly() -> None:
     prompt = get_chat_title_prompt()
-    assert "فارسی" in prompt
-    assert "کودکانه" in prompt or "کودک" in prompt
-    assert "نمونه بد" in prompt
+    assert "child-friendly" in prompt
+    assert "same language the child is using" in prompt
+    assert "Bad examples" in prompt
 
 
-def test_extracts_openwebui_embedded_chat_history() -> None:
+def test_extracts_embedded_chat_history() -> None:
     from api.core.chat_title import extract_conversation_for_title
 
     messages = [

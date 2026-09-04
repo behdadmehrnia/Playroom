@@ -16,7 +16,7 @@ from api.core import (
 def test_core_prompt_loads() -> None:
     prompt = get_core_prompt()
     assert len(prompt) > 100
-    assert "یار" in prompt or "کودک" in prompt
+    assert "Playroom" in prompt and "children" in prompt
 
 
 def test_intent_detection_prompt_loads() -> None:
@@ -37,9 +37,9 @@ def test_persona_none_returns_none() -> None:
 def test_reflection_prompt_is_safety_only() -> None:
     reflection = get_reflection_prompt()
     assert "{{CORE_PROMPT}}" not in reflection
-    assert "ایمنی" in reflection or "ناامن" in reflection
+    assert "safety" in reflection.lower() or "unsafe" in reflection.lower()
     # Must not embed the full core prompt anymore.
     core = get_core_prompt()
     assert core[:80] not in reflection
     assert "PASS" in reflection
-    assert "خشونت" in reflection or "فحش" in reflection
+    assert "Violence" in reflection or "profanity" in reflection

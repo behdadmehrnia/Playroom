@@ -36,9 +36,9 @@ def test_build_system_prompt_with_textbook_context() -> None:
         image_base64="abc",
     )
     prompt = build_system_prompt("teacher", textbook_context=ctx)
-    assert "متن صفحهٔ کتاب" in prompt
+    assert "Retrieved textbook text" in prompt
     assert "ریاضی" in prompt
-    assert "تصویر" in prompt
+    assert "image" in prompt
 
 
 def test_build_system_prompt_with_web_search_context() -> None:

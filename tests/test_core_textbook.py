@@ -676,7 +676,7 @@ def test_chapter_without_grade_asks_not_guesses() -> None:
         )
     )
     assert canned is not None
-    assert "کلاس" in canned or "پایه" in canned
+    assert "grade" in canned.lower()
     assert "ریاضی" in canned
 
 
@@ -858,10 +858,11 @@ def test_list_persian_grade4_canned_outline_no_doreh_ask() -> None:
     assert "کلاس چندم" not in canned
 
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "فهرست رسمی" in prompt or "فهرست / لیست" in prompt
-    assert "دوره اول / دوره دوم" in prompt  # forbidden explicitly in outline instruction
+    assert "official outline" in prompt or "table of contents" in prompt
+    # The outline instruction forbids inventing a fake structure.
+    assert "part one / part two" in prompt
     # Outline must NOT use the page-action header that tells the model to read images.
-    assert "اول تصویر صفحه را بخوان" not in prompt
+    assert "read the image first" not in prompt
 
 
 

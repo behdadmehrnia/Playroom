@@ -234,8 +234,8 @@ def test_book_unavailable_for_technology_grade_four() -> None:
     assert "4" in note
     assert "6" in note
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "کتاب: کار و فناوری" in prompt
-    assert "پایهٔ درخواستی: 4" in prompt
+    assert "Book: کار و فناوری" in prompt
+    assert "Requested grade: 4" in prompt
     assert "متن کتاب ریاضی" not in prompt
 
 
@@ -253,13 +253,12 @@ def test_out_of_range_instruction_uses_canonical_title() -> None:
     )
     note = format_page_out_of_range_instruction(ctx)
     assert "هدیه های آسمان" in note
-    assert "هدایای آسمان" in note  # as forbidden example in instruction
-    assert "251" in note or "۲۵۱" in note or "صفحهٔ درخواستی: 251" in note
+    assert "251" in note or "۲۵۱" in note or "Requested page: 251" in note
     assert "120" in note
 
     prompt = build_system_prompt("homework", textbook_context=ctx)
     assert "هدیه های آسمان" in prompt
-    assert "خارج از محدوده" in prompt or "وجود ندارد" in prompt
+    assert "doesn't exist in this textbook" in prompt
 
 
 def test_lesson_out_of_range_when_beyond_book_lesson_count() -> None:
@@ -371,7 +370,7 @@ def test_book_unavailable_system_prompt_mentions_available_grades() -> None:
     assert "6" in canned
     assert "عکس صفحه ۱۰" not in canned
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "برای پایه 4 نیست" in prompt or "پایهٔ درخواستی: 4" in prompt
+    assert "is not for grade 4" in prompt or "Requested grade: 4" in prompt
 
 
 def test_page_missing_gets_canned_honest_reply() -> None:
@@ -391,7 +390,7 @@ def test_page_missing_gets_canned_honest_reply() -> None:
     assert "۴۰" in canned or "40" in canned
     assert "فارسی" in canned
     assert "باز می‌کنم" not in canned
-    assert "عکس" in canned or "متن" in canned
+    assert "photo" in canned or "text" in canned
 
 
 def test_matched_textbook_prompt_demands_immediate_help() -> None:
@@ -408,10 +407,10 @@ def test_matched_textbook_prompt_demands_immediate_help() -> None:
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
     assert "متن نمونه درک مطلب" in prompt
-    assert "دستور کار فوری" in prompt
-    assert "تصویر" in prompt
-    assert "متن را خواندی" in prompt or "خوندی" in prompt or "مرور" in prompt
-    assert "صفحه را باز می‌کنم" in prompt or "باز می‌کنم" in prompt
+    assert "Immediate instruction" in prompt
+    assert "image" in prompt
+    assert "have you read the text?" in prompt
+    assert "I'll open the page" in prompt
 
 
 def test_matched_without_image_asks_for_photo() -> None:
@@ -426,8 +425,8 @@ def test_matched_without_image_asks_for_photo() -> None:
         needs_image=True,
     )
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "عکس" in prompt
-    assert "دستور کار فوری" not in prompt
+    assert "photo" in prompt
+    assert "Immediate instruction" not in prompt
 
 
 def test_lesson_out_of_range_system_prompt_mentions_max() -> None:
@@ -448,10 +447,10 @@ def test_lesson_out_of_range_system_prompt_mentions_max() -> None:
     assert "فارسی" in note
     assert "31" in note
     assert "17" in note
-    assert "تا درس/فصل 17" in note or "تا درس ۱۷" in note or "17 دارد" in note
+    assert "goes up to lesson 17" in note
     prompt = build_system_prompt("homework", textbook_context=ctx)
-    assert "وجود ندارد" in prompt or "خارج از محدوده" in prompt
-    assert "صفحهٔ همان واحد ناموجود" in note or "واحد ناموجود" in note or "درس ناموجود" in note
+    assert "doesn't exist in this textbook" in prompt
+    assert "that nonexistent unit" in note
 
 
 def test_catalog_map_parses_persian_digits_and_titles(
@@ -905,7 +904,7 @@ def test_chapter_out_of_range_reports_max_chapter_and_lessons() -> None:
     assert "17" in note
     canned = compose_textbook_failure_reply(ctx)
     assert canned is not None
-    assert "فصل" in canned
+    assert "hapter" in canned
     assert "6" in canned
     assert "17" in canned
 
