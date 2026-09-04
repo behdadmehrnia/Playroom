@@ -325,6 +325,7 @@ def _format_recent_messages(messages: list[ChatMessage], max_turns: int = 6) -> 
     return formatted
 
 
+# Persian and English phrasings that switch mode instantly, without an LLM call.
 _EXPLICIT_PERSONA_TRIGGERS: dict[str, tuple[str, ...]] = {
     "creative": (
         "خلاق باش",
@@ -333,6 +334,8 @@ _EXPLICIT_PERSONA_TRIGGERS: dict[str, tuple[str, ...]] = {
         "حالت خلاق",
         "شخصیت خلاق",
         "mode creative",
+        "be creative",
+        "creative mode",
     ),
     "storyteller": (
         "داستان بگو",
@@ -348,6 +351,11 @@ _EXPLICIT_PERSONA_TRIGGERS: dict[str, tuple[str, ...]] = {
         "حالت داستان",
         "شخصیت داستان",
         "mode storyteller",
+        "tell me a story",
+        "be the storyteller",
+        "be a storyteller",
+        "storyteller mode",
+        "story mode",
     ),
     "teacher": (
         "معلم باش",
@@ -355,6 +363,9 @@ _EXPLICIT_PERSONA_TRIGGERS: dict[str, tuple[str, ...]] = {
         "حالت معلم",
         "شخصیت معلم",
         "mode teacher",
+        "be the teacher",
+        "be a teacher",
+        "teacher mode",
     ),
     "homework": (
         "کمک درس باش",
@@ -364,6 +375,9 @@ _EXPLICIT_PERSONA_TRIGGERS: dict[str, tuple[str, ...]] = {
         "حالت کمک درس",
         "شخصیت کمک درس",
         "mode homework",
+        "help me with my homework",
+        "homework mode",
+        "homework help",
     ),
     "gamer": (
         "بازی باش",
@@ -376,6 +390,10 @@ _EXPLICIT_PERSONA_TRIGGERS: dict[str, tuple[str, ...]] = {
         "حالت بازی",
         "شخصیت بازی",
         "mode gamer",
+        "let's play",
+        "lets play",
+        "play a game",
+        "game mode",
     ),
 }
 

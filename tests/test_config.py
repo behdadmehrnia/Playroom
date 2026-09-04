@@ -35,7 +35,7 @@ def test_settings_web_search_provider_chain(monkeypatch: pytest.MonkeyPatch) -> 
         "PLAYROOM_WEB_SEARCH_PROVIDER", "api,perplexity,duckduckgo,gerdoo"
     )
     monkeypatch.setenv(
-        "PLAYROOM_WEB_SEARCH_GERDOO_URL", "http://185.149.192.142:8888"
+        "PLAYROOM_WEB_SEARCH_GERDOO_URL", "http://search.example.com:8888"
     )
     s = Settings.from_env()
     assert s.normalized_web_search_provider() == "api,perplexity,duckduckgo,gerdoo"
@@ -45,7 +45,7 @@ def test_settings_web_search_provider_chain(monkeypatch: pytest.MonkeyPatch) -> 
         "duckduckgo",
         "gerdoo",
     ]
-    assert s.web_search_gerdoo_url == "http://185.149.192.142:8888"
+    assert s.web_search_gerdoo_url == "http://search.example.com:8888"
 
 
 def test_settings_gerdoo_url_legacy_alias(monkeypatch: pytest.MonkeyPatch) -> None:

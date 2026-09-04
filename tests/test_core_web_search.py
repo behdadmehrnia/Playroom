@@ -130,12 +130,12 @@ def test_normalize_perplexity_search_url() -> None:
 
 def test_normalize_gerdoo_search_url() -> None:
     assert (
-        _normalize_gerdoo_search_url("http://185.149.192.142:8888")
-        == "http://185.149.192.142:8888/search"
+        _normalize_gerdoo_search_url("http://search.example.com:8888")
+        == "http://search.example.com:8888/search"
     )
     assert (
-        _normalize_gerdoo_search_url("http://185.149.192.142:8888/search")
-        == "http://185.149.192.142:8888/search"
+        _normalize_gerdoo_search_url("http://search.example.com:8888/search")
+        == "http://search.example.com:8888/search"
     )
     assert _normalize_gerdoo_search_url("") == ""
 
@@ -219,7 +219,7 @@ def test_search_via_gerdoo_fetches_list_results(monkeypatch: pytest.MonkeyPatch)
     ]
 
     def fake_get_json(url: str, *, headers=None, timeout_sec: float):  # noqa: ANN001
-        assert url.startswith("http://185.149.192.142:8888/search?")
+        assert url.startswith("http://search.example.com:8888/search?")
         assert "query=" in url
         return sample
 
@@ -227,7 +227,7 @@ def test_search_via_gerdoo_fetches_list_results(monkeypatch: pytest.MonkeyPatch)
 
     ctx = web_search_mod._search_via_gerdoo(
         "New god of war release",
-        gerdoo_url="http://185.149.192.142:8888",
+        gerdoo_url="http://search.example.com:8888",
         max_results=5,
         timeout_sec=8.0,
     )

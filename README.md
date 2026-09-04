@@ -1,199 +1,260 @@
-# Playroom (Playroom)
+<div align="center">
 
-دستPlayroom‌دوست — سرویس FastAPI مستقل به‌همراه Pipe کلاینت برای OpenWebUI.
+# Playroom
 
-## ساختار پروژه
+**A safe AI companion for children — five modes in one model.**
+
+Creative, storyteller, teacher, homework and games, routed automatically,
+grounded in the actual school textbook page, and reviewed for safety
+before a child ever sees a reply.
+
+[![Tests](https://github.com/BMDarkLight/Playroom/actions/workflows/tests.yml/badge.svg)](https://github.com/BMDarkLight/Playroom/actions/workflows/tests.yml)
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+</div>
+
+---
+
+## Table of contents
+
+- [Highlights](#highlights)
+- [The five modes](#the-five-modes)
+- [How a message is handled](#how-a-message-is-handled)
+- [Getting started](#getting-started)
+- [Configuration](#configuration)
+- [HTTP API](#http-api)
+- [Textbook retrieval](#textbook-retrieval)
+- [Web search](#web-search)
+- [Editing the prompts](#editing-the-prompts)
+- [Project structure](#project-structure)
+- [Tests](#tests)
+- [A note on language](#a-note-on-language)
+- [License](#license)
+
+---
+
+## Highlights
+
+| | |
+|---|---|
+| 🛡️ **Safety outranks everything** | A core prompt that no persona or user instruction can override, plus a reflection agent that judges every reply before it is sent. |
+| 📚 **Page-addressable textbooks** | Ask for a page, lesson or chapter and the real page — text *and* image — comes back from a local SQLite index. The image wins over OCR. |
+| 🧭 **Intent routing** | A classifier picks the mode above a confidence floor and stays put mid-activity instead of flipping on a single word. |
+| ✏️ **Method, never the answer** | Homework mode teaches the approach and refuses to hand over a finished result to copy. |
+| 🔢 **Checked arithmetic** | Maths in a child's message is evaluated by a sandboxed tool and used to explain the steps. |
+| ⚡ **Drop-in OpenAI API** | Point any OpenAI-compatible client at it, or use the built-in playground. |
+
+---
+
+## The five modes
+
+One model, five personas. Tools are gated per mode — the textbook and the calculator
+belong to teaching, web search belongs to play.
+
+| Mode | For | Textbook | Web search | Maths |
+|---|---|:---:|:---:|:---:|
+| 🎨 `creative` | Ideas, drawing, making things | — | ✓ | — |
+| 📖 `storyteller` | Short stories, 4–8 sentences | — | ✓ | — |
+| 📚 `teacher` | Explaining concepts | ✓ | — | ✓ |
+| ✏️ `homework` | Working an exercise, step by step | ✓ | — | ✓ |
+| 🎮 `gamer` | Word games, riddles, video game facts | — | ✓ | — |
+
+A mode is chosen in one of three ways, in priority order:
+
+1. `metadata.playroom_persona` on the request (or a top-level `persona` key)
+2. Intent detection, when confidence clears `0.7`
+3. Otherwise `none` — Playroom introduces itself and offers the modes
+
+---
+
+## How a message is handled
 
 ```
-playroom/
-├── api/                        # سرویس FastAPI (منبع حقیقت منطق)
-│   ├── main.py                 # entrypoint: uvicorn api.main:app
-│   ├── config.py / llm.py      # env settings + LLM client
-│   ├── service.py              # chat orchestration (calls api.core)
-│   ├── models.py               # HTTP request/response schemas
-│   ├── core/                   # domain logic (import via api.core)
-│   │   ├── persona.py / intent.py
-│   │   ├── textbook.py / web_search.py
-│   │   ├── generation.py / math_tool.py
-│   │   └── prompts.py          # loads api/prompts/*.md
-│   ├── routes/                 # HTTP endpoints (composed router)
-│   │   ├── chat.py / health.py
-│   │   ├── openai_compat.py    # /v1/chat/completions, /v1/responses
-│   │   └── …                   # intent, personas, textbook, web-search, …
-│   ├── prompts/                # پرامپت‌های .md
-│   ├── textbook/               # بازیابی کتاب درسی (embedded)
-│   ├── requirements-runtime.txt  # deps for Docker / API runtime
-│   ├── requirements.txt        # + MinerU indexer (local PDF indexing)
-│   └── pipe/
-│       ├── pipe.py             # ★ Pipe کلاینت OpenWebUI (توصیه‌شده)
-│       ├── pipe_logic.py       # [DEPRECATED] منطق محلی
-│       └── generate-logic-pipe.py
+message
+   │
+   ├── 1. Route      persona from metadata, else intent detection (≥ 0.7 confidence)
+   ├── 2. Ground     textbook page · web results · maths result   (gated by mode)
+   ├── 3. Generate   safety core + persona prompt + retrieved context
+   ├── 4. Review     reflection agent judges safety only; can send it back
+   └── 5. Stream     SSE chunks with live status, then a conversation title
 ```
 
-### وابستگی‌ها
+Retrieval failures never turn into invention. When a page is missing, out of range,
+or unreadable, the service answers from structured fields instead of trusting the
+model to admit it doesn't know.
+
+---
+
+## Getting started
+
+Requires **Python 3.12** and an OpenAI-compatible LLM endpoint.
 
 ```bash
-# اجرای API (همان چیزی که Docker نصب می‌کند)
 pip install -r api/requirements-runtime.txt
-
-# + ایندکس PDF محلی (MinerU — سنگین)
-pip install -r api/requirements.txt
+cp .env.example .env        # then set PLAYROOM_BACKEND_MODEL and PLAYROOM_LLM_API_KEY
+uvicorn api.main:app --reload --port 8000
 ```
 
-## اجرای API
+Then open **<http://localhost:8000>** for the landing page, or
+**<http://localhost:8000/chat>** for the playground.
+
+### Docker
 
 ```bash
 docker compose up -d --build
-# یا
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-تنظیمات از env (مثلاً `PLAYROOM_BACKEND_MODEL`, `PLAYROOM_LLM_API_KEY`, …) — نمونه: `.env.example`.
+The named volume `playroom-textbook-data` keeps `pages/`, `pdfs/` and `index.sqlite`
+across rebuilds; `catalog.json` is refreshed from the image on every start.
 
-## تست
+---
+
+## Configuration
+
+All settings are environment variables prefixed `PLAYROOM_`. See [`.env.example`](.env.example).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PLAYROOM_BACKEND_MODEL` | — | Backend LLM model (**required**) |
+| `PLAYROOM_LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible base URL |
+| `PLAYROOM_LLM_API_KEY` | — | Bearer token for the LLM service |
+| `PLAYROOM_TEMPERATURE` | `0.7` | Sampling temperature |
+| `PLAYROOM_ENABLE_REFLECTION` | `true` | Safety review before sending |
+| `PLAYROOM_ENABLE_STATUS_UPDATES` | `true` | Live status events while working |
+| `PLAYROOM_ENABLE_CHAT_TITLE` | `true` | Name conversations automatically |
+| `PLAYROOM_ENABLE_TEXTBOOK_CONTEXT` | `true` | Textbook retrieval |
+| `PLAYROOM_ENABLE_WEB_SEARCH` | `true` | Web search |
+| `PLAYROOM_API_HOST` / `_PORT` | `0.0.0.0` / `8000` | Bind address |
+
+---
+
+## HTTP API
+
+Interactive docs are served at `/docs`.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/v1/chat` | Native chat endpoint, SSE when `stream: true` |
+| `POST` | `/v1/chat/completions` | OpenAI Chat Completions (alias: `/v1/chat/completion`) |
+| `POST` | `/v1/responses` | OpenAI Responses API |
+| `GET` | `/v1/personas` | The persona list and each one's tool access |
+| `POST` | `/v1/persona/resolve` | Resolve which persona a conversation would use |
+| `POST` | `/v1/intent` | Intent classification only |
+| `POST` | `/v1/generate` · `/v1/reflect` | Generation and safety review in isolation |
+| `POST` | `/v1/textbook/query` · `/retrieve` | Textbook lookup |
+| `POST` | `/v1/web-search/query` · `/retrieve` | Web search, plus a route per provider |
+| `GET` | `/health` | Liveness |
+
+The client's `model` field is ignored; `PLAYROOM_BACKEND_MODEL` is used.
+
+```bash
+curl -s http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"tell me a story"}]}'
+```
+
+Every response (and the final stream chunk) carries a `playroom` object with the active
+persona, the textbook query and result, web search, and maths tool usage.
+
+---
+
+## Textbook retrieval
+
+The embedded [`api/textbook/`](api/textbook/) package indexes textbook PDFs into a local
+SQLite database plus per-page PNGs, and is called in-process — no separate service.
+Pages are addressable by page number, lesson, or chapter.
+
+Indexing uses [MinerU](https://github.com/opendatalab/MinerU) and needs its own
+environment; see [`api/textbook/README.md`](api/textbook/README.md). If retrieval is
+unavailable, Playroom continues without book context rather than inventing a page.
+
+---
+
+## Web search
+
+Set `PLAYROOM_WEB_SEARCH_PROVIDER` to one provider, `auto`, or a comma-separated
+fallback chain tried in order:
+
+| Provider | Endpoint |
+|---|---|
+| `api` | `POST {WEB_SEARCH_API_URL}/v1/search` |
+| `perplexity` | `GET {…}/api/v1/search?query=…` |
+| `duckduckgo` | Built-in DuckDuckGo (+ Wikipedia) |
+| `gerdoo` | `GET {…}/search?query=…` |
+
+Each provider also has its own test route under `/v1/web-search/providers/…`.
+If search fails, the chat continues without results — it does not guess.
+
+---
+
+## Editing the prompts
+
+Behaviour lives in Markdown, not in code. Edit the files under [`api/prompts/`](api/prompts/):
+
+| File | Role |
+|---|---|
+| `core.md` | Identity and the safety guardrails that outrank everything |
+| `personas/*.md` | One file per mode |
+| `intent_detection.md` | The routing classifier |
+| `reflection.md` | The safety reviewer |
+| `chat_title.md` | Conversation titles |
+| `web_search_query.md` | Turning a child's phrasing into a search query |
+
+---
+
+## Project structure
+
+```
+api/
+├── main.py             # entrypoint: uvicorn api.main:app
+├── config.py           # env settings
+├── llm.py              # OpenAI-compatible client
+├── service.py          # chat orchestration
+├── models.py           # request/response schemas
+├── core/               # domain logic
+│   ├── persona.py      #   persona resolution and stickiness
+│   ├── intent.py       #   intent classification
+│   ├── textbook.py     #   textbook query parsing
+│   ├── web_search.py   #   provider chain
+│   ├── generation.py   #   prompt building, reflection loop
+│   ├── math_tool.py    #   sandboxed arithmetic
+│   └── prompts.py      #   loads api/prompts/*.md
+├── routes/             # HTTP endpoints
+│   ├── openai_compat.py#   /v1/chat/completions, /v1/responses
+│   └── landing.py      #   landing page + chat playground
+├── prompts/            # all model behaviour, as Markdown
+└── textbook/           # embedded page-addressable retrieval
+```
+
+---
+
+## Tests
 
 ```bash
 pip install -r requirements-dev.txt
 pytest
 ```
 
-تست‌ها بر اساس ماژول‌های `api/core/` و `api/routes/` سازمان‌دهی شده‌اند (`tests/test_core_*.py`, `tests/test_routes.py`, …).  
-چک‌لیست تست دستی (پرامپت + انتظار): [`tests/README.md`](tests/README.md).
+263 tests covering personas, intent, textbook parsing and retrieval, web search,
+the maths tool, generation, and the HTTP routes. A manual QA checklist lives in
+[`tests/README.md`](tests/README.md).
 
-## نصب در OpenWebUI (مسیر توصیه‌شده)
+---
 
-1. سرویس `api/` را بالا بیاورید.
-2. در **Admin → Functions** فایل `api/pipe/pipe.py` را import کنید.
-3. Function را فعال کنید و در Valves مقدار `API_BASE_URL` را به آدرس سرویس بزنید
-   (مثلاً `http://host.docker.internal:8000`).
-4. مدل **Playroom مستقل** در لیست مدل‌ها ظاهر می‌شود.
+## A note on language
 
-> منطق دیگر داخل Pipe اجرا نمی‌شود؛ همهٔ مراحل در API انجام می‌شود.
+Playroom's instruction layer — every prompt, all UI copy, and these docs — is English,
+and the core prompt tells the model to **reply in whatever language the child writes in**.
 
-### عنوان گفتگو (Chat Title)
+The textbook subsystem is a deliberate exception. Its corpus is Persian, so the query
+parsers in `api/core/textbook.py` and `api/core/web_search.py` match Persian phrasing
+(«صفحه ۴۲», «فصل سوم»), and book titles in `catalog.json` stay in Persian. That is the
+recognition layer for the content, not user-facing copy. Swap the corpus and those
+matchers are what you would replace.
 
-عنوان سایدبار به‌صورت **فارسی و کودکانه** ساخته می‌شود و معمولاً بعد از کمی کانتکست (مثلاً پیام دوم کودک، نه فقط «سلام»). درخواست‌های title-generation اوپن‌وب‌یوآی هم همین پرامپت را می‌گیرند تا دیگر «Introduction to Playroom» ساخته نشود.
+---
 
-## نسخهٔ منسوخ (منطق محلی)
+## License
 
-`api/pipe/pipe_logic.py` منسوخ است. فقط اگر به یک فایل تک‌فایلی بدون API نیاز دارید:
-
-```bash
-python api/pipe/generate-logic-pipe.py
-```
-
-خروجی: `api/pipe/pipe_logic_embedded.py` — برای import مستقیم در OpenWebUI.
-برای استقرار جدید از `api/pipe/pipe.py` + API استفاده کنید.
-
-## انتخاب شخصیت (یک مدل — چند شخصیت)
-
-فقط **یک مدل** در لیست مدل‌ها نمایش داده می‌شود.
-
-انتخاب شخصیت از یکی از این مسیرها:
-
-| مسیر | مناسب برای |
-|------|------------|
-| **UserValves** | OpenWebUI استاندارد (Chat Controls → Valves) |
-| **`metadata.playroom_persona`** | UI سفارشی «یار» (dropdown کنار چت) |
-| **خودکار** | اگر چیزی انتخاب نشود → Intent Detection |
-
-### اتصال UI سفارشی (dropdown کنار چت)
-
-وقتی کاربر از dropdown شخصیت انتخاب کرد، هنگام ارسال پیام این مقدار را بفرستید:
-
-```json
-{
-  "model": "playroom_api",
-  "messages": [...],
-  "metadata": {
-    "playroom_persona": "creative"
-  }
-}
-```
-
-مقادیر مجاز: `auto` | `creative` | `storyteller` | `teacher` | `homework` | `gamer`
-
-همچنین می‌توانید مستقیم روی body بفرستید: `body.playroom_persona` یا `body.persona`
-
-### UserValves (OpenWebUI خام)
-
-Chat Controls → Valves → **شخصیت Playroom**
-
-### Valves کلاینت API (`api/pipe/pipe.py`)
-
-| پارامتر | توضیح |
-|---------|--------|
-| `API_BASE_URL` | آدرس پایهٔ سرویس `api/` (الزامی) |
-| `API_KEY` | Bearer اختیاری |
-| `MODEL` | مدل سمت API (خالی = پیش‌فرض API) |
-| `TEMPERATURE` | دمای تولید |
-| `ENABLE_STATUS_UPDATES` | نمایش وضعیت در UI |
-| `ENABLE_REFLECTION` | بازبینی پاسخ |
-| `ENABLE_TEXTBOOK_CONTEXT` | بازیابی کتاب درسی |
-| `ENABLE_WEB_SEARCH` | جستجوی وب |
-| `REQUEST_TIMEOUT_SEC` | مهلت درخواست |
-
-تنظیمات LLM / textbook / web search روی خود سرویس API (env) پیکربندی می‌شوند.
-
-## کتاب درسی
-
-برای پرسوناهای **معلم** و **کمک‌درسی**، API از ماژول embedded `api/textbook/` کانتکست صفحهٔ کتاب را می‌گیرد (پیش‌فرض؛ بدون سرویس جدا).
-
-جزئیات داده و ایندکس: زیر `api/textbook/`.
-
-اگر بازیابی در دسترس نباشد، Playroom بدون کانتکست کتاب ادامه می‌دهد.
-
-## جستجوی وب
-
-برای پرسوناهای **خلاق**، **داستان‌گو** و **بازی و سرگرمی**، وقتی سؤال کودک واقعی/به‌روز به نظر برسد، سیستم قبل از تولید پاسخ در اینترنت جستجو می‌کند و خلاصهٔ نتایج را به پرامپت تزریق می‌کند.
-
-- `WEB_SEARCH_PROVIDER` (env API):
-  - `api` — `POST {WEB_SEARCH_API_URL}/v1/search`
-  - `perplexity` — `GET {WEB_SEARCH_PERPLEXITY_URL}/api/v1/search?query=...`
-  - `duckduckgo` — DuckDuckGo داخلی (+ Wikipedia)
-  - `gerdoo` — `GET {WEB_SEARCH_GERDOO_URL}/search?query=...` (آرایهٔ `{link,title,snippet}`؛ [gerdoo.me](https://gerdoo.me))
-  - `auto` — منابع پیکربندی‌شده به ترتیب پیش‌فرض: api → perplexity → duckduckgo → gerdoo
-  - لیست ترتیبی با کاما برای fallback صریح، مثلاً `api,perplexity,duckduckgo,gerdoo`
-- تست مستقیم هر provider (بدون gate پرسونا):
-  - `POST /v1/web-search/providers/api`
-  - `POST /v1/web-search/providers/perplexity`
-  - `POST /v1/web-search/providers/duckduckgo`
-  - `POST /v1/web-search/providers/gerdoo`
-  - body: `{"query":"...", "max_results":5}`
-- در API: `POST /v1/web-search/query` و `POST /v1/web-search/retrieve`
-- اگر جستجو شکست بخورد، چت بدون نتایج ادامه می‌یابد (حدس نمی‌زند)
-
-## API سازگار با OpenAI
-
-سرویس `api/` علاوه بر `/v1/chat` این اندپوینت‌ها را هم ارائه می‌دهد (مدل کلاینت نادیده گرفته می‌شود؛ از `PLAYROOM_BACKEND_MODEL` استفاده می‌شود):
-
-| مسیر | توضیح |
-|------|--------|
-| `POST /v1/chat/completions` | Chat Completions استاندارد (+ alias: `/v1/chat/completion`) |
-| `POST /v1/responses` | Responses API |
-
-در پاسخ (و در آخرین chunk استریم) فیلد `playroom` شامل پرسونای فعال، لاگ‌ها، کوئری/نتیجهٔ کتاب درسی، جستجوی وب، و استفاده از ابزار ریاضی است.
-
-```bash
-curl -s http://localhost:8000/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"سلام"}]}'
-```
-
-## ویرایش پرامپت‌ها
-
-هر پرامپت در فایل `.md` جداگانه است. برای تغییر رفتار مدل، فایل‌های زیر `api/prompts/` را ویرایش کنید:
-
-| فایل | کاربرد |
-|------|--------|
-| `api/prompts/core.md` | هویت و قوانین ایمنی |
-| `api/prompts/personas/*.md` | رفتار هر پرسونا |
-| `api/prompts/intent_detection.md` | تشخیص نیت |
-| `api/prompts/reflection.md` | بازبینی کیفیت (`{{CORE_PROMPT}}` جایگزین می‌شود) |
-
-## افزودن پرسونای جدید
-
-1. فایل `api/prompts/personas/<id>.md` بسازید.
-2. شناسه را به `SUPPORTED_PERSONAS` در `api/core/constants.py` (و در صورت نیاز `api/pipe/pipe.py`) اضافه کنید.
-3. گزینه را به `UserValves.PERSONA` (dropdown) در کلاینت Pipe اضافه کنید.
-4. پرسونا را در `api/prompts/intent_detection.md` معرفی کنید.
+[MIT](LICENSE) © Behdad Mehrnia

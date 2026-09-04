@@ -41,6 +41,24 @@ def test_explicit_persona_triggers(text: str, expected: str | None) -> None:
     assert _detect_explicit_persona_request(text) == expected
 
 
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("be the teacher", "teacher"),
+        ("tell me a story", "storyteller"),
+        ("let's play", "gamer"),
+        ("be creative", "creative"),
+        ("homework help", "homework"),
+        ("game mode", "gamer"),
+        # No explicit switch — this must fall through to intent detection.
+        ("I am bored", None),
+        ("what is a fraction?", None),
+    ],
+)
+def test_explicit_persona_triggers_in_english(text: str, expected: str | None) -> None:
+    assert _detect_explicit_persona_request(text) == expected
+
+
 def test_manual_persona_sources() -> None:
     assert resolve_manual_persona(user_persona="teacher") == "teacher"
     assert (
