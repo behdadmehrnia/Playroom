@@ -26,8 +26,8 @@ def resolve_backend_model(settings: Settings, requested: str | None) -> str:
         raise HTTPException(
             status_code=400,
             detail=(
-                "هیچ مدل پشتیبانی تنظیم نشده. "
-                "PLAYROOM_BACKEND_MODEL را تنظیم کنید یا «model» را در درخواست بفرستید."
+                "No backend model is configured. "
+                "Set PLAYROOM_BACKEND_MODEL, or send 'model' in the request."
             ),
         )
     return model
@@ -153,8 +153,7 @@ def resolve_backend_model_optional(
         raise HTTPException(
             status_code=400,
             detail=(
-                "هیچ مدل پشتیبانی تنظیم نشده. "
-                "PLAYROOM_BACKEND_MODEL را تنظیم کنید."
+                "No backend model is configured. Set PLAYROOM_BACKEND_MODEL."
             ),
         )
     return model

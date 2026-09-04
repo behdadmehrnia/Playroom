@@ -7,7 +7,7 @@ from .messages import _looks_like_greeting_only, _looks_like_welcome_or_menu
 from .prompts import get_chat_title_prompt
 from .types import ChatMessage, LLMClient, LLMCompletionRequest
 
-PLACEHOLDER_CHAT_TITLE = "گفتگوی تازه"
+PLACEHOLDER_CHAT_TITLE = "New chat"
 CHAT_TITLE_METADATA_KEY = "playroom_chat_title"
 DEFAULT_MIN_USER_MESSAGES_FOR_TITLE = 2
 # When OpenWebUI title is unknown, re-emit through turns 2–3 so an early
@@ -187,7 +187,7 @@ def conversation_ready_for_title(
     *,
     min_user_messages: int = DEFAULT_MIN_USER_MESSAGES_FOR_TITLE,
 ) -> bool:
-    """Require a bit of real context — not just the first سلام."""
+    """Require a bit of real context — not just the first greeting."""
     convo = extract_conversation_for_title(messages)
     users = [
         m.content.strip()
@@ -223,9 +223,9 @@ def format_title_conversation(messages: list[ChatMessage], *, limit: int = 8) ->
     for message in messages[-limit:]:
         if message.role == "assistant" and _looks_like_welcome_or_menu(message.content):
             role = "Playroom"
-            content = "(خوش‌آمدگویی کوتاه)"
+            content = "(short welcome)"
         elif message.role == "user":
-            role = "کودک"
+            role = "Child"
             content = message.content.strip()
         elif message.role == "assistant":
             role = "Playroom"
@@ -246,7 +246,7 @@ async def generate_chat_title(
     messages: list[ChatMessage],
     min_user_messages: int = DEFAULT_MIN_USER_MESSAGES_FOR_TITLE,
 ) -> str:
-    """Return a Persian child-friendly title, or a placeholder if too early."""
+    """Return a child-friendly title, or a placeholder if too early."""
     convo = extract_conversation_for_title(messages)
     if not conversation_ready_for_title(convo, min_user_messages=min_user_messages):
         return PLACEHOLDER_CHAT_TITLE
@@ -263,7 +263,7 @@ async def generate_chat_title(
             {
                 "role": "user",
                 "content": (
-                    "بر اساس این گفتگو فقط یک عنوان فارسی کودکانه بنویس:\n\n"
+                    "Based on this conversation, write only a short child-friendly title:\n\n"
                     f"{transcript}"
                 ),
             },

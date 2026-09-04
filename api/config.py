@@ -2,7 +2,7 @@
 
 All settings are read from environment variables. Bool parsing reuses
 ``api.core.coerce_bool`` so the same tolerant semantics
-(``1``/``true``/``yes``/``بله`` ...) apply.
+(``1``/``true``/``yes`` ...) apply.
 """
 
 from __future__ import annotations
@@ -20,20 +20,20 @@ class Settings(BaseModel):
     # --- LLM provider ---
     backend_model: str = Field(
         default="",
-        description="مدل LLM پشتیبان (الزامی برای تولید پاسخ).",
+        description="Backend LLM model (required to generate replies).",
     )
     llm_base_url: str = Field(
         default="https://api.openai.com/v1",
-        description="آدرس پایهٔ API سازگار با OpenAI (بدون /chat/completions).",
+        description="Base URL of the OpenAI-compatible API (without /chat/completions).",
     )
     llm_api_key: str = Field(
         default="",
-        description="کلید API (Bearer token) برای سرویس LLM.",
+        description="API key (bearer token) for the LLM service.",
     )
     llm_timeout_sec: float = Field(
         default=120.0,
         ge=5.0,
-        description="مهلت درخواست به سرویس LLM (ثانیه).",
+        description="Request timeout for the LLM service, in seconds.",
     )
 
     # --- Generation / agents ---
@@ -48,7 +48,7 @@ class Settings(BaseModel):
     textbook_api_url: str = Field(
         default="",
         description=(
-            "آدرس سرویس کتاب درسی خارجی. خالی / local / self = بستهٔ داخلی api.textbook"
+            "URL of an external textbook service. Empty / local / self = the embedded api.textbook package."
         ),
     )
     textbook_api_key: str = Field(default="")
@@ -64,8 +64,8 @@ class Settings(BaseModel):
     web_search_provider: str = Field(
         default="auto",
         description=(
-            "یک provider، auto، یا لیست ترتیبی با کاما برای fallback "
-            "(مثل gerdoo,api,duckduckgo)."
+            "A single provider, auto, or a comma-separated fallback chain "
+            "(e.g. gerdoo,api,duckduckgo)."
         ),
     )
     web_search_api_url: str = Field(default="")
@@ -73,15 +73,15 @@ class Settings(BaseModel):
     web_search_gerdoo_url: str = Field(
         default="",
         description=(
-            "آدرس پایه یا کامل سرویس جستجوی Gerdoo (gerdoo.me) "
-            "(GET .../search?query=...). خالی = غیرفعال."
+            "Base or full URL of the Gerdoo search service (gerdoo.me) "
+            "(GET .../search?query=...). Empty = disabled."
         ),
     )
     web_search_perplexity_url: str = Field(
         default="",
         description=(
-            "آدرس پایه یا کامل سرویس جستجوی Perplexity "
-            "(GET .../api/v1/search?query=...). خالی = غیرفعال."
+            "Base or full URL of a Perplexity-style search service "
+            "(GET .../api/v1/search?query=...). Empty = disabled."
         ),
     )
     web_search_request_timeout_sec: float = Field(

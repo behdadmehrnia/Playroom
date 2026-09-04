@@ -119,7 +119,7 @@ async def retrieve_textbook_endpoint(
         )
         if use_scope and scope is not None:
             # Named lesson titles beat chapter-start lookup only when no unit
-            # number was given. Conversational leftovers must not clear فصل N.
+            # number was given. Conversational leftovers must not clear chapter N.
             prefer_named = (
                 bool(scope.topic_query and scope.topic_query.strip())
                 and scope.chapter is None

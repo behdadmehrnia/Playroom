@@ -2,7 +2,7 @@
 title: Playroom (API Client)
 author: Playroom
 version: 0.6.8
-description: Pipe کلاینت OpenWebUI — منطق Playroom را از طریق API مستقل (api/) اجرا می‌کند
+description: OpenWebUI Pipe client — runs Playroom logic through the standalone API (api/)
 required_open_webui_version: 0.5.0
 """
 
@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 MODEL_ID = "playroom_api"
-MODEL_NAME = "Playroom مستقل"
+MODEL_NAME = "Playroom"
 MANUAL_PERSONA_METADATA_KEY = "playroom_persona"
 ACTIVE_PERSONA_METADATA_KEY = "playroom_active_persona"
 CHAT_TITLE_METADATA_KEY = "playroom_chat_title"
@@ -67,22 +67,22 @@ _PERSONA_ZW_CODE: dict[str, str] = {
 _ZW_CODE_PERSONA: dict[str, str] = {v: k for k, v in _PERSONA_ZW_CODE.items()}
 
 PERSONA_DROPDOWN_OPTIONS: list[dict[str, str]] = [
-    {"value": "auto", "label": "✨ خودکار — خودم انتخاب می‌کنم!"},
-    {"value": "creative", "label": "🎨 خلاق"},
-    {"value": "storyteller", "label": "📖 داستان‌گو"},
-    {"value": "teacher", "label": "📚 معلم"},
-    {"value": "homework", "label": "✏️ کمک‌درس"},
-    {"value": "gamer", "label": "🎮 بازی و سرگرمی"},
+    {"value": "auto", "label": "✨ Auto — I'll pick for you!"},
+    {"value": "creative", "label": "🎨 Creative"},
+    {"value": "storyteller", "label": "📖 Storyteller"},
+    {"value": "teacher", "label": "📚 Teacher"},
+    {"value": "homework", "label": "✏️ Homework"},
+    {"value": "gamer", "label": "🎮 Games"},
 ]
 
 SAFE_FALLBACK_RESPONSE = (
-    "متأسفم، الان نتوانستم پاسخ مناسبی برایت بدهم. "
-    "بیایید با هم یک موضوع دیگر را امتحان کنیم!"
+    "Sorry, I couldn't come up with a good answer just now. "
+    "Let's try something else together!"
 )
 
 NO_API_URL_MESSAGE = (
-    "لطفاً در تنظیمات Pipe مقدار API_BASE_URL را مشخص کنید "
-    "(آدرس سرویس api/)."
+    "Please set API_BASE_URL in the Pipe settings "
+    "(the address of the api/ service)."
 )
 
 # ---------------------------------------------------------------------------
@@ -230,11 +230,11 @@ def _stream_sse_blocking(
         except Exception:  # noqa: BLE001
             pass
         loop.call_soon_threadsafe(
-            queue.put_nowait, ("error", f"HTTP {exc.code} از API: {detail}")
+            queue.put_nowait, ("error", f"HTTP {exc.code} from the API: {detail}")
         )
     except urllib.error.URLError as exc:
         loop.call_soon_threadsafe(
-            queue.put_nowait, ("error", f"اتصال به API ناموفق: {exc.reason}")
+            queue.put_nowait, ("error", f"Could not connect to the API: {exc.reason}")
         )
     except Exception as exc:  # noqa: BLE001
         loop.call_soon_threadsafe(
@@ -323,58 +323,58 @@ class Pipe:
     class Valves(BaseModel):
         API_BASE_URL: str = Field(
             default="http://host.docker.internal:8090",
-            description="آدرس پایهٔ API مستقل Playroom (api/main.py) — بدون / در انتها.",
+            description="Base URL of the standalone Playroom API (api/main.py) — no trailing slash.",
         )
         API_KEY: str = Field(
             default="",
-            description="کلید API اختیاری (Bearer) اگر API پشت دروازهٔ احراز هویت باشد.",
+            description="Optional API key (bearer) if the API sits behind an auth gateway.",
         )
         MODEL: str = Field(
             default="",
             description=(
-                "شناسهٔ مدل برای ارسال به API. "
-                "خالی = استفاده از مدل پیش‌فرضِ سمت API."
+                "Model id to send to the API. "
+                "Empty = use the API's own default model."
             ),
         )
         TEMPERATURE: float = Field(
             default=0.7,
             ge=0.0,
             le=2.0,
-            description="دمای تولید پاسخ.",
+            description="Sampling temperature for replies.",
         )
         ENABLE_STATUS_UPDATES: bool = Field(
             default=True,
-            description="نمایش وضعیت پردازش در رابط کاربری.",
+            description="Show processing status in the UI.",
         )
         ENABLE_REFLECTION: bool = Field(
             default=True,
-            title="ایجنت بازبینی پاسخ",
+            title="Reply review agent",
             description=(
-                "اگر روشن باشد، پاسخ قبل از ارسال توسط ایجنت Reflection بررسی می‌شود."
+                "When on, the reply is checked by the reflection agent before it is sent."
             ),
         )
         ENABLE_TEXTBOOK_CONTEXT: bool = Field(
             default=True,
-            description="بازیابی کتاب درسی از textbook-service (معلم/کمک‌درسی).",
+            description="Textbook retrieval from the textbook service (teacher/homework).",
         )
         ENABLE_WEB_SEARCH: bool = Field(
             default=True,
             description=(
-                "جستجوی وب برای پرسوناهای خلاق / داستان‌گو / بازی و سرگرمی "
-                "(وقتی سؤال واقعی/به‌روز باشد)."
+                "Web search for the creative / storyteller / games personas "
+                "(when the question needs real or current facts)."
             ),
         )
         REQUEST_TIMEOUT_SEC: float = Field(
             default=DEFAULT_API_TIMEOUT_SEC,
             ge=10.0,
-            description="مهلت درخواست به API (ثانیه).",
+            description="API request timeout, in seconds.",
         )
 
     class UserValves(BaseModel):
         PERSONA: str = Field(
             default="auto",
-            title="شخصیت Playroom",
-            description="از این منو شخصیت دوستت رو انتخاب کن! 😊",
+            title="Playroom persona",
+            description="Pick your friend's mode from this menu! 😊",
             json_schema_extra={
                 "input": {"type": "select", "options": PERSONA_DROPDOWN_OPTIONS}
             },
@@ -388,7 +388,7 @@ class Pipe:
             {
                 "id": MODEL_ID,
                 "name": MODEL_NAME,
-                "description": "همراه هوشمند و کودک‌دوست (نسخهٔ API)",
+                "description": "A smart, child-friendly companion (API edition)",
             }
         ]
 

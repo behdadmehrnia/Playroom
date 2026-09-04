@@ -151,7 +151,7 @@ class WebSearchRetrieveRequest(BaseModel):
     enable_web_search: bool | None = None
     force: bool = Field(
         default=False,
-        description="اگر True باشد heuristic را رد می‌کند و حتماً جستجو می‌کند.",
+        description="If true, bypass the heuristic and always run a search.",
     )
     debug: bool | None = None
 

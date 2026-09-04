@@ -14,12 +14,12 @@ def get_persona_ui_label(persona: PersonaId | str) -> str:
 
 
 def status_detecting_persona() -> str:
-    return "😊 دارم شخصیت مناسب رو پیدا می‌کنم..."
+    return "😊 Finding the right mode for you..."
 
 
 def status_persona_selected(persona: PersonaId) -> str:
     label = get_persona_ui_label(persona)
-    return f"🎭 شخصیت {label} انتخاب شد! بزن بریم..."
+    return f"🎭 {label} mode it is! Here we go..."
 
 
 def status_generating_response(
@@ -30,39 +30,39 @@ def status_generating_response(
 ) -> str:
     """Progress status while writing a reply.
 
-    Attempt counters like «(۱ از ۳)» only appear when ``debug`` is on.
+    Attempt counters like "(1 of 3)" only appear when ``debug`` is on.
     """
     if debug:
-        return f"✨ دارم جوابت رو مینویسم... ({attempt} از {max_attempts})"
-    return "✨ دارم جوابت رو مینویسم..."
+        return f"✨ Writing your answer... ({attempt} of {max_attempts})"
+    return "✨ Writing your answer..."
 
 
 def status_reviewing_response() -> str:
-    return "🔍 یه لحظه! دارم چک می‌کنم همه‌چیز عالی باشه..."
+    return "🔍 One moment! Checking everything looks great..."
 
 
 def status_reflection_disabled() -> str:
-    return "⚡ بازبینی پاسخ خاموش است — مستقیم جواب می‌دم..."
+    return "⚡ Review is off — answering straight away..."
 
 
 def status_fetching_textbook() -> str:
-    return "📖 دارم صفحهٔ کتاب درسی رو پیدا می‌کنم..."
+    return "📖 Finding the textbook page..."
 
 
 def status_textbook_unavailable() -> str:
-    return "⚠️ نتونستم به سرویس کتاب درسی وصل بشم..."
+    return "⚠️ Couldn't reach the textbook service..."
 
 
 def status_fetching_web_search() -> str:
-    return "🔎 دارم توی اینترنت دنبال اطلاعات می‌گردم..."
+    return "🔎 Searching the web for information..."
 
 
 def status_web_search_unavailable() -> str:
-    return "⚠️ جستجوی اینترنت الان در دسترس نبود..."
+    return "⚠️ Web search wasn't available just now..."
 
 
 def status_calculating_math() -> str:
-    return "🔢 دارم حساب می‌کنم..."
+    return "🔢 Working out the maths..."
 async def clear_status_message(
     __event_emitter__: Callable[[dict[str, Any]], Awaitable[None]] | None,
 ) -> None:

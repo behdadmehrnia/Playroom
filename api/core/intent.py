@@ -48,7 +48,7 @@ async def detect_intent(
     if not user_text:
         return IntentDetectionResult(persona="none")
 
-    # Bare greetings must not lock a persona (TC: «سلام» → none).
+    # Bare greetings must not lock a persona (e.g. "hi" -> none).
     if _looks_like_greeting_only(user_text):
         return IntentDetectionResult(persona="none")
 
@@ -64,7 +64,7 @@ async def detect_intent(
         return IntentDetectionResult(persona=explicit, confidence=0.98)
 
     # Hard stick: during an active persona session, short/continuation turns
-    # must NOT go to the LLM (e.g. word-chain answer «داستان»).
+    # must NOT go to the LLM (e.g. a word-chain answer that happens to be "story").
     if (
         current_persona
         and current_persona != "none"
@@ -76,18 +76,18 @@ async def detect_intent(
     system_prompt = get_intent_detection_prompt()
     if current_persona and current_persona != "none":
         system_prompt += (
-            f"\n\n⚠️ چسبندگی پرسونا: کاربر الان در حالت «{current_persona}» است"
-            + (f" و فعالیت «{activity}»" if activity else "")
+            f"\n\n⚠️ Persona stickiness: the user is currently in {current_persona} mode"
+            + (f", activity: {activity}" if activity else "")
             + ".\n"
-            "این حالت را پیش‌فرض نگه دار مگر درخواست تعویض واقعاً صریح باشد.\n"
-            "سوییچ آسان (بدون اصرار زیاد) فقط بین این جفت‌ها مجاز است:\n"
+            "Keep this mode by default unless the change request is genuinely explicit.\n"
+            "A soft switch is allowed only between these pairs:\n"
             "- creative ↔ storyteller\n"
             "- teacher ↔ homework\n"
-            "برای هر تعویض دیگر (مثلاً gamer↔teacher یا creative↔homework) فقط وقتی "
-            "درخواست خیلی صریح و قاطع بود پرسونای جدید را برگردان؛ وگرنه همان "
-            f"«{current_persona}» را نگه دار.\n"
-            "کلمهٔ تکی مثل «داستان» / «بازی» / «معلم» در وسط فعالیت، درخواست تعویض نیست.\n"
-            "«ادامه بده»، «سوال بعد»، «مثال دیگر»، «ایده دیگر» یعنی ماندن در همان پرسونا."
+            "For any other change (e.g. gamer<->teacher or creative<->homework), return the new "
+            "persona only on a very explicit, decisive request; otherwise keep "
+            f"{current_persona}.\n"
+            "A single word like 'story' / 'game' / 'teacher' mid-activity is not a change request.\n"
+            "'keep going', 'next question', 'another example', 'another idea' mean staying in the same persona."
         )
 
     history = _format_recent_messages(messages, max_turns=6)

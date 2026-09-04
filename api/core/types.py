@@ -74,14 +74,14 @@ class TextbookScope:
     """Structured textbook position resolved from chat (no NL query round-trip)."""
 
     grade: int | None = None
-    subject: str | None = None  # Persian keyword, e.g. «فارسی»
+    subject: str | None = None  # subject key, e.g. "persian"
     subject_id: str | None = None  # catalog id, e.g. «persian»
     page: int | None = None
-    lesson: int | None = None  # child unit number (درس/جلسه/مهارت/پروژه)
-    chapter: int | None = None  # parent unit number (فصل/بخش)
+    lesson: int | None = None  # child unit number (lesson/session/skill/project)
+    chapter: int | None = None  # parent unit number (chapter/section)
     kind: str | None = None  # lesson|session|project|skill|topic
     wants_outline: bool = False
-    # Free-text leftover for topic search only (names, «میرزا کوچک خان», …).
+    # Free-text leftover for topic search only (proper names and similar).
     topic_query: str | None = None
 
     def has_page_lookup(self) -> bool:
@@ -117,7 +117,7 @@ class TextbookScope:
 
         Page/lesson/chapter/outline already require grade+subject.
         Free-text topic search also needs both — never guess across grades
-        (e.g. «فصل ۳ ریاضی» without پایه must ask, not open پایه ۳ by FTS).
+        (e.g. "chapter 3 of maths" without a grade must ask, not open grade 3 via FTS).
         """
         if (
             self.has_page_lookup()
