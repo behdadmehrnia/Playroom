@@ -522,10 +522,11 @@ def resolve_manual_persona(
     body: dict[str, Any] | None = None,
 ) -> PersonaId | None:
     """
-    Resolve manually selected persona from chat UserValves or request metadata.
+    Resolve a manually selected persona from the request.
 
-    OpenWebUI exposes UserValves in Chat Controls → Valves sidebar.
-    When persona is "auto" or empty, returns None so intent detection runs.
+    Accepts an explicit ``user_persona``, ``metadata.playroom_persona``, a
+    top-level body key, or ``params``. When the persona is "auto" or empty,
+    returns None so intent detection runs.
     """
     manual = _normalize_persona(user_persona)
     if manual:
@@ -542,7 +543,7 @@ def resolve_manual_persona(
             if manual:
                 return manual
 
-    # Custom frontend (e.g. Yar UI): send persona directly on the request body.
+    # Custom frontend: send the persona directly on the request body.
     for key in ("playroom_persona", "persona", "PERSONA"):
         direct = body.get(key)
         if isinstance(direct, str):
@@ -561,22 +562,6 @@ def resolve_manual_persona(
     return None
 
 
-def get_user_persona_selection(__user__: dict[str, Any] | None) -> str | None:
-    """Read persona from OpenWebUI UserValves (Chat Controls sidebar)."""
-    if not __user__:
-        return None
-
-    valves = __user__.get("valves")
-    if valves is None:
-        return None
-
-    persona = dict(valves).get("PERSONA")
-    if isinstance(persona, str) and persona.strip():
-        return persona.strip()
-
-    return None
-
-
 # ---------------------------------------------------------------------------
 
 async def resolve_active_persona(
@@ -591,7 +576,7 @@ async def resolve_active_persona(
     """
     Resolve persona with sticky behaviour.
 
-    - Manual UserValves persona wins immediately (no confirmation),
+    - A manually selected persona wins immediately (no confirmation),
       except concrete textbook asks which need homework/teacher tools.
     - Auto-detected persona sticks across turns (via metadata/history).
     - Easy switches without confirmation only within sibling pairs:

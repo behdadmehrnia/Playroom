@@ -351,7 +351,7 @@ async def _handle_chat_completions(
     if not messages:
         raise HTTPException(status_code=400, detail="messages must not be empty")
 
-    # OpenWebUI title-generation calls — answer with Persian child-friendly titles
+    # Client title-generation calls — answer with a child-friendly title
     # instead of running the full chat pipeline (and avoid English "Introduction…").
     from api.core import (
         generate_chat_title,

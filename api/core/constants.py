@@ -18,7 +18,7 @@ ACTIVE_TEXTBOOK_SCOPE_METADATA_KEY = "playroom_textbook_scope"
 _PERSONA_MARKER_RE = re.compile(r"<!--\s*playroom:([a-z_]+)\s*-->", re.IGNORECASE)
 # Invisible sticky marker in assistant content (kept in history, stripped for LLM).
 # Digits are encoded with ZWSP / ZWNJ / ZWJ. Fence avoids U+2060 (Word Joiner),
-# which some clients (incl. Open WebUI) render as tofu boxes.
+# which some clients render as tofu boxes.
 _ZW_DIGIT = {"0": "\u200b", "1": "\u200c", "2": "\u200d"}
 _ZW_DIGIT_INV = {v: k for k, v in _ZW_DIGIT.items()}
 _ZW_FENCE = "\u200b\u200d\u200c\u200b"  # ZWSP + ZWJ + ZWNJ + ZWSP

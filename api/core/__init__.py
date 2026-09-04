@@ -53,7 +53,6 @@ from .math_tool import (
     run_math_tool_for_message,
 )
 from .messages import (
-    _await_if_needed,
     _extract_json_object,
     _get_latest_user_message,
     _looks_like_greeting_only,
@@ -77,7 +76,6 @@ from .persona import (
     _looks_like_word_chain_awaiting_answer,
     _should_keep_current_persona,
     format_persona_switch_confirmation,
-    get_user_persona_selection,
     resolve_active_persona,
     resolve_manual_persona,
 )
@@ -100,7 +98,6 @@ from .chat_title import (
     should_emit_chat_title,
 )
 from .status import (
-    clear_status_message,
     get_persona_ui_label,
     status_calculating_math,
     status_detecting_persona,
@@ -193,7 +190,6 @@ __all__ = [
     "WebSearchContext",
     "WebSearchQueryDiag",
     "WebSearchResult",
-    "_await_if_needed",
     "_detect_explicit_persona_request",
     "_detect_ongoing_activity",
     "_extract_json_object",
@@ -214,7 +210,6 @@ __all__ = [
     "build_web_search_diag",
     "build_web_search_query",
     "calculate_math",
-    "clear_status_message",
     "coerce_bool",
     "conversation_ready_for_title",
     "detect_intent",
@@ -241,7 +236,6 @@ __all__ = [
     "get_persona_prompt",
     "get_persona_ui_label",
     "get_reflection_prompt",
-    "get_user_persona_selection",
     "iter_text_chunks",
     "looks_like_textbook_followup",
     "looks_like_textbook_help_request",

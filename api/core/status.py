@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Awaitable, Callable
-
 from .constants import PERSONA_UI_LABELS, PersonaId
-from .messages import _await_if_needed
 
 def get_persona_ui_label(persona: PersonaId | str) -> str:
     """Return a child-friendly persona label for UI status messages."""
@@ -63,15 +59,3 @@ def status_web_search_unavailable() -> str:
 
 def status_calculating_math() -> str:
     return "🔢 Working out the maths..."
-async def clear_status_message(
-    __event_emitter__: Callable[[dict[str, Any]], Awaitable[None]] | None,
-) -> None:
-    """Hide the status bar after the response is complete (OpenWebUI events API)."""
-    if not __event_emitter__:
-        return
-    await __event_emitter__(
-        {
-            "type": "status",
-            "data": {"description": "", "done": True, "hidden": True},
-        }
-    )

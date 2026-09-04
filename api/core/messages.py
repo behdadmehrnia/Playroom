@@ -27,13 +27,8 @@ from .constants import (
 )
 from .types import ChatMessage
 
-async def _await_if_needed(value: Any) -> Any:
-    """Await coroutines; return plain values unchanged (OpenWebUI version compat)."""
-    if inspect.isawaitable(value):
-        return await value
-    return value
 def coerce_bool(value: Any, *, default: bool = True) -> bool:
-    """Robust bool coercion for OpenWebUI valves (bool / 0-1 / 'true'|'false')."""
+    """Robust bool coercion for settings (bool / 0-1 / 'true'|'false')."""
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
@@ -95,7 +90,7 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def extract_message_content(content: Any) -> str:
-    """Flatten Open WebUI / OpenAI message content (str or multimodal parts)."""
+    """Flatten OpenAI-style message content (str or multimodal parts)."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -148,7 +143,7 @@ def append_persona_marker(text: str, persona: PersonaId) -> str:
     """Append an invisible persona tag so history can recover sticky persona.
 
     The tag uses only zero-width characters (no HTML, no Word Joiner) so it
-    should not change Open WebUI / playground / OpenAI-client display. Markers
+    should not change playground / OpenAI-client display. Markers
     are stripped before LLM prompts and can be stripped for UI rendering.
     """
     base = strip_persona_markers(text) if text else ""
@@ -289,7 +284,7 @@ def _normalize_persona(value: str | None) -> PersonaId | None:
 
 
 def iter_text_chunks(text: str, chunk_size: int = STREAM_CHUNK_SIZE) -> Iterator[str]:
-    """Split text into chunks for simulated streaming in OpenWebUI pipes."""
+    """Split text into chunks for simulated streaming over SSE."""
     if not text:
         yield ""
         return

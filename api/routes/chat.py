@@ -116,7 +116,7 @@ async def chat_endpoint(
     messages = to_chat_messages(req.messages)
     body = build_resolve_body(req.metadata)
 
-    # OpenWebUI title tasks go through the pipe → /v1/chat (not completions).
+    # Some clients request a chat title through /v1/chat (not completions).
     if settings.enable_chat_title:
         from api.core import (
             generate_chat_title,

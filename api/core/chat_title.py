@@ -1,4 +1,4 @@
-"""Persian child-friendly chat title generation for OpenWebUI / pipe."""
+"""Child-friendly chat title generation."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .types import ChatMessage, LLMClient, LLMCompletionRequest
 PLACEHOLDER_CHAT_TITLE = "New chat"
 CHAT_TITLE_METADATA_KEY = "playroom_chat_title"
 DEFAULT_MIN_USER_MESSAGES_FOR_TITLE = 2
-# When OpenWebUI title is unknown, re-emit through turns 2–3 so an early
+# When the client's title is unknown, re-emit through turns 2-3 so an early
 # English Greeting title can be overwritten once the topic is clear.
 _MAX_USER_MESSAGES_FOR_TITLE_REFRESH = 3
 
@@ -58,7 +58,7 @@ def looks_like_title_generation_request(
     metadata: dict | None = None,
     task: str | None = None,
 ) -> bool:
-    """True when OpenWebUI (or similar) asks the model to name the chat."""
+    """True when a client asks the model to name the chat."""
     task_blob = " ".join(
         str(part).lower()
         for part in (
@@ -94,7 +94,7 @@ def is_generic_chat_title(title: str | None) -> bool:
         return True
     if _GENERIC_TITLE_RE.match(cleaned):
         return True
-    # OpenWebUI's default task template prefers English — treat Latin-only
+    # Some clients' title templates prefer English — treat Latin-only
     # titles as generic so we can overwrite them with Persian ones.
     if not has_persian_script(cleaned) and re.search(r"[A-Za-z]{3,}", cleaned):
         return True
@@ -112,7 +112,7 @@ _HISTORY_TURN_RE = re.compile(
 
 
 def _parse_embedded_chat_history(text: str) -> list[ChatMessage]:
-    """Parse OpenWebUI title-task blob that embeds history in one message."""
+    """Parse a title-task blob that embeds the history in one message."""
     parts = _CHAT_HISTORY_SPLIT_RE.split(text, maxsplit=1)
     if len(parts) < 2:
         return []
@@ -293,7 +293,7 @@ def should_emit_chat_title(
 ) -> bool:
     """Emit/overwrite when we have context and the current title is still generic.
 
-    When OpenWebUI's current title is unknown (``None``), only refresh through
+    When the client's current title is unknown (``None``), only refresh through
     the first few user turns so early English Greeting titles get replaced
     without regenerating on every later message.
     """
