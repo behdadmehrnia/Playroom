@@ -2,312 +2,480 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 router = APIRouter(tags=["Landing"])
 
+LOGO_PATH = Path(__file__).resolve().parent.parent / "logo.svg"
+
 LANDING_PAGE_HTML = """
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#000000">
     <title>Playroom</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 17'%3E%3Cpath d='M8.5 0.5C12.9183 0.5 16.5 4.08172 16.5 8.5C16.5 12.9183 12.9183 16.5 8.5 16.5C4.08172 16.5 0.5 12.9183 0.5 8.5C0.5 4.08172 4.08172 0.5 8.5 0.5Z' stroke='%23FFC828'/%3E%3Cpath d='M27.5 17C32.1944 17 36 13.1944 36 8.5C36 3.80558 32.1944 0 27.5 0C22.8056 0 19 3.80558 19 8.5C19 13.1944 22.8056 17 27.5 17Z' fill='%23FFC828'/%3E%3C/svg%3E">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <meta name="description" content="A safe AI companion for children — five modes, grounded in the school textbook.">
+    <link rel="icon" type="image/svg+xml" href="/logo.svg">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --bg: #000;
+            --panel: #121212;
+            --panel-soft: #181818;
+            --panel-raised: #242424;
+            --line: rgba(255, 255, 255, 0.08);
+            --text: #fff;
+            --muted: #b3b3b3;
+            --quiet: #737373;
+            --radius: 14px;
         }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html { -webkit-text-size-adjust: 100%; }
+
         body {
-            font-family: 'Vazirmatn', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #1a1a1a;
-            color: #e0e0e0;
-            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Circular", "Avenir Next", "Helvetica Neue", -apple-system,
+                         BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            padding: 8px;
+        }
+
+        .shell { max-width: 1180px; margin: 0 auto; }
+
+        .panel {
+            background: var(--panel);
+            border-radius: var(--radius);
+            padding: 40px;
+        }
+
+        .topbar {
             display: flex;
-            flex-direction: column;
             align-items: center;
-            padding: 2rem;
-            direction: rtl;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 18px 24px;
+            background: var(--panel);
+            border-radius: var(--radius);
+            margin-bottom: 8px;
         }
-        .container {
-            max-width: 960px;
-            width: 100%;
-            text-align: center;
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            font-size: 17px;
         }
-        h1 {
-            font-size: 3.2rem;
-            font-weight: 900;
-            margin-bottom: 0.5rem;
-            color: #f9d423;
-        }
-        .subtitle {
-            font-size: 1.15rem;
-            color: #999;
-            margin-bottom: 3rem;
-            max-width: 600px;
-            margin-left: auto;
-            margin-right: auto;
-            line-height: 1.8;
-        }
-        .section-title {
-            font-size: 1.8rem;
+
+        .brand svg { display: block; }
+
+        .topnav { display: flex; align-items: center; gap: 4px; }
+
+        .topnav a {
+            color: var(--muted);
+            text-decoration: none;
             font-weight: 700;
-            color: #f9d423;
-            margin-bottom: 0.5rem;
+            font-size: 13px;
+            padding: 8px 12px;
+            border-radius: 2px;
+            transition: color .15s ease, background .15s ease;
         }
-        .section-desc {
-            color: #888;
-            margin-bottom: 2rem;
-            font-size: 0.95rem;
+
+        .topnav a:hover { color: var(--text); background: var(--panel-raised); }
+
+        .overline {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--quiet);
         }
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 1.25rem;
-            margin-bottom: 4rem;
+
+        .hero { padding: 56px 40px 48px; }
+
+        .hero h1 {
+            font-size: clamp(40px, 7vw, 68px);
+            font-weight: 800;
+            letter-spacing: -0.04em;
+            line-height: 1.02;
+            margin: 14px 0 0;
+            max-width: 15ch;
         }
-        .feature-card {
-            background: #242424;
-            border: 1px solid #333;
-            border-radius: 12px;
-            padding: 1.5rem;
-            text-align: right;
-            transition: border-color 0.3s, box-shadow 0.3s;
+
+        .hero p.lede {
+            color: var(--muted);
+            font-size: 16px;
+            max-width: 58ch;
+            margin-top: 18px;
         }
-        .feature-card:hover {
-            border-color: #f9d423;
-            box-shadow: 0 0 20px rgba(249, 212, 35, 0.08);
+
+        .cta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 30px; }
+
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #fff;
+            color: #000;
+            font-weight: 800;
+            font-size: 14px;
+            letter-spacing: -0.01em;
+            text-decoration: none;
+            padding: 13px 26px;
+            border-radius: 999px;
+            transition: transform .15s ease;
         }
-        .feature-icon {
-            font-size: 2rem;
-            margin-bottom: 0.75rem;
-        }
-        .feature-title {
-            font-size: 1.1rem;
+
+        .btn-primary:hover { transform: scale(1.04); }
+
+        .btn-ghost {
+            color: var(--muted);
             font-weight: 700;
-            color: #f9d423;
-            margin-bottom: 0.5rem;
+            text-decoration: none;
+            padding: 13px 16px;
+            border-radius: 2px;
         }
-        .feature-desc {
-            color: #999;
-            line-height: 1.7;
-            font-size: 0.92rem;
+
+        .btn-ghost:hover { color: var(--text); }
+
+        section { margin-top: 8px; }
+
+        .section-head { margin-bottom: 22px; }
+
+        .section-head h2 {
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            margin-top: 10px;
         }
-        .personas {
+
+        .section-head p { color: var(--muted); margin-top: 6px; max-width: 62ch; }
+
+        .modes {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            gap: 1.25rem;
-            margin-bottom: 4rem;
+            gap: 16px;
         }
-        .persona-card {
-            background: #242424;
-            border: 1px solid #333;
-            border-radius: 12px;
-            padding: 1.5rem 1rem;
-            text-align: center;
-            transition: border-color 0.3s, transform 0.2s;
-        }
-        .persona-card:hover {
-            border-color: #f9d423;
-            transform: translateY(-3px);
-        }
-        .persona-emoji {
-            font-size: 2.5rem;
-            margin-bottom: 0.75rem;
-        }
-        .persona-name {
-            font-size: 1.05rem;
-            font-weight: 700;
-            color: #f9d423;
-            margin-bottom: 0.35rem;
-        }
-        .persona-desc {
-            color: #888;
-            font-size: 0.82rem;
-            line-height: 1.6;
-        }
-        .divider {
-            border: none;
-            border-top: 1px solid #333;
-            margin: 0 0 3rem 0;
-        }
-        .cta-section {
-            padding: 2.5rem 2rem;
-            background: #242424;
-            border-radius: 12px;
-            border: 1px solid #333;
-        }
-        .cta-section h2 {
-            color: #f9d423;
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
-        }
-        .cta-button {
-            display: inline-block;
-            padding: 1.2rem 2.7rem;
-            background: #f9d423;
-            color: #1a1a1a;
-            text-decoration: none;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 1.2rem;
-            transition: background 0.3s, box-shadow 0.3s;
-        }
-        .cta-button:hover {
-            background: #e6c320;
-            box-shadow: 0 4px 20px rgba(249, 212, 35, 0.25);
-        }
-        .cta-actions {
+
+        .mode { text-decoration: none; display: block; }
+
+        .mode .tile {
+            position: relative;
+            aspect-ratio: 1 / 1;
+            border-radius: 6px;
+            overflow: hidden;
             display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.85rem;
+            align-items: flex-end;
+            padding: 14px;
+            transition: transform .18s ease;
         }
-        .cta-link-secondary {
-            display: inline-block;
-            color: #999;
-            text-decoration: none;
-            font-size: 0.82rem;
-            font-weight: 500;
-            border-bottom: 1px solid #555;
-            padding-bottom: 0.1rem;
-            transition: color 0.2s, border-color 0.2s;
+
+        .mode:hover .tile { transform: translateY(-4px); }
+
+        .mode .tile::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at 50% 46%, rgba(255,255,255,.13) 0 1px, transparent 1px),
+                radial-gradient(circle at 50% 46%, transparent 27%, rgba(255,255,255,.10) 27%, rgba(255,255,255,.10) calc(27% + 1px), transparent calc(27% + 1px)),
+                radial-gradient(circle at 50% 46%, transparent 40%, rgba(255,255,255,.07) 40%, rgba(255,255,255,.07) calc(40% + 1px), transparent calc(40% + 1px));
         }
-        .cta-link-secondary:hover {
-            color: #f9d423;
-            border-color: #f9d423;
+
+        .mode .glyph {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -58%);
+            font-size: 34px;
+            line-height: 1;
+            z-index: 1;
         }
-        .footer {
-            margin-top: 3rem;
-            color: #555;
-            font-size: 0.85rem;
-            padding-bottom: 1rem;
+
+        .mode .tile b {
+            position: relative;
+            z-index: 1;
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: #fff;
         }
-        .footer a {
-            color: #f9d423;
-            text-decoration: none;
+
+        .mode h3 {
+            font-size: 14px;
+            font-weight: 700;
+            margin-top: 12px;
+            letter-spacing: -0.01em;
         }
-        .footer a:hover {
-            text-decoration: underline;
+
+        .mode p { color: var(--quiet); font-size: 13px; margin-top: 2px; }
+
+        .t-creative    { background: linear-gradient(155deg, #c2410c, #7c2d12); }
+        .t-storyteller { background: linear-gradient(155deg, #6d28d9, #4c1d95); }
+        .t-teacher     { background: linear-gradient(155deg, #1d4ed8, #172554); }
+        .t-homework    { background: linear-gradient(155deg, #047857, #064e3b); }
+        .t-gamer       { background: linear-gradient(155deg, #be123c, #881337); }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 12px;
+        }
+
+        .card {
+            background: var(--panel-soft);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 22px;
+        }
+
+        .card .ico { font-size: 20px; line-height: 1; }
+
+        .card h3 {
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin: 14px 0 6px;
+        }
+
+        .card p { color: var(--muted); font-size: 13px; }
+
+        .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+
+        .step {
+            flex: 1 1 170px;
+            background: var(--panel-soft);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 18px;
+        }
+
+        .step .n {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            color: var(--quiet);
+        }
+
+        .step h3 { font-size: 14px; font-weight: 800; margin: 10px 0 5px; letter-spacing: -0.02em; }
+        .step p { color: var(--muted); font-size: 12.5px; }
+
+        pre {
+            background: #0a0a0a;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 18px;
+            overflow-x: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12.5px;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+
+        pre b { color: var(--text); font-weight: 600; }
+
+        footer {
+            margin-top: 8px;
+            padding: 30px 40px 40px;
+            background: var(--panel);
+            border-radius: var(--radius);
+            color: var(--quiet);
+            font-size: 12.5px;
+        }
+
+        footer a { color: var(--muted); text-decoration: none; }
+        footer a:hover { color: var(--text); text-decoration: underline; }
+        .foot-row { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
+
+        @media (max-width: 640px) {
+            .panel, .hero { padding: 28px 20px; }
+            footer { padding: 24px 20px 32px; }
+            .topbar { padding: 14px 16px; }
+            .topnav a { padding: 8px; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1 style="display: flex; align-items: center; justify-content: center; gap: 1rem;">
-            <svg width="56" height="28" viewBox="0 0 36 17" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M8.5 0.5C12.9183 0.5 16.5 4.08172 16.5 8.5C16.5 12.9183 12.9183 16.5 8.5 16.5C4.08172 16.5 0.5 12.9183 0.5 8.5C0.5 4.08172 4.08172 0.5 8.5 0.5Z" stroke="#FFC828"/>
-                <path d="M27.5 17C32.1944 17 36 13.1944 36 8.5C36 3.80558 32.1944 0 27.5 0C22.8056 0 19 3.80558 19 8.5C19 13.1944 22.8056 17 27.5 17Z" fill="#FFC828"/>
+<div class="shell">
+
+    <div class="topbar">
+        <span class="brand">
+            <svg width="26" height="26" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <rect x="1" y="1" width="30" height="30" rx="8" stroke="#fff" stroke-opacity=".25" stroke-width="1.5"/>
+                <circle cx="11" cy="12" r="3.5" fill="#c2410c"/>
+                <circle cx="21" cy="12" r="3.5" fill="#6d28d9"/>
+                <circle cx="11" cy="21" r="3.5" fill="#047857"/>
+                <circle cx="21" cy="21" r="3.5" fill="#be123c"/>
             </svg>
             Playroom
-        </h1>
-        <p class="subtitle">دستیار هوش مصنوعی اختصاصی کودکان — بخشی از اکوسیستم هوش مصنوعی  یار</p>
+        </span>
+        <nav class="topnav">
+            <a href="/chat">Playground</a>
+            <a href="/docs">API</a>
+            <a href="https://github.com/BMDarkLight/Playroom" target="_blank" rel="noopener">GitHub</a>
+        </nav>
+    </div>
 
-        <hr class="divider">
-
-        <div class="section-title">قابلیت‌ها</div>
-        <p class="section-desc">امکاناتی که Playroom را از سایر دستیارها متمایز می‌کند</p>
-
-        <div class="features">
-            <div class="feature-card">
-                <div class="feature-icon">🧠</div>
-                <div class="feature-title">دانش به‌روز</div>
-                <div class="feature-desc">با دسترسی به جستجوی وب، همیشه آخرین اطلاعات را در اختPlayroomان قرار می‌دهد.</div>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">🛡️</div>
-                <div class="feature-title">امن برای کودکان</div>
-                <div class="feature-desc">طراحی شده با فیلترهای ایمنی و پاسخ‌های مناسب سن کودکان.</div>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">📚</div>
-                <div class="feature-title">دانش کتاب درسی</div>
-                <div class="feature-desc">دسترسی مستقیم به محتوای کتاب‌های درسی برای کمک در تکالیف و یادگیری.</div>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">🔍</div>
-                <div class="feature-title">تشخیص نیت هوشمند</div>
-                <div class="feature-desc">به‌صورت خودکار نیت کودک را تشخیص داده و بهترین پاسخ را ارائه می‌دهد.</div>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">💬</div>
-                <div class="feature-title">چت بلادرنگ</div>
-                <div class="feature-desc">پاسخ‌دهی آنی با جریان داده (SSE) برای تجربه‌ای روان و تعاملی.</div>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">🔄</div>
-                <div class="feature-title">بازبینی پاسخ</div>
-                <div class="feature-desc">بررسی و بازنویسی خودکار پاسخ‌ها برای اطمینان از کیفیت و دقت.</div>
-            </div>
-        </div>
-
-        <hr class="divider">
-
-        <div class="section-title">پرسوناهای Playroom</div>
-        <p class="section-desc">هر پرسونا یک نقش متفاوت دارد تا کودک بهترین تجربه را داشته باشد</p>
-
-        <div class="personas">
-            <div class="persona-card">
-                <div class="persona-emoji">🎨</div>
-                <div class="persona-name">خلاق</div>
-                <div class="persona-desc">ایده‌پردازی خلاقانه و کشف راه‌های جدید</div>
-            </div>
-
-            <div class="persona-card">
-                <div class="persona-emoji">📖</div>
-                <div class="persona-name">داستان‌گو</div>
-                <div class="persona-desc">قصه‌گویی تعاملی و ماجراجویی‌های جذاب</div>
-            </div>
-
-            <div class="persona-card">
-                <div class="persona-emoji">👩‍🏫</div>
-                <div class="persona-name">معلم</div>
-                <div class="persona-desc">آموزش مفهومی و توضیح ساده دروس</div>
-            </div>
-
-            <div class="persona-card">
-                <div class="persona-emoji">📝</div>
-                <div class="persona-name">کمک‌درس</div>
-                <div class="persona-desc">حل تمرین و تکالیف قدم‌به‌قدم</div>
-            </div>
-
-            <div class="persona-card">
-                <div class="persona-emoji">🎮</div>
-                <div class="persona-name">بازی و سرگرمی</div>
-                <div class="persona-desc">بازی کلمات، چیستان و معما</div>
-            </div>
-        </div>
-
-        <hr class="divider">
-
-        <div class="cta-section">
-            <h2>همین حالا شروع کنید!</h2>
-            <div class="cta-actions">
-                <a href="https://yarai.ir" target="_blank" class="cta-button">
-                   رفتن به هوش مصنوعی یار
-                </a>
-                <a href="/chat" class="cta-link-secondary">امتحان کردن مستقیم Playroom</a>
-            </div>
-        </div>
-
-        <div class="footer">
-            <p>بخشی از اکوسیستم هوش مصنوعی  یار</p>
-            <p style="font-size: 0.65rem;">شرکت یار، از پیشگامان ایرانی هوش مصنوعی، با تمرکز بر توسعه فناوری‌های نوآورانه و بومی‌سازی مدل‌ها، راهکارهای تخصصی برای کسب‌وکارها و مردم ارائه می‌دهد. تیم ما متشکل از نخبگان دانشگاهی و متخصصان فناوری است که با رویکرد علمی و مسئولیت‌پذیر، دستیارهای هوشمند در حوزه‌هایی چون پزشکی، حقوقی، آموزشی، سلامت روان، پژوهش و کودکان طراحی کرده و نقشی مؤثر در تحول دیجیتال کشور ایفا می‌کند.</p>
-            <p style="margin-top: 0.6rem; font-size: 1rem;">© تمامی حقوق برای شرکت یار محفوظ می باشد</p>
-            <p style="margin-top: 0.7rem; font-size: 0.65rem;">Built with ❤️ by <a href="https://github.com/BMdarkLight/" target="_blank">Behdad</a>  |  <a href="/docs">API Documentation</a></p>
+    <div class="panel hero">
+        <div class="overline">Playroom</div>
+        <h1>A safe AI companion for children.</h1>
+        <p class="lede">
+            Five modes in one model — creative, storyteller, teacher, homework and games.
+            Playroom routes to the right one on its own, grounds homework in the actual
+            school textbook page, and reviews every reply for safety before a child sees it.
+        </p>
+        <div class="cta-row">
+            <a class="btn-primary" href="/chat">Open the playground</a>
+            <a class="btn-ghost" href="/docs">Read the API docs &rarr;</a>
         </div>
     </div>
+
+    <section class="panel">
+        <div class="section-head">
+            <div class="overline">One model</div>
+            <h2>Five ways to be alongside a child</h2>
+            <p>Pick a mode, or let intent detection choose. Tools are gated per mode — the
+               textbook and calculator belong to teaching, web search to play.</p>
+        </div>
+        <div class="modes">
+            <a class="mode" href="/chat">
+                <div class="tile t-creative"><span class="glyph">🎨</span><b>Creative</b></div>
+                <h3>Ideas and making</h3>
+                <p>Turns "I'm bored" into one small step</p>
+            </a>
+            <a class="mode" href="/chat">
+                <div class="tile t-storyteller"><span class="glyph">📖</span><b>Storyteller</b></div>
+                <h3>Short stories</h3>
+                <p>Four to eight sentences, always a choice</p>
+            </a>
+            <a class="mode" href="/chat">
+                <div class="tile t-teacher"><span class="glyph">📚</span><b>Teacher</b></div>
+                <h3>Concepts</h3>
+                <p>Everyday examples, one idea per step</p>
+            </a>
+            <a class="mode" href="/chat">
+                <div class="tile t-homework"><span class="glyph">✏️</span><b>Homework</b></div>
+                <h3>Method, not answers</h3>
+                <p>Works the page, never hands over the result</p>
+            </a>
+            <a class="mode" href="/chat">
+                <div class="tile t-gamer"><span class="glyph">🎮</span><b>Games</b></div>
+                <h3>Play and puzzles</h3>
+                <p>Word games, riddles, real game facts</p>
+            </a>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="section-head">
+            <div class="overline">Capabilities</div>
+            <h2>What makes it different</h2>
+        </div>
+        <div class="grid">
+            <div class="card">
+                <div class="ico">📚</div>
+                <h3>Page-addressable textbooks</h3>
+                <p>Ask for a page, lesson or chapter and the real page — text and image — is
+                   retrieved from a local index. The image wins over OCR.</p>
+            </div>
+            <div class="card">
+                <div class="ico">🛡️</div>
+                <h3>Safety that outranks everything</h3>
+                <p>A core prompt no persona or user instruction can override, plus a
+                   reflection pass on every reply before it is sent.</p>
+            </div>
+            <div class="card">
+                <div class="ico">🧭</div>
+                <h3>Intent routing</h3>
+                <p>A classifier picks the mode above a confidence floor, and sticks with it
+                   mid-activity instead of flipping on a single word.</p>
+            </div>
+            <div class="card">
+                <div class="ico">🔢</div>
+                <h3>Checked arithmetic</h3>
+                <p>Maths in a child's message is evaluated by a sandboxed tool, then used to
+                   explain the steps — never to hand over the answer.</p>
+            </div>
+            <div class="card">
+                <div class="ico">🔎</div>
+                <h3>Web search with fallbacks</h3>
+                <p>An ordered provider chain keeps game and world facts current, and the
+                   model is told to say "I'm not sure" rather than guess.</p>
+            </div>
+            <div class="card">
+                <div class="ico">⚡</div>
+                <h3>Drop-in OpenAI API</h3>
+                <p>Point any OpenAI-compatible client at it. Streaming replies over SSE,
+                   with the active persona and diagnostics attached.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="section-head">
+            <div class="overline">Architecture</div>
+            <h2>What happens to a message</h2>
+        </div>
+        <div class="flow">
+            <div class="step">
+                <div class="n">01</div><h3>Route</h3>
+                <p>Persona from metadata, or intent detection above a 0.7 confidence floor.</p>
+            </div>
+            <div class="step">
+                <div class="n">02</div><h3>Ground</h3>
+                <p>Textbook page, web results, or a maths result — gated by the active mode.</p>
+            </div>
+            <div class="step">
+                <div class="n">03</div><h3>Generate</h3>
+                <p>The safety core, the persona prompt, and the retrieved context.</p>
+            </div>
+            <div class="step">
+                <div class="n">04</div><h3>Review</h3>
+                <p>A reflection agent judges safety only, and can send it back to be rewritten.</p>
+            </div>
+            <div class="step">
+                <div class="n">05</div><h3>Stream</h3>
+                <p>Chunks over SSE with live status, then a title for the conversation.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="section-head">
+            <div class="overline">Quick start</div>
+            <h2>Talk to it like any OpenAI model</h2>
+        </div>
+        <pre><b>curl</b> -s http://localhost:8000/v1/chat/completions \\
+  -H <b>'Content-Type: application/json'</b> \\
+  -d <b>'{"messages":[{"role":"user","content":"tell me a story"}]}'</b></pre>
+    </section>
+
+    <footer>
+        <div class="foot-row">
+            <div>
+                <div class="overline">Playroom</div>
+                <p style="margin-top:8px">Built by <a href="https://github.com/BMDarkLight" target="_blank" rel="noopener">Behdad</a> · MIT licensed</p>
+            </div>
+            <div style="display:flex;gap:16px;align-items:flex-start">
+                <a href="/chat">Playground</a>
+                <a href="/docs">API docs</a>
+                <a href="/health">Health</a>
+                <a href="https://github.com/BMDarkLight/Playroom" target="_blank" rel="noopener">Source</a>
+            </div>
+        </div>
+    </footer>
+
+</div>
 </body>
 </html>
 """
@@ -315,383 +483,415 @@ LANDING_PAGE_HTML = """
 
 CHAT_PAGE_HTML = """
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>چت مستقیم — Playroom</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 17'%3E%3Cpath d='M8.5 0.5C12.9183 0.5 16.5 4.08172 16.5 8.5C16.5 12.9183 12.9183 16.5 8.5 16.5C4.08172 16.5 0.5 12.9183 0.5 8.5C0.5 4.08172 4.08172 0.5 8.5 0.5Z' stroke='%23FFC828'/%3E%3Cpath d='M27.5 17C32.1944 17 36 13.1944 36 8.5C36 3.80558 32.1944 0 27.5 0C22.8056 0 19 3.80558 19 8.5C19 13.1944 22.8056 17 27.5 17Z' fill='%23FFC828'/%3E%3C/svg%3E">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#000000">
+    <title>Playground — Playroom</title>
+    <link rel="icon" type="image/svg+xml" href="/logo.svg">
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <style>
+        :root {
+            --bg: #000;
+            --panel: #121212;
+            --panel-soft: #181818;
+            --panel-raised: #242424;
+            --line: rgba(255, 255, 255, 0.08);
+            --text: #fff;
+            --muted: #b3b3b3;
+            --quiet: #737373;
+            --sidebar-width: 252px;
+            --radius: 14px;
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body { height: 100%; }
+
         body {
-            font-family: 'Vazirmatn', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #1a1a1a;
-            color: #e0e0e0;
-            height: 100vh;
-            display: flex;
-            direction: rtl;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Circular", "Avenir Next", "Helvetica Neue", -apple-system,
+                         BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.55;
+            -webkit-font-smoothing: antialiased;
+            display: grid;
+            grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+            gap: 8px;
+            padding: 8px;
             overflow: hidden;
         }
+
+        /* ---------- sidebar ---------- */
+
         .sidebar {
-            width: 240px;
-            flex-shrink: 0;
-            background: #1f1f1f;
-            border-left: 1px solid #333;
+            background: var(--panel);
+            border-radius: var(--radius);
             display: flex;
             flex-direction: column;
-            z-index: 30;
+            min-height: 0;
+            overflow: hidden;
         }
-        .sidebar-top {
-            padding: 0.85rem;
-            border-bottom: 1px solid #333;
-            display: flex;
-            flex-direction: column;
-            gap: 0.55rem;
-        }
+
+        .sidebar-top { padding: 14px; }
+
         .new-chat {
             width: 100%;
-            border: 1px dashed #555;
-            background: transparent;
-            color: #f9d423;
-            font-family: inherit;
-            font-size: 0.88rem;
-            font-weight: 600;
-            padding: 0.65rem 0.75rem;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: border-color 0.2s, background 0.2s;
-        }
-        .new-chat:hover:not(:disabled) {
-            border-color: #f9d423;
-            background: rgba(249, 212, 35, 0.06);
-        }
-        .new-chat:disabled,
-        .session-open:disabled,
-        .session-del:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-        body.is-busy .session-item { pointer-events: none; }
-        body.is-busy .new-chat { pointer-events: none; }
-        .session-list {
-            flex: 1;
-            overflow-y: auto;
-            padding: 0.5rem;
             display: flex;
-            flex-direction: column;
-            gap: 0.3rem;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: #fff;
+            color: #000;
+            border: 0;
+            border-radius: 999px;
+            padding: 11px 16px;
+            font: inherit;
+            font-weight: 800;
+            letter-spacing: -0.01em;
+            cursor: pointer;
+            transition: transform .15s ease;
         }
+
+        .new-chat:hover { transform: scale(1.03); }
+
+        .session-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
+
+        .session-list::-webkit-scrollbar { width: 8px; }
+        .session-list::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 8px; }
+
         .session-item {
             display: flex;
             align-items: center;
-            gap: 0.35rem;
-            border-radius: 8px;
-            padding: 0.15rem;
+            gap: 4px;
+            border-radius: 2px;
+            padding: 0 2px 0 6px;
         }
-        .session-item.active { background: #2a2a2a; }
-        .session-item.active .session-open { color: #f9d423; }
+
+        .session-item:hover { background: var(--panel-raised); }
+        .session-item.active { background: var(--panel-raised); }
+
         .session-open {
             flex: 1;
             min-width: 0;
-            text-align: right;
-            border: none;
-            background: transparent;
-            color: #bbb;
-            font-family: inherit;
-            font-size: 0.82rem;
-            padding: 0.55rem 0.5rem;
+            background: none;
+            border: 0;
+            color: var(--muted);
+            font: inherit;
+            font-weight: 600;
+            text-align: left;
+            padding: 9px 4px;
             cursor: pointer;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .session-open:hover { color: #f9d423; }
+
+        .session-item.active .session-open, .session-item:hover .session-open { color: var(--text); }
+
         .session-del {
-            flex-shrink: 0;
-            width: 28px;
-            height: 28px;
-            border: none;
-            border-radius: 6px;
-            background: transparent;
-            color: #666;
-            cursor: pointer;
-            font-size: 0.95rem;
+            flex: none;
+            background: none;
+            border: 0;
+            color: var(--quiet);
+            font: inherit;
+            font-size: 15px;
             line-height: 1;
+            padding: 6px 8px;
+            border-radius: 2px;
+            cursor: pointer;
+            opacity: 0;
         }
-        .session-del:hover { color: #ff8a8a; background: #2a1a1a; }
-        .session-empty {
-            color: #555;
-            font-size: 0.8rem;
-            text-align: center;
-            padding: 1.5rem 0.75rem;
-            line-height: 1.7;
+
+        .session-item:hover .session-del { opacity: 1; }
+        .session-del:hover { color: var(--text); }
+
+        .session-empty { color: var(--quiet); font-size: 13px; padding: 12px 8px; }
+
+        .sidebar-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, .6);
+            z-index: 40;
         }
+
+        /* ---------- main ---------- */
+
         .main {
-            flex: 1;
-            min-width: 0;
+            background: var(--panel);
+            border-radius: var(--radius);
             display: flex;
             flex-direction: column;
-            height: 100vh;
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
         }
+
         header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 0.75rem;
-            padding: 0.85rem 1.1rem;
-            border-bottom: 1px solid #333;
-            background: #242424;
-            flex-shrink: 0;
-            position: relative;
+            gap: 12px;
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--line);
+            background: rgba(18, 18, 18, .78);
+            backdrop-filter: blur(28px) saturate(1.6);
+            -webkit-backdrop-filter: blur(28px) saturate(1.6);
         }
-        .header-start {
-            display: flex;
+
+        .header-start { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+        .brand {
+            display: inline-flex;
             align-items: center;
-            gap: 0.5rem;
-            min-width: 0;
+            gap: 8px;
+            color: var(--text);
+            text-decoration: none;
+            font-weight: 800;
+            font-size: 15px;
+            letter-spacing: -0.03em;
         }
+
         .menu-toggle {
             display: none;
-            border: 1px solid #333;
-            background: #1a1a1a;
-            color: #f9d423;
-            width: 36px;
-            height: 36px;
-            border-radius: 8px;
+            background: none;
+            border: 0;
+            color: var(--text);
+            font-size: 20px;
+            line-height: 1;
+            padding: 6px 8px;
+            border-radius: 2px;
             cursor: pointer;
-            font-size: 1.1rem;
-            font-family: inherit;
         }
-        .brand {
-            display: flex;
-            align-items: center;
-            gap: 0.55rem;
-            color: #f9d423;
-            font-weight: 800;
-            font-size: 1.1rem;
-            text-decoration: none;
-            flex-shrink: 0;
-        }
-        .persona-wrap {
-            position: relative;
-            display: none;
-            align-items: center;
-        }
-        .persona-wrap.visible { display: flex; }
-        .persona-sep { color: #555; font-size: 0.85rem; }
+
+        .persona-sep { color: var(--quiet); }
+
+        .persona-wrap { position: relative; display: none; }
+        .persona-wrap.visible { display: inline-flex; align-items: center; gap: 6px; }
+
         .persona-btn {
-            appearance: none;
-            border: none;
-            background: transparent;
-            color: #999;
-            font-family: inherit;
-            font-size: 0.78rem;
-            font-weight: 500;
+            background: none;
+            border: 0;
+            color: var(--muted);
+            font: inherit;
+            font-weight: 700;
+            font-size: 13px;
+            padding: 6px 10px;
+            border-radius: 2px;
             cursor: pointer;
-            padding: 0.2rem 0.35rem;
-            border-radius: 6px;
-            max-width: 140px;
             white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
-        .persona-btn:hover, .persona-btn.open {
-            color: #f9d423;
-            background: rgba(249, 212, 35, 0.08);
-        }
-        .persona-hint { color: #666 !important; font-size: 0.72rem !important; }
-        .persona-hint:hover { color: #f9d423 !important; }
+
+        .persona-btn:hover { color: var(--text); background: var(--panel-raised); }
+
+        .persona-hint { display: none; color: var(--quiet); }
+        .persona-hint.visible { display: inline-block; }
+
         .persona-menu {
             display: none;
             position: absolute;
-            top: calc(100% + 0.45rem);
-            right: 0;
+            top: calc(100% + 8px);
+            left: 0;
+            z-index: 30;
             min-width: 210px;
-            background: #242424;
-            border: 1px solid #333;
-            border-radius: 10px;
-            padding: 0.35rem;
-            z-index: 40;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+            background: var(--panel-raised);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 6px;
+            box-shadow: 0 18px 40px rgba(0, 0, 0, .55);
         }
+
         .persona-menu.open { display: block; }
+
         .persona-option {
             display: block;
             width: 100%;
-            text-align: right;
-            border: none;
-            background: transparent;
-            color: #e0e0e0;
-            font-family: inherit;
-            font-size: 0.85rem;
-            padding: 0.55rem 0.7rem;
-            border-radius: 7px;
+            background: none;
+            border: 0;
+            color: var(--muted);
+            font: inherit;
+            font-weight: 600;
+            text-align: left;
+            padding: 9px 10px;
+            border-radius: 2px;
             cursor: pointer;
         }
-        .persona-option:hover { background: #333; }
-        .persona-option.active {
-            color: #1a1a1a;
-            background: #f9d423;
-            font-weight: 700;
-        }
-        .back { color: #888; text-decoration: none; font-size: 0.85rem; flex-shrink: 0; }
-        .back:hover { color: #f9d423; }
+
+        .persona-option:hover { background: rgba(255, 255, 255, .07); color: var(--text); }
+        .persona-option[aria-selected="true"] { color: var(--text); }
+
+        .back { color: var(--quiet); text-decoration: none; font-weight: 700; font-size: 13px; }
+        .back:hover { color: var(--text); }
+
+        /* ---------- messages ---------- */
+
         #messages {
             flex: 1;
+            min-height: 0;
             overflow-y: auto;
-            padding: 1.25rem;
+            padding: 28px 20px;
             display: flex;
             flex-direction: column;
-            gap: 0.85rem;
+            gap: 18px;
+            scroll-behavior: smooth;
         }
+
+        #messages::-webkit-scrollbar { width: 10px; }
+        #messages::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 10px; }
+
         .empty {
             margin: auto;
             text-align: center;
-            color: #666;
-            max-width: 280px;
+            color: var(--quiet);
+            font-size: 15px;
             line-height: 1.8;
-            font-size: 0.95rem;
+            max-width: 40ch;
         }
-        .empty strong { color: #f9d423; font-weight: 700; }
+
+        .empty strong { color: var(--text); font-weight: 800; letter-spacing: -0.02em; }
+
         .bubble {
-            max-width: min(720px, 92%);
-            padding: 0.85rem 1rem;
-            border-radius: 14px;
-            line-height: 1.75;
-            word-break: break-word;
-            font-size: 0.95rem;
+            max-width: min(760px, 92%);
+            width: fit-content;
+            word-wrap: break-word;
+            overflow-wrap: anywhere;
         }
+
         .bubble.user {
-            align-self: flex-start;
-            background: #f9d423;
-            color: #1a1a1a;
-            border-bottom-right-radius: 4px;
-            white-space: pre-wrap;
-        }
-        .bubble.assistant {
             align-self: flex-end;
-            background: #242424;
-            border: 1px solid #333;
-            color: #e0e0e0;
-            border-bottom-left-radius: 4px;
+            background: var(--panel-raised);
+            border-radius: 14px 14px 4px 14px;
+            padding: 11px 16px;
         }
-        .bubble.error {
-            align-self: flex-end;
-            background: #2a1a1a;
-            border: 1px solid #664444;
-            color: #ffb4b4;
-            white-space: pre-wrap;
-        }
-        .bubble.typing { color: #888; font-style: italic; white-space: pre-wrap; }
-        .bubble.assistant.streaming .stream-cursor {
+
+        .bubble.assistant { align-self: flex-start; color: var(--muted); }
+
+        .bubble.typing { color: var(--quiet); font-style: italic; }
+
+        .stream-cursor {
             display: inline-block;
-            width: 0.42em;
+            width: 7px;
             height: 1em;
-            margin-right: 2px;
-            background: #f9d423;
-            vertical-align: text-bottom;
-            animation: stream-blink 1s step-end infinite;
+            background: var(--text);
+            vertical-align: -0.15em;
+            margin-left: 2px;
+            animation: blink 1s steps(2, start) infinite;
         }
-        @keyframes stream-blink { 50% { opacity: 0; } }
+
+        @keyframes blink { to { visibility: hidden; } }
+
         .bubble.assistant.md p { margin: 0 0 0.65em; }
         .bubble.assistant.md p:last-child { margin-bottom: 0; }
         .bubble.assistant.md ul,
-        .bubble.assistant.md ol { margin: 0.4em 0 0.65em; padding-right: 1.3em; }
+        .bubble.assistant.md ol { margin: 0.4em 0 0.65em; padding-left: 1.3em; }
         .bubble.assistant.md li { margin: 0.2em 0; }
-        .bubble.assistant.md strong { color: #f9d423; font-weight: 700; }
-        .bubble.assistant.md em { color: #ccc; }
-        .bubble.assistant.md a { color: #f9d423; }
+        .bubble.assistant.md strong { color: var(--text); font-weight: 700; }
+        .bubble.assistant.md em { color: var(--text); }
+        .bubble.assistant.md a { color: var(--text); }
         .bubble.assistant.md code {
-            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            font-size: 0.86em;
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 4px;
-            padding: 0.05em 0.35em;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.9em;
+            background: #0a0a0a;
+            border: 1px solid var(--line);
+            border-radius: 3px;
+            padding: 1px 5px;
         }
         .bubble.assistant.md pre {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 8px;
-            padding: 0.75rem;
+            background: #0a0a0a;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 14px;
             overflow-x: auto;
-            margin: 0.5em 0;
+            margin: 0.5em 0 0.8em;
         }
         .bubble.assistant.md pre code { border: none; background: transparent; padding: 0; }
         .bubble.assistant.md h1,
         .bubble.assistant.md h2,
         .bubble.assistant.md h3 {
-            color: #f9d423;
+            color: var(--text);
             font-size: 1.05em;
-            margin: 0.4em 0 0.5em;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin: 0.7em 0 0.35em;
         }
         .bubble.assistant.md blockquote {
-            border-right: 3px solid #f9d423;
+            border-left: 2px solid var(--line);
+            padding-left: 12px;
+            color: var(--quiet);
             margin: 0.5em 0;
-            padding: 0.15em 0.8em;
-            color: #aaa;
         }
+
+        /* ---------- composer ---------- */
+
         form {
             display: flex;
-            gap: 0.65rem;
-            padding: 0.9rem 1.1rem;
-            border-top: 1px solid #333;
-            background: #242424;
-            flex-shrink: 0;
+            align-items: flex-end;
+            gap: 10px;
+            padding: 14px 20px 18px;
+            border-top: 1px solid var(--line);
         }
+
         #input {
             flex: 1;
             resize: none;
-            min-height: 48px;
-            max-height: 140px;
-            padding: 0.75rem 0.9rem;
-            border-radius: 10px;
-            border: 1px solid #333;
-            background: #1a1a1a;
-            color: #e0e0e0;
-            font-family: inherit;
-            font-size: 0.95rem;
+            max-height: 180px;
+            background: var(--panel-soft);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            color: var(--text);
+            font: inherit;
+            padding: 13px 16px;
             outline: none;
+            transition: border-color .15s ease;
         }
-        #input:focus { border-color: #f9d423; }
+
+        #input::placeholder { color: var(--quiet); }
+        #input:focus { border-color: rgba(255, 255, 255, .22); }
+
         #send {
-            padding: 0 1.25rem;
-            border: none;
-            border-radius: 10px;
-            background: #f9d423;
-            color: #1a1a1a;
-            font-family: inherit;
-            font-weight: 700;
-            font-size: 0.95rem;
+            flex: none;
+            background: #fff;
+            color: #000;
+            border: 0;
+            border-radius: 999px;
+            font: inherit;
+            font-weight: 800;
+            letter-spacing: -0.01em;
+            padding: 13px 26px;
             cursor: pointer;
+            transition: transform .15s ease, opacity .15s ease;
         }
-        #send:hover:not(:disabled) { background: #e6c320; }
-        #send:disabled { opacity: 0.45; cursor: not-allowed; }
-        .sidebar-backdrop {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.45);
-            z-index: 25;
-        }
-        @media (max-width: 720px) {
+
+        #send:hover:not(:disabled) { transform: scale(1.04); }
+        #send:disabled { opacity: .45; cursor: not-allowed; }
+
+        /* ---------- responsive ---------- */
+
+        @media (max-width: 820px) {
+            body { grid-template-columns: minmax(0, 1fr); }
+
             .sidebar {
                 position: fixed;
-                top: 0;
-                right: 0;
-                bottom: 0;
-                transform: translateX(105%);
-                transition: transform 0.2s ease;
-                box-shadow: -8px 0 24px rgba(0,0,0,0.35);
+                top: 8px;
+                bottom: 8px;
+                left: 8px;
+                width: var(--sidebar-width);
+                z-index: 50;
+                transform: translateX(calc(-100% - 16px));
+                transition: transform .22s ease;
             }
+
             body.sidebar-open .sidebar { transform: translateX(0); }
             body.sidebar-open .sidebar-backdrop { display: block; }
-            .menu-toggle { display: inline-flex; align-items: center; justify-content: center; }
+
+            .menu-toggle { display: block; }
+            #messages { padding: 20px 14px; }
+            form { padding: 12px 14px 16px; }
+            #send { padding: 13px 20px; }
         }
     </style>
 </head>
@@ -699,7 +899,7 @@ CHAT_PAGE_HTML = """
     <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-top">
-            <button type="button" class="new-chat" id="newChatBtn">＋ گفتگوی جدید</button>
+            <button type="button" class="new-chat" id="newChatBtn">＋ New chat</button>
         </div>
         <div class="session-list" id="sessionList"></div>
     </aside>
@@ -707,32 +907,34 @@ CHAT_PAGE_HTML = """
     <div class="main">
         <header>
             <div class="header-start">
-                <button type="button" class="menu-toggle" id="menuToggle" aria-label="سشن‌ها">☰</button>
+                <button type="button" class="menu-toggle" id="menuToggle" aria-label="Conversations">☰</button>
                 <a class="brand" href="/">
-                    <svg width="40" height="20" viewBox="0 0 36 17" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M8.5 0.5C12.9183 0.5 16.5 4.08172 16.5 8.5C16.5 12.9183 12.9183 16.5 8.5 16.5C4.08172 16.5 0.5 12.9183 0.5 8.5C0.5 4.08172 4.08172 0.5 8.5 0.5Z" stroke="#FFC828"/>
-                        <path d="M27.5 17C32.1944 17 36 13.1944 36 8.5C36 3.80558 32.1944 0 27.5 0C22.8056 0 19 3.80558 19 8.5C19 13.1944 22.8056 17 27.5 17Z" fill="#FFC828"/>
+                    <svg width="22" height="22" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect x="1" y="1" width="30" height="30" rx="8" stroke="#fff" stroke-opacity=".25" stroke-width="1.5"/>
+                        <circle cx="11" cy="11.5" r="3.6" fill="#c2410c"/>
+                        <circle cx="21" cy="11.5" r="3.6" fill="#6d28d9"/>
+                        <circle cx="11" cy="21" r="3.6" fill="#047857"/>
+                        <circle cx="21" cy="21" r="3.6" fill="#be123c"/>
                     </svg>
                     Playroom
                 </a>
                 <div class="persona-wrap" id="personaWrap">
                     <span class="persona-sep">·</span>
-                    <button type="button" class="persona-btn" id="personaBtn" aria-haspopup="listbox" aria-expanded="false" title="انتخاب پرسونا">پرسونا</button>
+                    <button type="button" class="persona-btn" id="personaBtn" aria-haspopup="listbox" aria-expanded="false" title="Choose a mode">Mode</button>
                     <div class="persona-menu" id="personaMenu" role="listbox"></div>
                 </div>
-                <button type="button" class="persona-btn persona-hint" id="personaHint" title="انتخاب پرسونا">· انتخاب پرسونا</button>
+                <button type="button" class="persona-btn persona-hint" id="personaHint" title="Choose a mode">· Choose a mode</button>
             </div>
-            <a class="back" href="/">بازگشت</a>
+            <a class="back" href="/">Back</a>
         </header>
 
         <div id="messages"></div>
 
         <form id="form">
-            <textarea id="input" rows="1" placeholder="پیامت را بنویس..." autofocus></textarea>
-            <button type="submit" id="send">بفرست</button>
+            <textarea id="input" rows="1" placeholder="Write your message..." autofocus></textarea>
+            <button type="submit" id="send">Send</button>
         </form>
     </div>
-
     <script>
         const STORAGE_KEY = 'playroom_chat_v1';
         const COOKIE_PREFIX = 'ykc_';
@@ -755,12 +957,12 @@ CHAT_PAGE_HTML = """
         const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 
         const FALLBACK_PERSONAS = [
-            { value: 'auto', label: '✨ خودکار' },
-            { value: 'creative', label: '🎨 خلاق' },
-            { value: 'storyteller', label: '📖 داستان‌گو' },
-            { value: 'teacher', label: '📚 معلم' },
-            { value: 'homework', label: '✏️ کمک‌درس' },
-            { value: 'gamer', label: '🎮 بازی و سرگرمی' },
+            { value: 'auto', label: '✨ Auto' },
+            { value: 'creative', label: '🎨 Creative' },
+            { value: 'storyteller', label: '📖 Storyteller' },
+            { value: 'teacher', label: '📚 Teacher' },
+            { value: 'homework', label: '✏️ Homework' },
+            { value: 'gamer', label: '🎮 Games' },
         ];
         let personas = FALLBACK_PERSONAS.slice();
         let selectedPersona = 'auto';
@@ -828,7 +1030,7 @@ CHAT_PAGE_HTML = """
         }
 
         function isDefaultTitle(title) {
-            return !title || title === 'گفتگوی جدید';
+            return !title || title === 'New chat';
         }
 
         function touchSession(session, messages, persona, actPersona, titleHint) {
@@ -845,9 +1047,9 @@ CHAT_PAGE_HTML = """
             } else if (isDefaultTitle(session.title)) {
                 const firstUser = session.messages.find((m) => m.role === 'user');
                 if (firstUser) {
-                    session.title = firstUser.content.trim().slice(0, 40) || 'گفتگوی جدید';
+                    session.title = firstUser.content.trim().slice(0, 40) || 'New chat';
                 } else {
-                    session.title = 'گفتگوی جدید';
+                    session.title = 'New chat';
                 }
             }
         }
@@ -862,7 +1064,7 @@ CHAT_PAGE_HTML = """
                     .slice(0, MAX_SESSIONS)
                     .map((s) => ({
                         id: s.id,
-                        title: String(s.title || 'گفتگوی جدید').slice(0, 60),
+                        title: String(s.title || 'New chat').slice(0, 60),
                         updatedAt: s.updatedAt || 0,
                         persona: s.persona || 'auto',
                         activePersona: s.activePersona || null,
@@ -915,7 +1117,7 @@ CHAT_PAGE_HTML = """
                 selectedPersona: data.selectedPersona || 'auto',
                 sessions: data.sessions.map((s) => ({
                     id: s.id,
-                    title: s.title || 'گفتگوی جدید',
+                    title: s.title || 'New chat',
                     updatedAt: s.updatedAt || 0,
                     persona: s.persona || 'auto',
                     activePersona: s.activePersona || null,
@@ -956,7 +1158,7 @@ CHAT_PAGE_HTML = """
             if (s) return s;
             s = {
                 id: uid(),
-                title: 'گفتگوی جدید',
+                title: 'New chat',
                 updatedAt: Date.now(),
                 persona: selectedPersona,
                 activePersona: activePersona,
@@ -1005,7 +1207,7 @@ CHAT_PAGE_HTML = """
 
             const s = {
                 id: uid(),
-                title: 'گفتگوی جدید',
+                title: 'New chat',
                 updatedAt: Date.now(),
                 persona: 'auto',
                 activePersona: null,
@@ -1073,7 +1275,7 @@ CHAT_PAGE_HTML = """
             if (!store.sessions.length) {
                 const empty = document.createElement('div');
                 empty.className = 'session-empty';
-                empty.textContent = 'هنوز گفتگویی نیست';
+                empty.textContent = 'No conversations yet';
                 sessionList.appendChild(empty);
                 return;
             }
@@ -1086,14 +1288,14 @@ CHAT_PAGE_HTML = """
                     const openBtn = document.createElement('button');
                     openBtn.type = 'button';
                     openBtn.className = 'session-open';
-                    openBtn.textContent = s.title || 'گفتگوی جدید';
-                    openBtn.title = isBusy ? 'تا پایان پاسخ صبر کن' : (s.title || 'گفتگوی جدید');
+                    openBtn.textContent = s.title || 'New chat';
+                    openBtn.title = isBusy ? 'Wait for the reply to finish' : (s.title || 'New chat');
                     openBtn.disabled = isBusy;
                     openBtn.addEventListener('click', () => switchSession(s.id));
                     const delBtn = document.createElement('button');
                     delBtn.type = 'button';
                     delBtn.className = 'session-del';
-                    delBtn.setAttribute('aria-label', 'حذف');
+                    delBtn.setAttribute('aria-label', 'Delete');
                     delBtn.textContent = '×';
                     delBtn.disabled = isBusy;
                     delBtn.addEventListener('click', (e) => {
@@ -1110,7 +1312,7 @@ CHAT_PAGE_HTML = """
             const empty = document.createElement('div');
             empty.className = 'empty';
             empty.id = 'empty';
-            empty.innerHTML = 'با <strong>Playroom</strong> مستقیم حرف بزن.<br>سوالت را بنویس تا شروع کنیم.';
+            empty.innerHTML = 'Talk to <strong>Playroom</strong>.<br>Write your question to get started.';
             messagesEl.appendChild(empty);
         }
 
@@ -1214,7 +1416,7 @@ CHAT_PAGE_HTML = """
                 if (Array.isArray(data.personas) && data.personas.length) {
                     personas = data.personas.map((p) => ({ value: p.value, label: p.label }));
                     if (!personas.some((p) => p.value === 'auto')) {
-                        personas.unshift({ value: 'auto', label: '✨ خودکار' });
+                        personas.unshift({ value: 'auto', label: '✨ Auto' });
                     }
                 }
             } catch (_) {}
@@ -1290,7 +1492,7 @@ CHAT_PAGE_HTML = """
             input.value = '';
             autoResize();
             setBusy(true);
-            const typing = addBubble('assistant', 'در حال فکر کردن...', 'typing');
+            const typing = addBubble('assistant', 'Thinking...', 'typing');
 
             const messagesForRequest = history.slice();
             const personaForRequest = selectedPersona;
@@ -1340,13 +1542,13 @@ CHAT_PAGE_HTML = """
 
                 if (!res.ok) {
                     const data = await res.json().catch(() => ({}));
-                    const detail = (data && (data.detail || data.error || data.message)) || ('خطا ' + res.status);
+                    const detail = (data && (data.detail || data.error || data.message)) || ('Error ' + res.status);
                     failRequest(detail);
                     return;
                 }
 
                 if (!res.body) {
-                    failRequest('پاسخ جریانی از سرور دریافت نشد.');
+                    failRequest('No streaming response from the server.');
                     return;
                 }
 
@@ -1467,7 +1669,7 @@ CHAT_PAGE_HTML = """
 
                 if (!reply.trim()) {
                     stopReveal();
-                    failRequest('پاسخی دریافت نشد.');
+                    failRequest('No reply received.');
                     return;
                 }
 
@@ -1506,7 +1708,7 @@ CHAT_PAGE_HTML = """
                     throw streamErr;
                 }
             } catch (err) {
-                failRequest('ارتباط با سرور برقرار نشد. دوباره تلاش کن.');
+                failRequest('Could not reach the server. Please try again.');
             } finally {
                 if (token === requestToken) {
                     setBusy(false);
@@ -1530,11 +1732,21 @@ CHAT_PAGE_HTML = """
 
 @router.get("/", response_class=HTMLResponse)
 async def landing_page() -> HTMLResponse:
-    """صفحه اصلی Playroom — معرفی قابلیت‌ها و هدایت به yarai.ir"""
+    """Playroom landing page — what it is, and a way into the playground."""
     return HTMLResponse(content=LANDING_PAGE_HTML)
 
 
 @router.get("/chat", response_class=HTMLResponse)
 async def chat_playground() -> HTMLResponse:
-    """اینترفیس ساده چت مستقیم با Playroom (OpenAI-compatible)."""
+    """The built-in chat playground, talking to the OpenAI-compatible endpoint."""
     return HTMLResponse(content=CHAT_PAGE_HTML)
+
+
+@router.get("/logo.svg", include_in_schema=False)
+async def logo() -> Response:
+    """Serve the Playroom mark, used as the favicon on both pages."""
+    return Response(
+        content=LOGO_PATH.read_text(encoding="utf-8"),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
