@@ -8,7 +8,7 @@ Creative, storyteller, teacher, homework and games, routed automatically,
 grounded in the actual school textbook page, and reviewed for safety
 before a child ever sees a reply.
 
-[![Tests](https://github.com/BMDarkLight/Playroom/actions/workflows/tests.yml/badge.svg)](https://github.com/BMDarkLight/Playroom/actions/workflows/tests.yml)
+[![Tests](https://github.com/behdadmehrnia/Playroom/actions/workflows/tests.yml/badge.svg)](https://github.com/behdadmehrnia/Playroom/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 

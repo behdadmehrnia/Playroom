@@ -322,7 +322,7 @@ LANDING_PAGE_HTML = """
         <nav class="topnav">
             <a href="/chat">Playground</a>
             <a href="/docs">API</a>
-            <a href="https://github.com/BMDarkLight/Playroom" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://github.com/behdadmehrnia/Playroom" target="_blank" rel="noopener">GitHub</a>
         </nav>
     </div>
 
@@ -464,13 +464,13 @@ LANDING_PAGE_HTML = """
         <div class="foot-row">
             <div>
                 <div class="overline">Playroom</div>
-                <p style="margin-top:8px">Built by <a href="https://github.com/BMDarkLight" target="_blank" rel="noopener">Behdad</a> · MIT licensed</p>
+                <p style="margin-top:8px">Built by <a href="https://github.com/behdadmehrnia" target="_blank" rel="noopener">Behdad</a> · MIT licensed</p>
             </div>
             <div style="display:flex;gap:16px;align-items:flex-start">
                 <a href="/chat">Playground</a>
                 <a href="/docs">API docs</a>
                 <a href="/health">Health</a>
-                <a href="https://github.com/BMDarkLight/Playroom" target="_blank" rel="noopener">Source</a>
+                <a href="https://github.com/behdadmehrnia/Playroom" target="_blank" rel="noopener">Source</a>
             </div>
         </div>
     </footer>
